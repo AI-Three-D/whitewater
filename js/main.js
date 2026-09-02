@@ -18,9 +18,7 @@ const $ = id => document.getElementById(id);
 const BUILD = 'build 23';
 { const v = document.getElementById('ver'); if (v) v.textContent = BUILD; }
 // ---------- detail level ----------
-// picked once at load (persisted), applied by mutating the shared config objects in place —
-// everything downstream (river generation, buffer sizing, vegetation, particles) just reads
-// GRID/SIM/PARTS/VEG like it always did, with no idea a quality system exists.
+
 const QKEY = 'whitewater.quality';
 const loadQuality = () => { const q = localStorage.getItem(QKEY); return QUALITY_LEVELS.includes(q) ? q : null; };
 const saveQuality = q => localStorage.setItem(QKEY, q);
@@ -508,10 +506,7 @@ applyQuality(quality);
     f[20] = jOffset;
     device.queue.writeBuffer(simUBuf, 0, ab);
   }
-  // rows defaults to the full grid (used by the warmup, which must settle the whole river, not
-  // just a window) — during gameplay the caller passes a smaller row count for the moving
-  // compute window (see updateComputeWindow / the frame loop), paired with the jOffset already
-  // baked into simUBuf by writeSimUniforms
+
   function encodeSubstep(enc, rows = L) {
     const pass = enc.beginComputePass();
     for (let k = 0; k < 3; k++) { pass.setPipeline(simPipes[k]); pass.setBindGroup(0, simBGs[k]); pass.dispatchWorkgroups(W / 8, Math.ceil(rows / 8)); }
@@ -580,13 +575,7 @@ applyQuality(quality);
         if (it.alive) {
           const bobPhase = simTime * PICKUPS.bobSpeed + it.bobPh;
           const bob = it.floating ? PICKUPS.bobAmp * Math.sin(bobPhase) : 0;
-          // deliberately the stable, precomputed design-time channel level, not waterAt()'s live
-          // simulated eta: waterAt() only has real simulated data within a small (~16-19m) band
-          // window around the boat and falls back to this same design value outside it, with a
-          // hard cutoff between the two — a pickup crossing that boundary as the boat approaches
-          // would otherwise jump between "design eta" and "live eta", which can differ near waves/
-          // turbulence and reads as the pickup suddenly popping up or down. This is constant for a
-          // given pickup's whole lifetime, so it can never have that discontinuity.
+
           const jrow = clamp(Math.floor(it.z / dx), 0, L - 1);
           const y = nearestChan(river.rows[jrow], it.x).eta + PICKUPS.hover + bob;
           const dist = Math.hypot(kayak.p[0] - it.x, kayak.p[2] - it.z);
@@ -614,10 +603,7 @@ applyQuality(quality);
       device.queue.writeBuffer(buf, 0, data);
     }
   }
-  // the warmup is ~400 substeps over the whole grid — a single giant command buffer full of that
-  // many compute dispatches can take long enough on a weak GPU to trip the driver's hang watchdog
-  // and lose the device entirely. Submit it in small chunks and actually wait for each one to land
-  // before queuing the next, so no single submission is ever that big.
+
   async function runWarmup() {
     const chunk = 30;
     for (let s = 0; s < SIM.warmupSteps; s += chunk) {
@@ -795,27 +781,12 @@ applyQuality(quality);
   }
   // ---------- frame ----------
   let lastT = performance.now();
-  // both the boat and the fluid sim advance a fixed number of ticks per rendered frame rather than
-  // tracking real elapsed time — this is deliberately the original, un-decoupled design. An earlier
-  // attempt to make just the boat track real elapsed time (while the GPU-bound fluid sim stayed
-  // tied to frame count, since "catch it up too" risks a GPU-side spiral of death under real load)
-  // caused the boat and the water to run at different effective paces, which read as worse than the
-  // original behavior it was trying to fix. Keeping both on a fixed per-frame tick count avoids
-  // that mismatch; fixing slow motion on a weak device belongs to making that device actually hit
-  // target FPS (grid size, particle count, view-distance/compute-window culling, shading — the
-  // quality tiers), not to warping simulated time to paper over it. The two tick counts are
-  // deliberately separate knobs, though (see KAYAK_TICKS below) — the fluid sim's is a real
-  // quality-tier-tunable GPU cost, the boat's must never vary or its own pacing breaks.
   function frame(now) {
     requestAnimationFrame(frame);
     const dtReal = Math.min(0.05, (now - lastT) / 1000); lastT = now;
     fps += (1 / Math.max(dtReal, 1e-3) - fps) * 0.05;
     if (!river || gameState === 'menu' || warmingUp) return;
     const running = gameState === 'run';
-    // boat physics always ticks twice per frame, same as the original design — SIM.substeps is a
-    // quality-tier knob for the fluid sim's GPU dispatch count only. They used to be the same
-    // loop counter, so dropping substeps to 1 for the low tier (to cut GPU cost) silently halved
-    // the boat's own physics rate too — literal slow motion, unrelated to actual frame rate.
     const KAYAK_TICKS = 2;
     for (let s = 0; s < KAYAK_TICKS; s++) {
       simTime += SIM.dt;
@@ -823,9 +794,7 @@ applyQuality(quality);
     }
     const t = simTime;
     const inQ = 1 + 0.06 * Math.sin(0.21 * t) + 0.04 * Math.sin(0.53 * t + 1) + 0.025 * Math.sin(1.3 * t + 2);
-    // fluid sim is only actively ticked in a window around the paddler (see RENDER.computeBehind/
-    // computeAhead) — everywhere else just holds its last-simulated state rather than being
-    // recomputed every frame, which is most of the ~500m river most of the time
+
     const cj0 = clamp(Math.floor((kayak.p[2] - RENDER.computeBehind) / dx), 0, L - 1);
     const cj1 = clamp(Math.ceil((kayak.p[2] + RENDER.computeAhead) / dx), cj0 + 1, L);
     const computeRows = cj1 - cj0;

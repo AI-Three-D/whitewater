@@ -8,14 +8,6 @@ export const SIM = {
   warmupSteps: 400, waterFrac: 0.75,
 };
 
-// viewBehind/viewAhead: how far along the river (metres) the terrain/water mesh actually gets
-// drawn, centred on the paddler. The full river is ~500m; fog already hides anything past a
-// couple hundred metres, so drawing all of it every frame is pure waste.
-// computeBehind/computeAhead: the fluid sim itself is also only actively ticked in a window
-// around the paddler now (a moving subset of dispatched rows, not the whole grid) — deliberately
-// wider than the view window so a stretch of river has a head start of real simulation before it
-// ever becomes visible (rows outside the compute window just hold their last-simulated state
-// rather than decaying, so nothing pops when the window catches up to them).
 export const RENDER = { sunDir: [0.35, 0.55, 0.75], fogColor: [0.72, 0.80, 0.90], fogDensity: 0.0024,
   viewBehind: 30, viewAhead: 170, computeBehind: 60, computeAhead: 220 };
 
@@ -23,14 +15,6 @@ export const PARTS = { count: 24000, kayakShare: 4000, ambient: 0.055 };
 
 export const VEG = { caps: { tree: 900, bush: 700, rock: 500, grass: 3500 }, attempts: 26000 };
 
-// Visual biomes — a prop-colour + terrain-texture "set" a river can opt into via `biome: '<name>'`
-// (defaults to 'alpine', the original look, when unset). `vegTint` multiplies each prop type's
-// existing tint (so the brightness variation placeVegetation() already does is preserved, just
-// hue-shifted); `vegDensity` multiplies the quality tier's veg caps for that river, so a biome can
-// also read sparser/denser (a dry canyon has far fewer trees and more exposed rock, say) — not
-// just differently coloured. Terrain texture colours for each biome live in fsTerrain (shaders.js),
-// selected by the same id via BIOME_IDS. `marsh`/`redwood` are reserved slots for the next two
-// sets — currently identical to alpine (neutral tint/density) until they get their own look.
 export const BIOME_IDS = { alpine: 0, canyon: 1, marsh: 2, redwood: 3 };
 const neutralBiome = { vegTint: { tree: [1, 1, 1], bush: [1, 1, 1], rock: [1, 1, 1], grass: [1, 1, 1] }, vegDensity: { tree: 1, bush: 1, rock: 1, grass: 1 } };
 export const BIOMES = {
@@ -44,12 +28,6 @@ export const BIOMES = {
   redwood: neutralBiome,
 };
 
-// Detail-level presets. `high` is the original desktop-tuned config (unchanged). `medium` and
-// `low` cut the fluid-sim grid (the single biggest GPU cost — it's both a compute grid and the
-// terrain/water triangle count), particle count, prop density, and render resolution, and drop
-// the pricier optional bits of the simulation and shading. Applied once at startup by mutating
-// GRID/SIM/PARTS/VEG in place, so the rest of the codebase (river generation included) just reads
-// the numbers it always did — nothing downstream needs to know a quality system exists.
 export const QUALITY = {
   high: {
     grid: { W: 256, L: 1024, dx: 0.5 },
@@ -57,14 +35,7 @@ export const QUALITY = {
     veg: { caps: { tree: 900, bush: 700, rock: 500, grass: 3500 }, attempts: 26000 },
     dprCap: 1.5, warmupSteps: 400, macCormack: 1, turbA: 0.6, simpleShading: false, substeps: 2,
   },
-  // macCormack matters more than it looks: turning it off (as this tier originally did, purely
-  // for the GPU win) increases numerical diffusion in the advection step, which smooths away
-  // exactly the sharp wave/chop detail near rocks and turbulence that gives the boat something to
-  // actually get thrown around by — the water reads as calm no matter how rough the river design
-  // says it should be. Combined with a materially coarser grid under-resolving the same features,
-  // medium ends up mechanically easier than intended, not just lower-fidelity. Fixed by turning
-  // MacCormack back on and bringing the grid close enough to high's to resolve that detail again —
-  // this tier is no longer dramatically cheaper than high, just meaningfully cheaper.
+
   medium: {
     grid: { W: 216, L: 864, dx: 128 / 216 },
     particles: 9000, kayakShare: 1800,
@@ -98,14 +69,7 @@ KAYAK.formStab = 2 * KAYAK.buoyK * KAYAK.buoySide * KAYAK.buoySide;
 
 export const RIVERS = [
   // ---------- easy ----------
-  // `len` is the actual playable length (put-in to take-out, metres) — it varies per river now
-  // instead of every run sharing the same grid-length finish line. Rocks/constrictions are scoped
-  // to it (see river.js) so a short river doesn't end up sparser than a long one.
-  // `biome` picks a prop/terrain palette (see BIOMES above); unset = 'alpine', the original look.
-  // `waterTint` is now an absolute deep-water colour (not a multiplier — multiplying the
-  // original teal-dominant base couldn't override its own green dominance, especially for murky
-  // low-clarity water where that base colour dominates the whole look) blended with the bed tint
-  // in shallows. `waterClarity` still scales how fast it reaches that colour with depth.
+
   { name: 'Meadow Run', cls: 'Class II · easy', tier: 'easy', slope: 0.0018, manning: 0.032, halfW: 12, widthVar: 0.25,
     meander: [[18, 170], [6, 61]], depth: 1.6, rocks: 10, rockR: [0.8, 2.0], emergent: 0.3, ledges: [],
     constrictions: 0, valleyH: 12, valleyScale: 70, seed: 11, len: 350,
@@ -169,10 +133,7 @@ export const TIERS = [
 ];
 export const TIER_POINTS = Object.fromEntries(TIERS.map(t => [t.id, t.points]));
 
-// floating pickups: spinning paddles (xp, banked only on a finished run) and coins (currency).
-// an easy run always has PICKUPS.perTierBase of each, all sitting at a fixed height; medium/hard
-// scale the count up by TIER_SCALE and make half of the *extra* pickups (beyond the easy baseline)
-// bob slowly up and down — those can only be grabbed while low.
+
 export const PICKUPS = {
   perTierBase: 8,
   paddleXp: 1,
