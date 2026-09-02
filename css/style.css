@@ -105,3 +105,42 @@ kbd{background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;border:1p
 #store .opts{display:flex;gap:20px;margin:18px 0}
 #store .opt{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.3);border-radius:12px;padding:16px 22px;width:220px}
 #store .opt p{font-size:13px;color:#cde}
+
+/* ---------- mobile ---------- */
+body{touch-action:none}                                   /* no pinch/scroll gestures on the game itself… */
+canvas{height:100dvh}                                      /* …and the canvas tracks the real visible viewport */
+#menu,#lvl,#store,#charsheet{touch-action:pan-y;overflow-y:auto}   /* the menus may still scroll */
+.mobile-only{display:none}
+body.mobile .mobile-only{display:block}
+body.mobile .desktop-only{display:none}
+/* round floating paddle pads in the bottom corners — only in mobile mode, only during a run */
+.pad{position:fixed;bottom:calc(22px + env(safe-area-inset-bottom));width:92px;height:92px;border-radius:50%;display:none;align-items:center;justify-content:center;
+background:rgba(255,255,255,.14);border:2px solid rgba(255,255,255,.55);box-shadow:0 2px 12px rgba(0,0,0,.45);
+touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;cursor:pointer;
+transition:transform .08s,background .08s}
+#padL{left:calc(22px + env(safe-area-inset-left))}
+#padR{right:calc(22px + env(safe-area-inset-right))}
+#padR svg{transform:scaleX(-1)}
+.pad svg{width:58px;height:58px;pointer-events:none}
+.pad.down{background:rgba(255,224,138,.45);border-color:#ffe08a;transform:scale(.93)}
+/* small round in-run buttons (menu, camera), top right */
+.mbtn{position:fixed;top:calc(10px + env(safe-area-inset-top));width:40px;height:40px;border-radius:50%;display:none;align-items:center;justify-content:center;
+background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.5);color:#fff;font-size:18px;
+touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;cursor:pointer}
+#mExit{right:calc(12px + env(safe-area-inset-right))}
+#mCam{right:calc(60px + env(safe-area-inset-right))}
+body.mobile.inrun .pad,body.mobile.inrun .mbtn{display:flex}
+/* end-of-run buttons (shown everywhere; desktop additionally keeps the key hints) */
+.mbtns{display:flex;gap:14px;margin-top:18px}
+.mbtns button{background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.6);border-radius:28px;padding:12px 28px;font-size:18px;cursor:pointer;text-shadow:none;touch-action:manipulation}
+.mbtns button:hover{background:rgba(255,255,255,.3)}
+/* phone-sized layout for the menus */
+@media (max-width:900px){
+  #menu{padding:16px 12px 40px}#menu h1{font-size:30px;letter-spacing:2px}#menu p{font-size:14px}
+  #menuHero{height:60px}
+  .rivers,#charsel,#lvl .opts,#store .opts{flex-wrap:wrap;justify-content:center}
+  #topbar{min-width:0;width:100%;box-sizing:border-box;flex-wrap:wrap}
+  .charsheet-card{flex-direction:column;align-items:center}
+  #gl{width:300px;margin-left:-150px;font-size:12px}
+  #hud{font-size:13px}
+}

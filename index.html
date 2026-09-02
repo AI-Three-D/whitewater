@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Whitewater — WebGPU shallow-water kayaking</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -14,25 +16,40 @@
   <div id="gl"></div>
   <div id="gauge"><div class="l"></div><div class="r"></div><div class="z"></div><div id="mk"></div></div>
   <div id="dbg"></div>
+  <!-- mobile: round paddle pads + in-run buttons; css shows them only for body.mobile.inrun.
+       they sit before #msg in the DOM so the end-of-run overlay covers them -->
+  <div class="pad" id="padL" aria-label="paddle on the left">
+    <svg viewBox="0 0 64 64"><path d="M46 14 L22 42" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+      <ellipse cx="17" cy="48" rx="6.5" ry="11" transform="rotate(40 17 48)" fill="#ffe08a"/></svg></div>
+  <div class="pad" id="padR" aria-label="paddle on the right">
+    <svg viewBox="0 0 64 64"><path d="M46 14 L22 42" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+      <ellipse cx="17" cy="48" rx="6.5" ry="11" transform="rotate(40 17 48)" fill="#ffe08a"/></svg></div>
+  <div class="mbtn" id="mExit" title="river menu">✕</div>
+  <div class="mbtn" id="mCam" title="camera">📷</div>
   <div id="msg"></div>
   <div id="menu">
     <div class="art-slot" id="menuHero">hero art</div>
     <h1>WHITEWATER</h1>
-    <p>Shallow-water simulation running live on your GPU. The boat is <b>unstable</b>: keep your torso up with
+    <p class="desktop-only">Shallow-water simulation running live on your GPU. The boat is <b>unstable</b>: keep your torso up with
        <kbd>A</kbd>/<kbd>D</kbd> — small taps, all the way down. Paddle with the <kbd>arrow keys</kbd>.
        Watch your <b>stamina</b>: tired paddlers are slow and weak. The first 30 m are a calm pool.
        Spinning <b>paddles</b> (xp) and <b>coins</b> float above the water — grab them as you pass, they
        fade away soon after you get close. Loot only banks if you reach the take-out.</p>
+    <p class="mobile-only">Shallow-water simulation running live on your GPU. The boat is <b>unstable</b>:
+       <b>tilt the phone</b> to lean and keep it upright — small corrections, all the way down.
+       Tap the round <b>left</b> / <b>right</b> buttons to paddle on that side: alternate them to go straight,
+       repeat a side to turn, hold to keep paddling. Watch your <b>stamina</b>. The first 30 m are a calm pool.
+       Grab the spinning <b>paddles</b> (xp) and <b>coins</b> — they fade soon after you get close, and only bank if you finish.</p>
     <div id="quality"></div>
     <div id="charsel"></div>
     <div id="topbar"></div>
     <div id="riverlist"></div>
-    <p style="font-size:13px;color:#9bc"><kbd>↑</kbd> paddle &nbsp; <kbd>↓</kbd> brake &nbsp; <kbd>←</kbd><kbd>→</kbd> sweep turns &nbsp; <kbd>A</kbd><kbd>D</kbd> lean &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>F1</kbd> debug &nbsp; <kbd>R</kbd> restart &nbsp; <kbd>F</kbd> finish run &nbsp; <kbd>Esc</kbd> menu</p>
+    <p class="desktop-only" style="font-size:13px;color:#9bc"><kbd>↑</kbd> paddle &nbsp; <kbd>↓</kbd> brake &nbsp; <kbd>←</kbd><kbd>→</kbd> sweep turns &nbsp; <kbd>A</kbd><kbd>D</kbd> lean &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>F1</kbd> debug &nbsp; <kbd>R</kbd> restart &nbsp; <kbd>F</kbd> finish run &nbsp; <kbd>Esc</kbd> menu</p>
   </div>
   <div id="lvl"></div>
   <div id="charsheet"></div>
   <div id="store"></div>
   <div id="err"></div>
-  <script type="module" src="js/main.js?v=23"></script>
+  <script type="module" src="js/main.js?v=24"></script>
 </body>
 </html>

@@ -60,7 +60,9 @@ export const KAYAK = {
   startGrace: 2.5, graceStab: 90,
   paddleFwd: 120, paddleBack: 80, sweepTorque: 85, sweepFwd: 45, strokePeriod: 0.8,
   collK: 8000, collDamp: 300, collFric: 60,
+  paddleSwingRate: 7,     // rad/s cap on the drawn paddle's yaw — turns any jump in the stroke angle into a short swing
 };
+
 KAYAK.buoyPts = [[0, -0.05, 1.4], [0, -0.05, -1.4],
   [-KAYAK.buoySide, -0.08, 0.5], [KAYAK.buoySide, -0.08, 0.5],
   [-KAYAK.buoySide, -0.08, -0.5], [KAYAK.buoySide, -0.08, -0.5]];
@@ -177,3 +179,17 @@ export const SKILL = {
 };
 
 export const PUTIN = 30;   // length of the calm put-in pool [m]
+
+// ---------- mobile build ----------
+export const MOBILE = {
+  force: false,             // true → touch pads + tilt even on a desktop browser (for development)
+  tiltMax: 22,              // device roll [deg] that gives a full lean
+  tiltDead: 2.5,            // roll [deg] around neutral that is ignored
+  tiltInvert: false,        // flip the tilt direction (only needed if a device reports it mirrored)
+  calibrateOnStart: true,   // how the phone is held when a run starts counts as "level"
+  leanRate: 3,              // lean response for the analog tilt (KAYAK.leanRate is for the binary keys)
+  strokeQueue: 2,           // taps remembered while a stroke is still in progress
+  repeatFwd: 0.45,          // forward push of a same-side (turning) stroke, as a fraction of paddleFwd
+  repeatYaw: 1.0,           // turning torque of a same-side stroke, as a fraction of sweepTorque
+  fullscreen: true,         // ask for fullscreen + landscape lock when a run starts (best effort, Android)
+};
