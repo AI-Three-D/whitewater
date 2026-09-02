@@ -274,7 +274,7 @@ applyQuality(quality);
     if (isMobile && padKeys[e.code]) { if (!e.repeat) for (const s of padKeys[e.code]) padDown(s); e.preventDefault(); return; }
     if (keymap[e.code] !== undefined) { input[keymap[e.code]] = true; e.preventDefault(); }
     if (e.code === 'KeyC') camMode = (camMode + 1) % 3;
-    if (e.code === 'F1') { dbgMode = (dbgMode + 1) % 5; $('dbg').style.display = dbgMode ? 'block' : 'none'; e.preventDefault(); }
+    if (e.code === 'F1') { toggleDbg(); e.preventDefault(); }
     if (e.code === 'KeyR') retryRun();
     if (e.code === 'KeyF' && gameState === 'run') endRun(true);
     if (e.code === 'Escape') { if ($('charsheet').style.display === 'flex') hideCharSheet(); else if ($('store').style.display === 'flex') hideStore(); else if ($('lvl').style.display !== 'flex') showMenu(); }
@@ -315,6 +315,8 @@ applyQuality(quality);
   }
   $('mExit').onclick = () => { if (gameState !== 'menu' && $('lvl').style.display !== 'flex') showMenu(); };
   $('mCam').onclick = () => { camMode = (camMode + 1) % 3; };
+  function toggleDbg() { dbgMode = (dbgMode + 1) % 5; $('dbg').style.display = dbgMode ? 'block' : 'none'; }
+  $('mDbg').onclick = toggleDbg;
   // best effort: fullscreen hides the browser chrome and (Android) allows a landscape lock.
   // iPhone Safari has no requestFullscreen and lock() rejects — both are simply skipped.
   function enterFullscreen() {
