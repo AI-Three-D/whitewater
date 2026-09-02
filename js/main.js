@@ -660,8 +660,13 @@ if (MOBILE) {
     if (warmingUp) return;
     if (!profile) return showMenu();
     warmingUp = true;
-    $('menu').style.display = 'none'; $('lvl').style.display = 'none'; $('stam').style.display = 'block'; $('loot').style.display = 'flex';
-    $('msg').style.display = 'flex'; $('msg').innerHTML = 'Loading river…';
+    $('menu').style.display = 'none'; 
+    $('lvl').style.display = 'none'; 
+    $('stam').style.display = 'block'; 
+    $('loot').style.display = 'flex';
+    $('msg').style.display = 'flex'; 
+    $('msg').innerHTML = 'Loading river…';
+    showPads(true);
     if (!river || river.R !== R) {          // regenerate only when the river changes (R restarts are instant)
       river = generateRiver(R);
       fillTerrainIndex(river.b);
