@@ -176,4 +176,9 @@ export const SKILL = {
   leanPerPt: 1.5,       // N·m added to hip/lean torque per skill point
 };
 
+export const INPUT = {
+  forceMobile: false,   // true → touch buttons + gyro lean even on desktop (for testing)
+  gyroMaxDeg: 22,       // device tilt in degrees that maps to a full lean
+};
+
 export const PUTIN = 30;   // length of the calm put-in pool [m]

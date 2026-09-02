@@ -1,5 +1,5 @@
 'use strict';
-import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, TIERS, PICKUPS, CHARACTERS, STAMINA, SKILL, BIOMES, BIOME_IDS } from './config.js';
+import { INPUT, GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, TIERS, PICKUPS, CHARACTERS, STAMINA, SKILL, BIOMES, BIOME_IDS } from './config.js';
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW } from './shaders.js';
 import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec,
          mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, mat4Compose, mat4TRS, mat4Transform,
@@ -17,12 +17,17 @@ const $ = id => document.getElementById(id);
 // on sight instead of chasing "am I even testing the current code" through several rounds
 const BUILD = 'build 23';
 { const v = document.getElementById('ver'); if (v) v.textContent = BUILD; }
+// mobile = a touch-first device: coarse primary pointer plus an actual touch digitizer.
+// (navigator.userAgentData.mobile exists only in Chromium and calls tablets "not mobile";
+// for controls what matters is touch + gyro, so the pointer media query is the right signal.)
+const MOBILE = INPUT.forceMobile ||
+  (navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches);
 // ---------- detail level ----------
 
 const QKEY = 'whitewater.quality';
 const loadQuality = () => { const q = localStorage.getItem(QKEY); return QUALITY_LEVELS.includes(q) ? q : null; };
 const saveQuality = q => localStorage.setItem(QKEY, q);
-let quality = loadQuality() || 'high';
+let quality = loadQuality() || (MOBILE ? 'medium' : 'high');
 function applyQuality(q) {
   const Q = QUALITY[q];
   Object.assign(GRID, Q.grid);
@@ -203,7 +208,7 @@ applyQuality(quality);
   let river = null, simTime = 0, gameState = 'menu', runTime = 0, camMode = 0, dbgMode = 0, fps = 60, warmingUp = false;
   let runLoot = { paddles: 0, coins: 0 };
   let profile = loadProfile();           // null → character selection
-  const input = { fwd: false, back: false, left: false, right: false, leanL: false, leanR: false };
+  const input = { fwd: false, back: false, left: false, right: false, leanL: false, leanR: false, leanAnalog: 0 };
   const keymap = { ArrowUp: 'fwd', ArrowDown: 'back', ArrowLeft: 'left', ArrowRight: 'right', KeyA: 'leanL', KeyD: 'leanR', KeyW: 'fwd', KeyS: 'back' };
   addEventListener('keydown', e => {
     if (keymap[e.code] !== undefined) { input[keymap[e.code]] = true; e.preventDefault(); }
@@ -214,6 +219,42 @@ applyQuality(quality);
     if (e.code === 'Escape') { if ($('charsheet').style.display === 'flex') hideCharSheet(); else if ($('store').style.display === 'flex') hideStore(); else if ($('lvl').style.display !== 'flex') showMenu(); }
   });
   addEventListener('keyup', e => { if (keymap[e.code] !== undefined) input[keymap[e.code]] = false; });
+// ---------- touch controls (mobile) ----------
+const padL = $('padL'), padR = $('padR');
+const pad = { L: false, R: false };
+// one button held = a stroke on that side (same flags as ↑ + ←/→: forward force plus a
+// sweep); alternating taps or holding both = plain forward paddling. The kayak's existing
+// stroke machinery handles all of it, so there are no new animation states to pop.
+const syncPad = () => { input.left = pad.L; input.right = pad.R; input.fwd = pad.L || pad.R; };
+function bindPad(el, key) {
+  const down = e => { e.preventDefault(); if (el.setPointerCapture) el.setPointerCapture(e.pointerId); pad[key] = true; el.classList.add('held'); syncPad(); };
+  const up = e => { e.preventDefault(); pad[key] = false; el.classList.remove('held'); syncPad(); };
+  el.addEventListener('pointerdown', down);
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+  el.addEventListener('contextmenu', e => e.preventDefault());
+}
+function showPads(on) { const d = on && MOBILE ? 'flex' : 'none'; padL.style.display = d; padR.style.display = d; }
+if (MOBILE) { bindPad(padL, 'L'); bindPad(padR, 'R'); }
+
+// gyro lean: device roll maps to the same lean target A/D produce (tilt left → lean left).
+// iOS only exposes the sensor after requestPermission() from inside a user gesture, so the
+// listener is armed on the first tap; browsers without the permission gate start immediately.
+if (MOBILE) {
+  const onOrient = e => {
+    if (e.beta == null || e.gamma == null) return;
+    const a = (screen.orientation && screen.orientation.angle) || 0;
+    // pick the axis that is "roll" for the current screen rotation; positive = tilted right
+    const tilt = a === 90 ? e.beta : a === 270 ? -e.beta : a === 180 ? -e.gamma : e.gamma;
+    input.leanAnalog = clamp(-tilt / INPUT.gyroMaxDeg, -1, 1);
+  };
+  const start = () => addEventListener('deviceorientation', onOrient);
+  addEventListener('pointerdown', () => {
+    if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission)
+      DeviceOrientationEvent.requestPermission().then(s => { if (s === 'granted') start(); }).catch(() => {});
+    else start();
+  }, { once: true });
+}
 
   // effective kayak parameters derived from the character's traits
   const traits = () => ({
@@ -232,6 +273,7 @@ applyQuality(quality);
   function showMenu() {
     gameState = 'menu';
     $('menu').style.display = 'flex'; $('msg').style.display = 'none'; $('stam').style.display = 'none'; $('loot').style.display = 'none';
+    showPads(false);
     renderMenu();
     if (profile && profile.pending > 0) showLevelUp();
   }
@@ -459,7 +501,7 @@ applyQuality(quality);
           if (!input.fwd && !input.back) F = v3.add(F, v3.scale(fwdH, K.sweepFwd * power * this.env * 0.5));
         }
       } else { this.paddling = false; this.env *= Math.exp(-dt * 8); this.strokeT = 0; }
-      const leanTarget = (input.leanL ? 1 : 0) - (input.leanR ? 1 : 0);
+      const leanTarget = clamp((input.leanL ? 1 : 0) - (input.leanR ? 1 : 0) + input.leanAnalog, -1, 1);
       this.lean += (leanTarget - this.lean) * Math.min(1, dt * K.leanRate);
       // terrain contact
       this.hitFlash *= Math.exp(-dt * 4);
@@ -643,20 +685,28 @@ applyQuality(quality);
   function endRun(won) {
     if (gameState !== 'run') return;
     gameState = 'over';
+    showPads(false);
     const msg = $('msg');
     msg.style.display = 'flex';
+    const hint = MOBILE ? '' : `<small>R — run again · Esc — river menu</small>`;
     if (won) {
       const { pts, basePts, paddleXp, coins, ups } = awardRun(profile, river.R, runTime, runLoot);
       const best = profile.best[river.R.name] === runTime ? ' · new best!' : '';
       msg.innerHTML = `🏁 Take-out reached!<br>${river.R.name} in ${runTime.toFixed(1)} s${best}<br>
         <span style="color:#ffe08a">+${basePts} finish${paddleXp ? ` +${paddleXp} paddle` : ''} = +${pts} xp${coins ? ` · +${coins} coin${coins > 1 ? 's' : ''}` : ''}${ups ? ` — LEVEL UP${ups > 1 ? ' ×' + ups : ''}!` : ` · ${profile.points}/${pointsForLevel(profile.level)} to level ${profile.level + 1}`}</span>
-        <small>R — run again · Esc — river menu</small>`;
+        ${hint}`;
       if (ups) setTimeout(showLevelUp, 900);
     } else {
       const lost = runLoot.paddles || runLoot.coins;
       msg.innerHTML = `🌊 Capsized! You're swimming.<br>${(kayak.p[2] - 15).toFixed(0)} m of ${(river.finishZ - 15).toFixed(0)} m
         ${lost ? `<br><small style="color:#ff9a80">lost ${runLoot.paddles} paddle${runLoot.paddles === 1 ? '' : 's'} &amp; ${runLoot.coins} coin${runLoot.coins === 1 ? '' : 's'} — loot only banks on a finish</small>` : ''}
-        <small>R — try again · Esc — river menu</small>`;
+        ${hint}`;
+    }
+    if (MOBILE) {
+      msg.insertAdjacentHTML('beforeend',
+        `<div class="endbtns"><button id="btnRetry">↻ Retry</button><button id="btnMenu">Menu</button></div>`);
+      $('btnRetry').onclick = () => startRun(river.R);
+      $('btnMenu').onclick = () => { msg.style.display = 'none'; showMenu(); };
     }
   }
 
@@ -764,8 +814,8 @@ applyQuality(quality);
     mkEl.style.left = (50 + tilt * 50) + '%';
     mkEl.style.background = Math.abs(tilt) > 0.7 ? '#ff5040' : Math.abs(tilt) > 0.35 ? '#ffb040' : '#ffe08a';
     glEl.innerHTML = Math.abs(tilt) > 0.35
-      ? `<span style="color:#ff8060;font-weight:700">LEAN ${tilt > 0 ? 'RIGHT (D)' : 'LEFT (A)'}</span>`
-      : 'torso balance — lean with A / D';
+      ? `<span style="color:#ff8060;font-weight:700">LEAN ${tilt > 0 ? 'RIGHT' : 'LEFT'}${MOBILE ? ' — tilt device' : tilt > 0 ? ' (D)' : ' (A)'}</span>`
+      : (MOBILE ? 'torso balance — tilt your device' : 'torso balance — lean with A / D');
     if (dbgMode) {
       const w = waterAt(kayak.p[0], kayak.p[2]), K = KAYAK, tr = traits();
       const instab = tr.instabK - K.formStab;
