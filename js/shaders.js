@@ -421,7 +421,11 @@ fn etaN(i: i32, j: i32, eta0: f32, hmin: f32) -> f32 {
   let uc = 0.5 * (s.y + S[ci(i+1, j)].y); let vc = 0.5 * (s.z + S[ci(i, j+1)].z);
   let k = K[id];
   let p2 = vec2f((f32(i) + 0.5) * dx, (f32(j) + 0.5) * dx);
-  let amp = 0.06 * k * smoothstep(0.0, 0.35, h);
+  // waves are sub-pixel where the mesh goes coarse; fading them before the LOD seam keeps the
+  // fine and coarse edges at the same height there (no flickering slivers). dbg.w = RENDER.lod.near
+  let camD = length(vec3f(p2.x, eta, p2.y) - C.camPos.xyz);
+  let amp = 0.06 * k * smoothstep(0.0, 0.35, h) * (1.0 - smoothstep(0.6 * C.dbg.w, C.dbg.w, camD));
+  
   let d = amp * (sin(dot(p2, vec2f(2.3, 0.9)) - t * 6.0) + sin(dot(p2, vec2f(-1.1, 2.4)) - t * 4.7)
                  + 0.6 * sin(dot(p2, vec2f(3.9, 3.3)) - t * 8.1));
   var y = eta + d;

@@ -79,6 +79,9 @@ function applyQuality(q) {
   PARTS.count = Q.particles; PARTS.kayakShare = Q.kayakShare;
   VEG.caps = Q.veg.caps; VEG.attempts = Q.veg.attempts;
   SIM.warmupSteps = Q.warmupSteps; SIM.macCormack = Q.macCormack; SIM.turbA = Q.turbA; SIM.substeps = Q.substeps;
+  RENDER.viewAhead = Q.viewAhead ?? RENDER.viewAhead;
+  RENDER.fogDensity = Q.fogDensity ?? RENDER.fogDensity;
+  RENDER.lod = Q.lod ?? { near: 1e9, mid: 1e9 };
 }
 applyQuality(quality);
 
@@ -107,19 +110,25 @@ applyQuality(quality);
   const BAND_ROWS = 32, BAND_BYTES = BAND_ROWS * W * 16;
   const staging = [0, 1].map(() => ({ buf: mkBuf(BAND_BYTES, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST), busy: false }));
   const band = { ready: false, j0: 0, data: new Float32Array(BAND_ROWS * W * 4) };
-  const idx = new Uint32Array((W - 1) * (L - 1) * 6);
+  // terrain/water index buffers at three mesh densities. The grid vertex shaders derive (i, j)
+  // from the vertex index over the full grid, so a coarser mesh is simply an index buffer that
+  // skips vertices. Each is laid out one row of quads at a time, so a Z-range is a contiguous slice.
+  const lods = [1, 2, 4].map(s => {
+    const cols = Math.floor((W - 1) / s) + 1, rows = Math.floor((L - 1) / s) + 1;   // vertices per row / vertex rows
+    const idx = new Uint32Array((cols - 1) * (rows - 1) * 6);
+    return { s, cols, rows, idx, rowIdx: (cols - 1) * 6, buf: mkBuf(idx.byteLength, GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST) };
+  });
   function fillTerrainIndex(b) {
-    let qi = 0;
-    for (let j = 0; j < L - 1; j++) for (let i = 0; i < W - 1; i++) {
-      const a = j * W + i, bi = a + 1, c = a + W, d = c + 1;
-      if (Math.abs(b[a] - b[d]) <= Math.abs(b[bi] - b[c])) {
-        idx[qi++] = a; idx[qi++] = c; idx[qi++] = bi; idx[qi++] = bi; idx[qi++] = c; idx[qi++] = d;
-      } else {
-        idx[qi++] = a; idx[qi++] = c; idx[qi++] = d; idx[qi++] = a; idx[qi++] = d; idx[qi++] = bi;
+    for (const lod of lods) {
+      const { s, cols, rows, idx } = lod; let qi = 0;
+      for (let r = 0; r < rows - 1; r++) for (let c = 0; c < cols - 1; c++) {
+        const a = r * s * W + c * s, bi = a + s, cc = a + s * W, d = cc + s;
+        if (Math.abs(b[a] - b[d]) <= Math.abs(b[bi] - b[cc])) { idx[qi++] = a; idx[qi++] = cc; idx[qi++] = bi; idx[qi++] = bi; idx[qi++] = cc; idx[qi++] = d; }
+        else { idx[qi++] = a; idx[qi++] = cc; idx[qi++] = d; idx[qi++] = a; idx[qi++] = d; idx[qi++] = bi; }
       }
+      device.queue.writeBuffer(lod.buf, 0, idx);
     }
   }
-  const idxBuf = mkBuf(idx.byteLength, GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST);
   // ---------- simulation pipelines ----------
   const simBGL = device.createBindGroupLayout({ entries: [
     { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
@@ -187,7 +196,9 @@ applyQuality(quality);
   const meshPipe = mkRender(WGSL_MESH, 'vsMesh', 'fsMesh', { buffers: meshBuffers });
   const pickupPipe = mkRender(WGSL_MESH, 'vsMesh', 'fsMeshFade', { buffers: meshBuffers, blend: alphaBlend, depthWrite: false });
   // ---------- GPU meshes ----------
-  const gpuMesh = mb => { const d = mb.data(); const vbuf = mkBuf(d.byteLength, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST); device.queue.writeBuffer(vbuf, 0, d); return { vbuf, count: mb.count }; };
+  const gpuMesh = mb => { const d = mb.data(); const vbuf = mkBuf(d.byteLength, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST); 
+    device.queue.writeBuffer(vbuf, 0, d); 
+    return { vbuf, count: mb.count }; };
   const vegMeshes = {}; for (const [k, mb] of Object.entries(buildVegetationMeshes())) vegMeshes[k] = gpuMesh(mb);
   const kayakMeshes = {}; for (const [k, mb] of Object.entries(buildKayakParts())) kayakMeshes[k] = gpuMesh(mb);
   const pickupMeshes = { paddle: kayakMeshes.paddle, coin: gpuMesh(buildCoinMesh()) };
@@ -261,7 +272,7 @@ applyQuality(quality);
     if (isMobile && padKeys[e.code]) { if (!e.repeat) for (const s of padKeys[e.code]) padDown(s); e.preventDefault(); return; }
     if (keymap[e.code] !== undefined) { input[keymap[e.code]] = true; e.preventDefault(); }
     if (e.code === 'KeyC') camMode = (camMode + 1) % 3;
-    if (e.code === 'F1') { dbgMode = (dbgMode + 1) % 5; $('dbg').style.display = dbgMode ? 'block' : 'none'; e.preventDefault(); }
+    if (e.code === 'F1') { toggleDbg(); e.preventDefault(); }
     if (e.code === 'KeyR') retryRun();
     if (e.code === 'KeyF' && gameState === 'run') endRun(true);
     if (e.code === 'Escape') { if ($('charsheet').style.display === 'flex') hideCharSheet(); else if ($('store').style.display === 'flex') hideStore(); else if ($('lvl').style.display !== 'flex') showMenu(); }
@@ -302,6 +313,8 @@ applyQuality(quality);
   }
   $('mExit').onclick = () => { if (gameState !== 'menu' && $('lvl').style.display !== 'flex') showMenu(); };
   $('mCam').onclick = () => { camMode = (camMode + 1) % 3; };
+  function toggleDbg() { dbgMode = (dbgMode + 1) % 5; $('dbg').style.display = dbgMode ? 'block' : 'none'; }
+  $('mDbg').onclick = toggleDbg;
   // best effort: fullscreen hides the browser chrome and (Android) allows a landscape lock.
   // iPhone Safari has no requestFullscreen and lock() rejects — both are simply skipped.
   function enterFullscreen() {
@@ -768,7 +781,7 @@ applyQuality(quality);
     if (!river || river.R !== R) {          // regenerate only when the river changes (R restarts are instant)
       river = generateRiver(R);
       fillTerrainIndex(river.b);
-      device.queue.writeBuffer(idxBuf, 0, idx);
+  
       device.queue.writeBuffer(terrainBuf, 0, river.b); device.queue.writeBuffer(maskBuf, 0, river.mask);
       placeVegetation();
       placePickups();
@@ -849,8 +862,28 @@ applyQuality(quality);
     const wt = (river && river.R.waterTint) || [0.02, 0.10, 0.09];   // the original deep-water colour
     f.set([wt[0], wt[1], wt[2], (river && river.R.waterClarity) || 1], 60);
     f.set([BIOME_IDS[(river && river.R.biome) || 'alpine'] ?? 0, 0, 0, 0], 64);
+    f.set([dbgMode, SIM.hmin, QUALITY[quality].simpleShading ? 1 : 0, RENDER.lod.near], 48);
     device.queue.writeBuffer(camUBuf, 0, f);
   }
+
+  function lodSlices(overlap) {
+    const zk = kayak.p[2], lod = RENDER.lod;
+    const near = Math.min(lod.near, RENDER.viewAhead), mid = Math.min(Math.max(lod.mid, near), RENDER.viewAhead);
+    const up = (j, s) => Math.ceil(j / s) * s;
+    const jB = clamp(Math.floor((zk - RENDER.viewBehind) / dx), 0, L - 2);
+    const jN = clamp(up(Math.ceil((zk + near) / dx), 2), jB + 1, L - 1);
+    const jM = clamp(up(Math.ceil((zk + mid) / dx), 4), jN, L - 1);
+    const jA = clamp(Math.ceil((zk + RENDER.viewAhead) / dx), jM, L - 1);
+    const seams = [jB, jN, jM, jA], out = [];
+    for (let k = 0; k < 3; k++) {
+      const lo = lods[k], s = lo.s;
+      const r0 = clamp(Math.floor(seams[k] / s) - (k && overlap ? 1 : 0), 0, lo.rows - 2);
+      const r1 = clamp(Math.ceil(seams[k + 1] / s), 0, lo.rows - 1);
+      if (r1 > r0) out.push({ buf: lo.buf, first: r0 * lo.rowIdx, count: (r1 - r0) * lo.rowIdx });
+    }
+    return out;
+  }
+
   // ---------- kayak instances ----------
   function updateKayakInstances(dtReal) {
     const k = kayak, M = mat4Compose(k.p, k.q, [1, 1, 1]);
@@ -990,27 +1023,42 @@ applyQuality(quality);
       enc.copyBufferToBuffer(stateBufs[0], j0 * W * 16, stg.buf, 0, BAND_BYTES);
       stg.busy = true;
     }
-    // only rasterize the stretch of river actually near the paddler — the index buffer is laid
-    // out one row of quads at a time, so a contiguous slice of it is exactly a Z-range of terrain
-    const rowIdx = (W - 1) * 6;
-    const rj0 = clamp(Math.floor((kayak.p[2] - RENDER.viewBehind) / dx), 0, L - 2);
-    const rj1 = clamp(Math.ceil((kayak.p[2] + RENDER.viewAhead) / dx), rj0 + 1, L - 1);
-    const viewFirst = rj0 * rowIdx, viewCount = (rj1 - rj0) * rowIdx;
+
+    const terrainSlices = lodSlices(true), waterSlices = lodSlices(false);
+
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: ctx.getCurrentTexture().createView(), clearValue: { r: RENDER.fogColor[0], g: RENDER.fogColor[1], b: RENDER.fogColor[2], a: 1 }, loadOp: 'clear', storeOp: 'store' }],
       depthStencilAttachment: { view: depthView, depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' },
     });
     pass.setBindGroup(0, renBG);
     pass.setPipeline(skyPipe); pass.draw(3);
-    pass.setPipeline(terrainPipe); pass.setIndexBuffer(idxBuf, 'uint32'); pass.drawIndexed(viewCount, 1, viewFirst);
+    pass.setPipeline(terrainPipe);
+    for (const sl of terrainSlices) { 
+      pass.setIndexBuffer(sl.buf, 'uint32');
+      pass.drawIndexed(sl.count, 1, sl.first); }
+ 
+
+   
     pass.setPipeline(meshPipe);
     for (const name of ['tree', 'bush', 'rock', 'grass', 'pole']) {
       const ib = instBufs[name]; if (!ib || !ib.count) continue;
-      pass.setVertexBuffer(0, vegMeshes[name].vbuf); pass.setVertexBuffer(1, ib.buf); pass.draw(vegMeshes[name].count, ib.count);
+      pass.setVertexBuffer(0, vegMeshes[name].vbuf); 
+      pass.setVertexBuffer(1, ib.buf); 
+      pass.draw(vegMeshes[name].count, ib.count);
     }
-    for (const name of ['hull', 'cockpit', 'torso', 'head', 'paddle']) { pass.setVertexBuffer(0, kayakMeshes[name].vbuf); pass.setVertexBuffer(1, kayakInst[name]); pass.draw(kayakMeshes[name].count, 1); }
-    pass.setVertexBuffer(0, armBuf); pass.setVertexBuffer(1, kayakInst.arms); pass.draw(armVertCount, 1);
-    pass.setPipeline(waterPipe); pass.setIndexBuffer(idxBuf, 'uint32'); pass.drawIndexed(viewCount, 1, viewFirst);
+
+
+    for (const name of ['hull', 'cockpit', 'torso', 'head', 'paddle']) {
+       pass.setVertexBuffer(0, kayakMeshes[name].vbuf); 
+       pass.setVertexBuffer(1, kayakInst[name]); 
+       pass.draw(kayakMeshes[name].count, 1); }
+    pass.setVertexBuffer(0, armBuf); pass.setVertexBuffer(1, kayakInst.arms); 
+    pass.draw(armVertCount, 1);
+    pass.setPipeline(waterPipe);
+    for (const sl of waterSlices) { 
+      pass.setIndexBuffer(sl.buf, 'uint32'); 
+      pass.drawIndexed(sl.count, 1, sl.first); }
+
     if (river.pickups) {
       pass.setPipeline(pickupPipe);
       for (const kind of ['paddle', 'coin']) {
