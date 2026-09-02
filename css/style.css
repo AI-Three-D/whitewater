@@ -1,0 +1,107 @@
+html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#fff}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:fixed;left:14px;top:12px;font-size:15px;text-shadow:0 1px 3px #000;pointer-events:none;line-height:1.45}
+#hud b{font-weight:600;color:#ffe08a}
+#gauge{position:fixed;left:50%;bottom:26px;width:320px;height:16px;margin-left:-160px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.5);border-radius:9px}
+#gauge .z{position:absolute;left:50%;top:-6px;width:2px;height:28px;background:#fff;margin-left:-1px}
+#gauge .l,#gauge .r{position:absolute;top:0;height:100%;width:18%;background:rgba(255,60,40,.45)}
+#gauge .l{left:0;border-radius:9px 0 0 9px}#gauge .r{right:0;border-radius:0 9px 9px 0}
+#mk{position:absolute;top:-4px;width:10px;height:24px;margin-left:-5px;background:#ffe08a;border-radius:4px;box-shadow:0 0 6px #000}
+#gl{position:fixed;left:50%;bottom:46px;width:420px;margin-left:-210px;text-align:center;font-size:13px;text-shadow:0 1px 2px #000}
+#menu{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 30%,rgba(20,60,90,.92),rgba(3,10,18,.97));display:flex;flex-direction:column;align-items:center;justify-content:flex-start;overflow-y:auto;padding:40px 20px 60px;box-sizing:border-box}
+#menu h1{font-size:46px;letter-spacing:4px;margin:0 0 6px}
+#menu p{max-width:640px;text-align:center;color:#cfe;line-height:1.5}
+.rivers{display:flex;gap:18px;margin:20px 0}
+.riv{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:10px;padding:16px 20px;width:210px;cursor:pointer;transition:.15s}
+.riv:hover{background:rgba(255,255,255,.18);transform:translateY(-3px)}
+.riv h3{margin:0 0 6px}.riv small{color:#bde}
+#msg{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,.45);font-size:28px;text-align:center;text-shadow:0 2px 6px #000}
+#msg small{font-size:16px;margin-top:10px;color:#dde}
+#dbg{position:fixed;right:12px;top:10px;font:12px/1.4 monospace;white-space:pre;text-shadow:0 1px 2px #000;display:none}
+#ver{position:fixed;right:6px;bottom:4px;font:11px/1 monospace;color:rgba(255,255,255,.55);text-shadow:0 1px 2px #000;z-index:50;pointer-events:none}
+#err{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:30px;background:#300;font-size:18px;white-space:pre-wrap}
+kbd{background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;border:1px solid rgba(255,255,255,.3)}
+
+#stam{position:fixed;left:14px;top:62px;width:220px;height:12px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.5);border-radius:7px;display:none}
+#stamfill{height:100%;width:100%;background:#5ad27a;border-radius:7px;transition:background .2s}
+#stamfill.tired{background:#ff5040}
+#stamtxt{position:absolute;left:228px;top:-3px;font-size:13px;white-space:nowrap;text-shadow:0 1px 2px #000}
+#loot{position:fixed;left:14px;top:86px;display:none;flex-direction:row;gap:8px}
+#loot .lc{background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.3);border-radius:7px;padding:3px 9px;font-size:14px;text-shadow:0 1px 3px #000;transform-origin:left center}
+#loot .lc b{color:#ffe08a}
+#loot .lc.pop{animation:lootpop .55s ease-out}
+@keyframes lootpop{
+  0%{transform:scale(1)}
+  30%{transform:scale(1.7);box-shadow:0 0 14px #ffe08a,0 0 26px rgba(255,224,138,.7);border-color:#ffe08a}
+  100%{transform:scale(1)}
+}
+
+#quality{display:flex;align-items:center;gap:10px;justify-content:center;margin:10px 0}
+#quality span{font-size:12px;color:#9bc}
+#quality button{background:rgba(255,255,255,.1);color:#cde;border:1px solid rgba(255,255,255,.3);border-radius:7px;padding:5px 14px;cursor:pointer;font-size:13px}
+#quality button:hover{background:rgba(255,255,255,.2)}
+#quality button.on{background:#ffe08a;color:#1a1e12;border-color:#ffe08a;font-weight:700}
+
+#charsel{display:flex;gap:22px;margin:14px 0}
+.chr{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:12px;padding:18px 22px;width:260px;cursor:pointer;transition:.15s}
+.chr:hover{background:rgba(255,255,255,.18);transform:translateY(-3px)}
+.chr h3{margin:0 0 4px}.chr small{color:#bde}.chr p{font-size:13px;color:#cde;margin:8px 0;text-align:left}
+.bar{display:flex;gap:3px;margin:3px 0}
+.bar i{width:14px;height:9px;border-radius:2px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25)}
+.bar i.on{background:#ffe08a}.bar i.cap{visibility:hidden}
+
+/* generic stand-in for art that'll be dropped in later — a plain image or background-image can
+   replace the inner text with no layout changes needed */
+.art-slot{background:repeating-linear-gradient(45deg,rgba(255,255,255,.05) 0 10px,rgba(255,255,255,.09) 10px 20px);
+  border:1px dashed rgba(255,255,255,.35);border-radius:9px;display:flex;align-items:center;justify-content:center;
+  color:rgba(255,255,255,.45);font-size:11px;text-transform:uppercase;letter-spacing:1.5px;flex-shrink:0}
+#menuHero{width:min(680px,90vw);height:100px;margin-bottom:8px}
+.chr-portrait{width:100%;height:100px;margin-bottom:10px}
+.riv-thumb{width:100%;height:56px;margin-bottom:8px}
+.store-banner{width:min(600px,88vw);height:84px;margin-bottom:4px}
+.opt-icon{width:52px;height:52px;margin:0 auto 10px}
+.topbar-portrait{width:56px;height:56px;border-radius:10px;font-size:9px}
+.charsheet-portrait{width:180px;height:220px}
+
+/* a reusable xp/progress bar, visually matching the in-run stamina meter */
+.xpbar{width:100%;height:8px;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.3);border-radius:5px;overflow:hidden;margin:5px 0}
+.xpfill{height:100%;background:linear-gradient(90deg,#ffd35c,#ffe08a);transition:width .3s}
+
+/* compact bar on the main screen: portrait + level/xp + Character/Store buttons */
+#topbar{display:none;align-items:center;gap:16px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);
+  border-radius:12px;padding:12px 20px;margin:6px 0;min-width:520px}
+.topbar-info{flex:1;text-align:left}
+.topbar-btns{display:flex;gap:8px;flex-shrink:0}
+
+#lvl button,#store button,#topbar button,#charsheet button{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:7px;padding:6px 14px;cursor:pointer;font-size:14px}
+#lvl button:hover,#store button:hover:not(:disabled),#topbar button:hover,#charsheet button:hover{background:rgba(255,255,255,.28)}
+#lvl button:disabled,#store button:disabled{opacity:.35;cursor:default}
+#riverlist{display:none;flex-direction:column;gap:8px;margin:10px 0}
+.tier{font-size:13px;color:#9bc;margin:4px 0 2px;text-align:left}
+.rivers{display:flex;gap:14px;margin:0 0 6px}
+.riv{width:190px;padding:12px 16px}
+.riv .best{color:#ffe08a;font-size:12px}
+#lvl{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,.7);text-align:center;text-shadow:0 2px 6px #000}
+#lvl h2{font-size:34px;margin:0 0 8px;color:#ffe08a}
+#lvl .opts{display:flex;gap:20px;margin:18px 0}
+#lvl .opt{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.3);border-radius:12px;padding:16px 22px;width:240px}
+#lvl .opt p{font-size:13px;color:#cde}
+
+/* character sheet — its own visually distinct full-screen view, cooler palette than the store */
+#charsheet{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
+  background:radial-gradient(ellipse at 50% 30%,rgba(30,55,85,.95),rgba(3,10,18,.98));text-shadow:0 2px 6px #000}
+.charsheet-card{display:flex;gap:26px;background:rgba(255,255,255,.06);border:1px solid rgba(255,224,138,.35);
+  border-radius:16px;padding:26px 32px;max-width:640px;text-align:left}
+.charsheet-info h2{margin:0 0 2px;color:#ffe08a}
+.charsheet-info h2 small{color:#bde;font-weight:400;font-size:15px;margin-left:8px}
+.charsheet-info p{font-size:13px;color:#cde;max-width:340px}
+.charsheet-info .stat-row{margin:8px 0 2px}
+.charsheet-actions{display:flex;gap:10px;margin-top:20px}
+
+/* store — visually distinct "shopfront" palette (warm/gold) instead of a plain grey dialog */
+#store{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
+  background:radial-gradient(ellipse at 50% 30%,rgba(75,58,20,.93),rgba(10,7,3,.98));text-shadow:0 2px 6px #000}
+#store h2{font-size:34px;margin:0 0 8px;color:#ffd35c}
+#store .opts{display:flex;gap:20px;margin:18px 0}
+#store .opt{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.3);border-radius:12px;padding:16px 22px;width:220px}
+#store .opt p{font-size:13px;color:#cde}
