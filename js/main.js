@@ -80,6 +80,9 @@ function applyQuality(q) {
   VEG.caps = Q.veg.caps; VEG.attempts = Q.veg.attempts;
   SIM.warmupSteps = Q.warmupSteps; SIM.macCormack = Q.macCormack; SIM.turbA = Q.turbA; SIM.substeps = Q.substeps;
   RENDER.viewAhead = Q.viewAhead ?? RENDER.viewAhead;
+  RENDER.viewBehind = Q.viewBehind ?? RENDER.viewBehind;
+  RENDER.computeAhead = Q.computeAhead ?? RENDER.computeAhead;
+  RENDER.computeBehind = Q.computeBehind ?? RENDER.computeBehind;
   RENDER.fogDensity = Q.fogDensity ?? RENDER.fogDensity;
   RENDER.lod = Q.lod ?? { near: 1e9, mid: 1e9 };
 }
