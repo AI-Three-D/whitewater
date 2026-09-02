@@ -80,9 +80,6 @@ function applyQuality(q) {
   VEG.caps = Q.veg.caps; VEG.attempts = Q.veg.attempts;
   SIM.warmupSteps = Q.warmupSteps; SIM.macCormack = Q.macCormack; SIM.turbA = Q.turbA; SIM.substeps = Q.substeps;
   RENDER.viewAhead = Q.viewAhead ?? RENDER.viewAhead;
-  RENDER.viewBehind = Q.viewBehind ?? RENDER.viewBehind;
-  RENDER.computeAhead = Q.computeAhead ?? RENDER.computeAhead;
-  RENDER.computeBehind = Q.computeBehind ?? RENDER.computeBehind;
   RENDER.fogDensity = Q.fogDensity ?? RENDER.fogDensity;
   RENDER.lod = Q.lod ?? { near: 1e9, mid: 1e9 };
 }
@@ -831,15 +828,17 @@ applyQuality(quality);
   // ---------- camera ----------
   const cam = {
     pos: [0, 5, 0], look: [0, 0, 10], dir: [0, 0, 1], right: [1, 0, 0], up: [0, 1, 0],
-    reset() { this.dir = v3.norm(qRotate(kayak.q, [0, 0, 1])); const p = kayak.p; this.pos = [p[0], p[1] + 3.5, p[2] - 8]; this.look = [p[0], p[1], p[2] + 5]; },
+    // mobile screens are small and mostly held at arm's length, so the usual desktop framing
+    // leaves the boat/water too tiny to read — pull the rig in to half distance on mobile only
+    reset() { this.dir = v3.norm(qRotate(kayak.q, [0, 0, 1])); const p = kayak.p; const cs = isMobile ? 0.5 : 1; this.pos = [p[0], p[1] + 3.5 * cs, p[2] - 8 * cs]; this.look = [p[0], p[1], p[2] + 5]; },
     update(dt) {
-      const p = kayak.p;
+      const p = kayak.p, cs = isMobile ? 0.5 : 1;
       let wantDir;
       if (camMode === 1) wantDir = [0, 0, 1];
       else { const f = qRotate(kayak.q, [0, 0, 1]); wantDir = v3.norm([f[0], 0, f[2]]); if (v3.dot(wantDir, [0, 0, 1]) < -0.2 && camMode === 0) wantDir = v3.norm(v3.add(wantDir, [0, 0, 1.3])); }
       const k = 1 - Math.exp(-dt * (camMode === 1 ? 6 : 1.8));
       this.dir = v3.norm(v3.add(this.dir, v3.scale(v3.sub(wantDir, this.dir), k)));
-      const back = camMode === 2 ? 16 : 8.5, up = camMode === 2 ? 11 : 3.4;
+      const back = (camMode === 2 ? 16 : 8.5) * cs, up = (camMode === 2 ? 11 : 3.4) * cs;
       const want = v3.add(v3.sub(p, v3.scale(this.dir, back)), [0, up, 0]);
       want[1] = Math.max(want[1], terrainH(want[0], want[2]) + 1.5);
       const kp = 1 - Math.exp(-dt * 5);
