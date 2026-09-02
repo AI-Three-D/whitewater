@@ -120,6 +120,19 @@ applyQuality(quality);
     }
   }
   const idxBuf = mkBuf(idx.byteLength, GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST);
+  const LODCFG = QUALITY[quality].lod || null;
+  const lodIdx = {};                         // stride → { buf, cols, rows }
+  if (LODCFG) for (const s of [2, 4]) {
+    const cols = Math.floor((W - 1) / s), rows = Math.floor((L - 1) / s);
+    const a = new Uint32Array(cols * rows * 6); let q = 0;
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+      const v = j * s * W + i * s, b2 = v + s, c2 = v + s * W, d2 = c2 + s;
+      a[q++] = v; a[q++] = c2; a[q++] = b2; a[q++] = b2; a[q++] = c2; a[q++] = d2;
+    }
+    const buf = mkBuf(a.byteLength, GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST);
+    device.queue.writeBuffer(buf, 0, a);
+    lodIdx[s] = { buf, cols, rows };
+  }
   // ---------- simulation pipelines ----------
   const simBGL = device.createBindGroupLayout({ entries: [
     { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
@@ -990,19 +1003,42 @@ applyQuality(quality);
       enc.copyBufferToBuffer(stateBufs[0], j0 * W * 16, stg.buf, 0, BAND_BYTES);
       stg.busy = true;
     }
-    // only rasterize the stretch of river actually near the paddler — the index buffer is laid
-    // out one row of quads at a time, so a contiguous slice of it is exactly a Z-range of terrain
     const rowIdx = (W - 1) * 6;
     const rj0 = clamp(Math.floor((kayak.p[2] - RENDER.viewBehind) / dx), 0, L - 2);
     const rj1 = clamp(Math.ceil((kayak.p[2] + RENDER.viewAhead) / dx), rj0 + 1, L - 1);
-    const viewFirst = rj0 * rowIdx, viewCount = (rj1 - rj0) * rowIdx;
+    // LOD band boundaries in grid rows, snapped so the coarse quad rows line up with the grid
+    let jn = rj1, jm = rj1;                         // no LOD → the near band covers everything
+    if (LODCFG) {
+      const jb = Math.floor(kayak.p[2] / dx);
+      jn = clamp(Math.ceil((jb + LODCFG.near / dx) / 2) * 2, rj0, rj1);
+      jm = clamp(Math.ceil((jb + LODCFG.mid / dx) / 4) * 4, jn, rj1);
+    }
+    // draw the visible stretch as up to three slices: full res near the boat, ½ and ¼ beyond.
+    // `overlap` starts each coarse band one coarse row early so the finer mesh in front hides the
+    // T-junction cracks — used for terrain; water is blended, so it butt-joins instead
+    const drawGrid = overlap => {
+      pass.setIndexBuffer(idxBuf, 'uint32');
+      pass.drawIndexed((jn - rj0) * rowIdx, 1, rj0 * rowIdx);
+      if (jn < jm) {
+        const Ld = lodIdx[2], r0 = Math.max(0, jn / 2 - (overlap ? 1 : 0)), r1 = Math.min(Ld.rows, jm / 2);
+        pass.setIndexBuffer(Ld.buf, 'uint32');
+        pass.drawIndexed((r1 - r0) * Ld.cols * 6, 1, r0 * Ld.cols * 6);
+      }
+      if (jm < rj1) {
+        const Ld = lodIdx[4], r0 = Math.max(0, jm / 4 - (overlap ? 1 : 0)), r1 = Math.min(Ld.rows, Math.ceil(rj1 / 4));
+        pass.setIndexBuffer(Ld.buf, 'uint32');
+        pass.drawIndexed((r1 - r0) * Ld.cols * 6, 1, r0 * Ld.cols * 6);
+      }
+    };
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: ctx.getCurrentTexture().createView(), clearValue: { r: RENDER.fogColor[0], g: RENDER.fogColor[1], b: RENDER.fogColor[2], a: 1 }, loadOp: 'clear', storeOp: 'store' }],
       depthStencilAttachment: { view: depthView, depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' },
     });
     pass.setBindGroup(0, renBG);
     pass.setPipeline(skyPipe); pass.draw(3);
-    pass.setPipeline(terrainPipe); pass.setIndexBuffer(idxBuf, 'uint32'); pass.drawIndexed(viewCount, 1, viewFirst);
+    pass.setPipeline(terrainPipe); drawGrid(true);
+
+
     pass.setPipeline(meshPipe);
     for (const name of ['tree', 'bush', 'rock', 'grass', 'pole']) {
       const ib = instBufs[name]; if (!ib || !ib.count) continue;
@@ -1010,7 +1046,9 @@ applyQuality(quality);
     }
     for (const name of ['hull', 'cockpit', 'torso', 'head', 'paddle']) { pass.setVertexBuffer(0, kayakMeshes[name].vbuf); pass.setVertexBuffer(1, kayakInst[name]); pass.draw(kayakMeshes[name].count, 1); }
     pass.setVertexBuffer(0, armBuf); pass.setVertexBuffer(1, kayakInst.arms); pass.draw(armVertCount, 1);
-    pass.setPipeline(waterPipe); pass.setIndexBuffer(idxBuf, 'uint32'); pass.drawIndexed(viewCount, 1, viewFirst);
+    pass.setPipeline(waterPipe); 
+    drawGrid(false);
+
     if (river.pickups) {
       pass.setPipeline(pickupPipe);
       for (const kind of ['paddle', 'coin']) {

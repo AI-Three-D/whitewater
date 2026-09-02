@@ -9,7 +9,7 @@ export const SIM = {
 };
 
 export const RENDER = { sunDir: [0.35, 0.55, 0.75], fogColor: [0.72, 0.80, 0.90], fogDensity: 0.0024,
-  viewBehind: 30, viewAhead: 170, computeBehind: 60, computeAhead: 220 };
+  viewBehind: 20, viewAhead: 100, computeBehind: 25, computeAhead: 120 };
 
 export const PARTS = { count: 24000, kayakShare: 4000, ambient: 0.055 };
 
@@ -30,20 +30,34 @@ export const BIOMES = {
 
 export const QUALITY = {
   high: {
+    lod: null,
     grid: { W: 256, L: 1024, dx: 0.5 },
     particles: 24000, kayakShare: 4000,
     veg: { caps: { tree: 900, bush: 700, rock: 500, grass: 3500 }, attempts: 26000 },
     dprCap: 1.5, warmupSteps: 400, macCormack: 1, turbA: 0.6, simpleShading: false, substeps: 2,
+    lod: { near: 80, mid: 140 }, viewAhead: 170, viewBehind: 30, computeAhead: 220, computeBehind: 60, fogDensity: 0.0024
   },
-
   medium: {
+    lod: null,
     grid: { W: 216, L: 864, dx: 128 / 216 },
-    particles: 9000, kayakShare: 1800,
-    veg: { caps: { tree: 400, bush: 320, rock: 220, grass: 1300 }, attempts: 12000 },
+    particles: 3000, kayakShare: 1000,
+    veg: { caps: { tree: 400, bush: 300, rock: 250, grass: 2500 }, attempts: 12000 },
     dprCap: 1.0, warmupSteps: 300, macCormack: 1, turbA: 0.6, simpleShading: false, substeps: 2,
+    // computeAhead/Behind stay a healthy margin past viewAhead/Behind: rows beyond the compute
+    // window only hold the one-time load warmup state (no live turbulence/foam) until the moving
+    // window reaches them, so a view range that outruns compute reads as dead, frozen water.
+    lod: { near: 60, mid: 110 }, viewAhead: 150, viewBehind: 25, computeAhead: 180, computeBehind: 45, fogDensity: 0.0028,
+  },
+  low: {
+    lod: { near: 45, mid: 100 },
+    grid: { W: 216, L: 864, dx: 128 / 216 },
+    particles: 800, kayakShare: 400,
+    veg: { caps: { tree: 100, bush: 80, rock: 80, grass: 500 }, attempts: 12000 },
+    dprCap: 0.75, warmupSteps: 300, macCormack: 1, turbA: 0.6, simpleShading: false, substeps: 2,
+    lod: { near: 40, mid:  80 }, viewAhead: 120, viewBehind: 20, computeAhead: 140, computeBehind: 35, fogDensity: 0.0040
   },
 };
-export const QUALITY_LEVELS = ['high', 'medium'];
+export const QUALITY_LEVELS = ['high', 'medium', 'low'];
 
 export const KAYAK = {
   mass: 95,
