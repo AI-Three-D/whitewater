@@ -598,6 +598,12 @@ fn litMesh(in: MVOut) -> vec3f {
   lit = applyFog(lit, length(in.wp - C.camPos.xyz));
   return vec4f(lit, in.a);
 }
+  // obstacles: ordinary solid-mesh lighting (not the pickups' glow) but honouring the instance
+// tint's alpha, so one can sink under the surface and fade out at the same time
+@fragment fn fsMeshAlpha(in: MVOut) -> @location(0) vec4f {
+  if (in.a <= 0.003) { discard; }
+  return vec4f(litMesh(in), in.a);
+}
 `;
 
 export const WGSL_PART_DRAW = WGSL_RENDER_COMMON + /* wgsl */`

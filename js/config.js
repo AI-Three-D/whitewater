@@ -147,10 +147,9 @@ export const RIVERS = [
     meander: [[18, 170], [6, 61]], depth: 1.6, rocks: 10, rockR: [0.8, 2.0], emergent: 0.3, ledges: [],
     constrictions: 0, valleyH: 12, valleyScale: 70, seed: 11, len: 350,
     waterTint: [0.02, 0.17, 0.06], waterClarity: 1.0,   // emerald
-    // wide (24 m), slow and shallow-graded — the one river roomy enough to carry every log size at
-    // once, so it's the test bed. Counts are per 100 m of playable length, i.e. ~26 branches,
-    // ~14 medium logs and ~7 full trunks over its 350 m.
-    obstacles: { log: { small: 9, medium: 5, large: 2.5 } },
+    // wide (24 m), slow and shallow-graded — the one river roomy enough for full-length trunks, so
+    // it's the test bed. Counts are per 100 m of river swept by the spawn horizon.
+    obstacles: { log: { medium: 4, large: 2 } },
     forks: [{ startZ: 70, mergeZ: 83, splitLen: 22, mergeLen: 22, separation: 20, widthScale: 0.75, shares: [0.55, 0.45] }],
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 31 } },
 
@@ -201,7 +200,10 @@ export const RIVERS = [
     meander: [[26, 110], [8, 45]], depth: 1.4, rocks: 120, rockR: [0.9, 2.8], emergent: 0.55,
     ledges: [[120, 0.8], [210, 1.0], [330, 1.2], [440, 0.9]], constrictions: 4, valleyH: 42, valleyScale: 60, seed: 37, len: 475,
     biome: 'glacier', waterTint: [0.10, 0.20, 0.28], waterClarity: 3.0,   // pale, near-white glacial melt, steep peaks
-
+// glacier theme, but only 11 m wide with 120 boulders — a default 4-8 m berg will very likely
+// wedge and close the channel. Try floes alone first, or shrink `large` per river:
+//   obstacles: { ice: { medium: 6, large: { per100m: 1, len: [3, 4.5], rad: [1.0, 1.4] } }, max: 10 },
+// obstacles: { ice: { medium: 6 } },
     boulderIslands: [{ z: 250, len: 10, widthFrac: 0.65, bias: -0.15 }],
     waterfalls: [{ z: 320, drop: 4.0, len: 5 }],
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 33 } },
@@ -317,54 +319,70 @@ export const RUCKSACK = {
 // decides what it looks like, how big it is and what it weighs. Any river can carry any subset
 // of kinds and classes — see RIVERS[].obstacles.
 //
-//   small  — hitK 0: never touches the boat at all. Floating branches / brash ice: they drift,
-//            rotate, ground out on rocks and bump each other, but the kayak goes straight through.
 //   medium — a fraction of a rock's contact stiffness plus some upward lift, so a paddler rides
-//            over it or shoves it aside with a noticeable bump instead of being stopped.
-//   large  — full KAYAK.collK stiffness, i.e. exactly as solid as the bed: a real wall.
+//            over it or shoves it aside with a bump instead of being stopped
+//   large  — full KAYAK.collK stiffness, i.e. exactly as solid as the bed: a real wall
 //
-// Physics: every obstacle is a floating capsule (long axis, circular-ish cross-section) sampled
-// at `samples` points along its length. Each sample is dragged toward the locally simulated water
-// velocity, with much more drag across the axis than along it — that anisotropy in a sheared
-// river is what makes a long trunk swing round and line itself up with the current, and what
-// makes a trunk pinned on a rock pivot instead of sliding off. Where the local depth is less
-// than the obstacle's draft it grounds: pushed downhill by the bed slope and heavily damped, so
-// logs really do beach on bars and jam on emergent boulders.
+// Population: obstacles are never placed where the player could watch them appear. A spawn
+// horizon is swept `spawnAhead` metres downstream of the boat and every new metre of river it
+// uncovers is seeded at the river's configured density, so by the time anything comes into view
+// it has been floating there for a while. They leave the same way — well behind the boat, by
+// sinking under the surface while fading out, never by blinking off.
+//
+// Physics: every obstacle is a floating capsule sampled at `samples` points along its length.
+// Each sample is dragged toward the locally simulated water velocity, with much more drag across
+// the axis than along it — that anisotropy in a sheared river is what swings a trunk round until
+// it points downstream, and what makes one pinned on a boulder pivot instead of sliding off.
+// Where the local depth is less than the obstacle's draft it grounds: pushed downhill by the bed
+// slope and heavily damped, so logs beach on bars and jam on emergent rocks.
 export const OBSTACLES = {
-  enabled: true,                    // master switch, handy when debugging something else
-  substeps: 2,                      // physics substeps per rendered frame
-  simAhead: 130, simBehind: 45,     // only obstacles this close to the boat are simulated [m]
+  enabled: true,
+  // ---- population ----
+  maxAlive: 18,        // hard cap on obstacles in existence at once (per river: obstacles.max)
+  spawnAhead: 210,     // metres downstream of the boat where new ones are created. Keep this
+                       // above every QUALITY[*].viewAhead (170 / 150 / 120) or they pop into view.
+  despawnBehind: 60,   // metres behind the boat at which one starts its sink-and-fade exit.
+                       // Drop to ~20 if you want to watch the sink happen on screen.
+  sinkTime: 2.5,       // seconds the exit takes
+  sinkDepth: 3.0,      // how far under it slides while fading, in multiples of its own radius
+  drawFade: 40,        // metres of alpha ramp at the edge of the terrain draw range, so nothing
+                       // ever blinks on at the fog wall (obstacles past it aren't drawn at all —
+                       // there is no water under them out there)
+  // ---- physics ----
+  substeps: 2,
   dragAxial: 0.5, dragLat: 2.2,     // [1/s] velocity relaxation toward the current along / across
   yawDrag: 0.9,                     // [1/s] spin damping
   groundPush: 45, groundFric: 6,    // grounded-out behaviour (see above)
   pairK: 70, pairDamp: 10,          // obstacle-vs-obstacle contact — this is what builds log jams
   vmax: 8, wmax: 2.5,               // sanity clamps [m/s], [rad/s]
   hullR: 0.34,                      // kayak hull radius used by the contact test [m]
-  bob: 0.05, bobSpeed: 1.6,         // gentle vertical bob while afloat
+  // ---- presentation ----
+  ySmooth: 6,          // [1/s] low-pass on the drawn waterline height (see writeObstacleInstances)
+  bob: 0.04, bobSpeed: 1.6,
+  stubsMax: 3,         // broken branch stubs per log. Purely visual: they are not in the collision
+  stubLen: [0.15, 0.5],// shape at all, so they stay short enough that that can't look wrong.
   classes: {
-    small:  { hitK: 0,    lift: 0,    samples: 3 },
-    medium: { hitK: 0.16, lift: 0.45, samples: 4 },
-    large:  { hitK: 1.0,  lift: 0.05, samples: 6 },
+    medium: { hitK: 0.16, bumpLift: 0.45, samples: 4 },
+    large:  { hitK: 1.0,  bumpLift: 0.05, samples: 6 },
   },
-  // Per kind: `density` kg/m³, `volFactor` the cross-section area of that kind's mesh in units of
-  // rad² (so mass = density · volFactor · rad² · radY · len — a 9 m × 1 m trunk comes out at
-  // ~3.5 t, a 6 m berg at ~39 t, a floating branch at ~45 kg). `draftFrac` is how deep it sits as
-  // a fraction of its half-thickness, and therefore how shallow the water has to get before it
-  // grounds. `radY` flattens the cross-section per instance — the main shape variation knob.
+  // Per kind: `density` kg/m³, `volFactor` the mesh's cross-section area in units of rad² (mass =
+  // density · volFactor · rad² · radY · len — a 9 m × 1 m trunk lands at ~3.5 t, a 6 m berg at
+  // ~39 t). `draftFrac` is how deep it floats as a fraction of its half-thickness, and therefore
+  // how shallow the water must get before it grounds; `freeboardFrac` lifts the drawn mesh so the
+  // right amount of it stands clear of the water (the ice meshes already sit low in their own
+  // local frame, the log meshes are centred, hence the different values).
   kinds: {
     log: {
-      label: 'driftwood', density: 650, volFactor: 2.6, draftFrac: 1.0, roll: true,
-      tint: [1, 1, 1],
-      small:  { meshes: ['logSmall'],                 len: [1.2, 2.8], rad: [0.09, 0.16], radY: [0.85, 1.0] },
-      medium: { meshes: ['logMedium', 'logMediumB'],  len: [3.5, 6.0], rad: [0.20, 0.32], radY: [0.85, 1.0] },
-      large:  { meshes: ['logLarge', 'logLargeB'],    len: [7.0, 11.0], rad: [0.38, 0.62], radY: [0.85, 1.0] },
+      label: 'driftwood', density: 650, volFactor: 2.6, draftFrac: 0.7, freeboardFrac: 0.3,
+      roll: true, stubs: true, tint: [1, 1, 1],
+      medium: { meshes: ['logMedium', 'logMediumB'], len: [3.5, 6.0], rad: [0.20, 0.32] },
+      large:  { meshes: ['logLarge', 'logLargeB'],   len: [7.0, 11.0], rad: [0.38, 0.62] },
     },
     ice: {
-      label: 'drift ice', density: 900, volFactor: 1.35, draftFrac: 0.75, roll: false,
-      tint: [1, 1, 1],
-      small:  { meshes: ['iceSmall'],                 len: [0.8, 2.2], rad: [0.45, 1.0], radY: [0.45, 0.8] },
-      medium: { meshes: ['iceMedium', 'iceMediumB'],  len: [1.8, 3.2], rad: [0.80, 1.4], radY: [0.45, 0.7] },
-      large:  { meshes: ['iceberg', 'icebergB'],      len: [4.0, 8.0], rad: [1.60, 2.6], radY: [0.80, 1.4] },
+      label: 'drift ice', density: 900, volFactor: 1.35, draftFrac: 0.7, freeboardFrac: 0.0,
+      roll: false, stubs: false, tint: [1, 1, 1],
+      medium: { meshes: ['iceMedium', 'iceMediumB'], len: [1.8, 3.2], rad: [0.80, 1.4], radY: [0.45, 0.7] },
+      large:  { meshes: ['iceberg', 'icebergB'],     len: [4.0, 8.0], rad: [1.60, 2.6], radY: [0.80, 1.4] },
     },
   },
 };
