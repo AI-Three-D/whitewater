@@ -143,13 +143,18 @@ KAYAK.formStab = 2 * KAYAK.buoyK * KAYAK.buoySide * KAYAK.buoySide;
 
 export const RIVERS = [
   // ---------- easy ----------
-
   { name: 'Meadow Run', cls: 'Class II · easy', tier: 'easy', slope: 0.0018, manning: 0.032, halfW: 12, widthVar: 0.25,
     meander: [[18, 170], [6, 61]], depth: 1.6, rocks: 10, rockR: [0.8, 2.0], emergent: 0.3, ledges: [],
     constrictions: 0, valleyH: 12, valleyScale: 70, seed: 11, len: 350,
     waterTint: [0.02, 0.17, 0.06], waterClarity: 1.0,   // emerald
+    // wide (24 m), slow and shallow-graded — the one river roomy enough to carry every log size at
+    // once, so it's the test bed. Counts are per 100 m of playable length, i.e. ~26 branches,
+    // ~14 medium logs and ~7 full trunks over its 350 m.
+    obstacles: { log: { small: 9, medium: 5, large: 2.5 } },
     forks: [{ startZ: 70, mergeZ: 83, splitLen: 22, mergeLen: 22, separation: 20, widthScale: 0.75, shares: [0.55, 0.45] }],
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 31 } },
+
+
   { name: 'Willow Bend', cls: 'Class II · easy', tier: 'easy', slope: 0.002, manning: 0.031, halfW: 11, widthVar: 0.3,
     meander: [[24, 190], [5, 48]], depth: 1.5, rocks: 12, rockR: [0.8, 1.9], emergent: 0.3, ledges: [],
     pond: { z: 70, len: 80 },
@@ -196,6 +201,7 @@ export const RIVERS = [
     meander: [[26, 110], [8, 45]], depth: 1.4, rocks: 120, rockR: [0.9, 2.8], emergent: 0.55,
     ledges: [[120, 0.8], [210, 1.0], [330, 1.2], [440, 0.9]], constrictions: 4, valleyH: 42, valleyScale: 60, seed: 37, len: 475,
     biome: 'glacier', waterTint: [0.10, 0.20, 0.28], waterClarity: 3.0,   // pale, near-white glacial melt, steep peaks
+
     boulderIslands: [{ z: 250, len: 10, widthFrac: 0.65, bias: -0.15 }],
     waterfalls: [{ z: 320, drop: 4.0, len: 5 }],
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 33 } },
@@ -305,6 +311,62 @@ export const RUCKSACK = {
                       // a light bag genuinely does drift a bit faster than the bulk flow, and it
                       // keeps the rucksack from exactly pacing an idle kayak forever
   drag: 2.2, checkInterval: 4, stuckDist: 0.6, nudgeSpeed: 0.8,
+};
+// ---------- floating obstacles: drifting logs and ice ----------
+// A "size class" decides only how an obstacle behaves against the kayak; a "kind" (log / ice)
+// decides what it looks like, how big it is and what it weighs. Any river can carry any subset
+// of kinds and classes — see RIVERS[].obstacles.
+//
+//   small  — hitK 0: never touches the boat at all. Floating branches / brash ice: they drift,
+//            rotate, ground out on rocks and bump each other, but the kayak goes straight through.
+//   medium — a fraction of a rock's contact stiffness plus some upward lift, so a paddler rides
+//            over it or shoves it aside with a noticeable bump instead of being stopped.
+//   large  — full KAYAK.collK stiffness, i.e. exactly as solid as the bed: a real wall.
+//
+// Physics: every obstacle is a floating capsule (long axis, circular-ish cross-section) sampled
+// at `samples` points along its length. Each sample is dragged toward the locally simulated water
+// velocity, with much more drag across the axis than along it — that anisotropy in a sheared
+// river is what makes a long trunk swing round and line itself up with the current, and what
+// makes a trunk pinned on a rock pivot instead of sliding off. Where the local depth is less
+// than the obstacle's draft it grounds: pushed downhill by the bed slope and heavily damped, so
+// logs really do beach on bars and jam on emergent boulders.
+export const OBSTACLES = {
+  enabled: true,                    // master switch, handy when debugging something else
+  substeps: 2,                      // physics substeps per rendered frame
+  simAhead: 130, simBehind: 45,     // only obstacles this close to the boat are simulated [m]
+  dragAxial: 0.5, dragLat: 2.2,     // [1/s] velocity relaxation toward the current along / across
+  yawDrag: 0.9,                     // [1/s] spin damping
+  groundPush: 45, groundFric: 6,    // grounded-out behaviour (see above)
+  pairK: 70, pairDamp: 10,          // obstacle-vs-obstacle contact — this is what builds log jams
+  vmax: 8, wmax: 2.5,               // sanity clamps [m/s], [rad/s]
+  hullR: 0.34,                      // kayak hull radius used by the contact test [m]
+  bob: 0.05, bobSpeed: 1.6,         // gentle vertical bob while afloat
+  classes: {
+    small:  { hitK: 0,    lift: 0,    samples: 3 },
+    medium: { hitK: 0.16, lift: 0.45, samples: 4 },
+    large:  { hitK: 1.0,  lift: 0.05, samples: 6 },
+  },
+  // Per kind: `density` kg/m³, `volFactor` the cross-section area of that kind's mesh in units of
+  // rad² (so mass = density · volFactor · rad² · radY · len — a 9 m × 1 m trunk comes out at
+  // ~3.5 t, a 6 m berg at ~39 t, a floating branch at ~45 kg). `draftFrac` is how deep it sits as
+  // a fraction of its half-thickness, and therefore how shallow the water has to get before it
+  // grounds. `radY` flattens the cross-section per instance — the main shape variation knob.
+  kinds: {
+    log: {
+      label: 'driftwood', density: 650, volFactor: 2.6, draftFrac: 1.0, roll: true,
+      tint: [1, 1, 1],
+      small:  { meshes: ['logSmall'],                 len: [1.2, 2.8], rad: [0.09, 0.16], radY: [0.85, 1.0] },
+      medium: { meshes: ['logMedium', 'logMediumB'],  len: [3.5, 6.0], rad: [0.20, 0.32], radY: [0.85, 1.0] },
+      large:  { meshes: ['logLarge', 'logLargeB'],    len: [7.0, 11.0], rad: [0.38, 0.62], radY: [0.85, 1.0] },
+    },
+    ice: {
+      label: 'drift ice', density: 900, volFactor: 1.35, draftFrac: 0.75, roll: false,
+      tint: [1, 1, 1],
+      small:  { meshes: ['iceSmall'],                 len: [0.8, 2.2], rad: [0.45, 1.0], radY: [0.45, 0.8] },
+      medium: { meshes: ['iceMedium', 'iceMediumB'],  len: [1.8, 3.2], rad: [0.80, 1.4], radY: [0.45, 0.7] },
+      large:  { meshes: ['iceberg', 'icebergB'],      len: [4.0, 8.0], rad: [1.60, 2.6], radY: [0.80, 1.4] },
+    },
+  },
 };
 
 export const CHARACTERS = {
