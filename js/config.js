@@ -14,7 +14,7 @@ export const PARTS = { count: 24000, kayakShare: 4000, ambient: 0.055 };
 
 export const VEG = { caps: { tree: 900, bush: 700, rock: 500, grass: 3500 }, attempts: 26000 };
 
-export const BIOME_IDS = { alpine: 0, canyon: 1, marsh: 2, redwood: 3 };
+export const BIOME_IDS = { alpine: 0, canyon: 1, desert: 2, deciduous: 3, icy: 4, barren: 5 };
 const neutralBiome = { vegTint: { tree: [1, 1, 1], bush: [1, 1, 1], rock: [1, 1, 1], grass: [1, 1, 1] }, vegDensity: { tree: 1, bush: 1, rock: 1, grass: 1 } };
 export const BIOMES = {
   alpine: neutralBiome,
@@ -23,8 +23,26 @@ export const BIOMES = {
     vegTint: { tree: [1.05, 0.92, 0.72], bush: [1.12, 0.9, 0.55], rock: [1.2, 0.82, 0.68], grass: [1.2, 1.0, 0.5] },
     vegDensity: { tree: 0.32, bush: 0.7, rock: 1.7, grass: 0.45 },
   },
-  marsh: neutralBiome,
-  redwood: neutralBiome,
+  // hot, sparse desert: sandy scrub, almost no trees, pale sun-bleached rock
+  desert: {
+    vegTint: { tree: [1.1, 0.85, 0.5], bush: [1.15, 0.85, 0.45], rock: [1.15, 0.95, 0.75], grass: [1.3, 1.05, 0.4] },
+    vegDensity: { tree: 0.08, bush: 0.5, rock: 1.4, grass: 0.2 },
+  },
+  // lush deciduous woodland: dense leafy trees and undergrowth, warm greens
+  deciduous: {
+    vegTint: { tree: [0.85, 1.08, 0.65], bush: [0.9, 1.1, 0.6], rock: [0.95, 1.0, 0.85], grass: [0.85, 1.15, 0.55] },
+    vegDensity: { tree: 1.6, bush: 1.5, rock: 0.8, grass: 1.3 },
+  },
+  // icy alpine: bare rock and snow, vegetation nearly gone, cold blue-white tint
+  icy: {
+    vegTint: { tree: [0.8, 0.9, 1.05], bush: [0.8, 0.9, 1.05], rock: [0.9, 0.95, 1.08], grass: [0.85, 0.95, 1.05] },
+    vegDensity: { tree: 0.04, bush: 0.1, rock: 1.6, grass: 0.05 },
+  },
+  // barren rock: scoured, dusty grey-brown, almost nothing growing
+  barren: {
+    vegTint: { tree: [0.9, 0.85, 0.78], bush: [0.9, 0.85, 0.78], rock: [0.85, 0.83, 0.8], grass: [0.95, 0.88, 0.7] },
+    vegDensity: { tree: 0.02, bush: 0.15, rock: 1.8, grass: 0.08 },
+  },
 };
 
 export const QUALITY = {
@@ -108,10 +126,12 @@ export const RIVERS = [
   { name: 'Cedar Chute', cls: 'Class III · medium', tier: 'medium', slope: 0.012, manning: 0.034, halfW: 7, widthVar: 0.4,
     meander: [[20, 120], [6, 50]], depth: 1.5, rocks: 55, rockR: [0.9, 2.4], emergent: 0.45,
     ledges: [[70, 0.6], [130, 0.6], [190, 0.8]], constrictions: 4, valleyH: 20, valleyScale: 50, seed: 24, len: 240,
+    biome: 'deciduous', waterTint: [0.03, 0.14, 0.05], waterClarity: 1.1,   // leafy green, dappled
     lanes: { count: 2, amp: 0.18, wander: 3, seedOffset: 36 } },
   { name: 'Split Rock', cls: 'Class III · medium', tier: 'medium', slope: 0.014, manning: 0.036, halfW: 9, widthVar: 0.3,
     meander: [[18, 160], [9, 62]], depth: 1.6, rocks: 60, rockR: [1.0, 2.8], emergent: 0.55,
     ledges: [[200, 0.6], [360, 0.7]], constrictions: 2, valleyH: 16, valleyScale: 60, seed: 25, len: 410,
+    biome: 'desert', waterTint: [0.14, 0.11, 0.05], waterClarity: 0.5, extraKind: 'diamond',   // murky sandy
     forks: [{ startZ: 150, mergeZ: 200, splitLen: 25, mergeLen: 25, separation: 22, widthScale: 0.7, shares: [0.6, 0.4] }],
     boulderIslands: [{ z: 300, len: 9, widthFrac: 0.6, bias: 0.2 }],
     lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 37 } },
@@ -119,6 +139,7 @@ export const RIVERS = [
   { name: 'The Gorge', cls: 'Class IV · hard', tier: 'hard', slope: 0.03, manning: 0.04, halfW: 5.5, widthVar: 0.4,
     meander: [[26, 110], [8, 45]], depth: 1.4, rocks: 120, rockR: [0.9, 2.8], emergent: 0.55,
     ledges: [[120, 0.8], [210, 1.0], [330, 1.2], [440, 0.9]], constrictions: 4, valleyH: 30, valleyScale: 75, seed: 37, len: 475,
+    biome: 'icy', waterTint: [0.05, 0.12, 0.20], waterClarity: 2.8,   // pale glacial blue, very clear
     boulderIslands: [{ z: 250, len: 10, widthFrac: 0.65, bias: -0.15 }],
     waterfalls: [{ z: 320, drop: 4.0, len: 5 }],
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 33 } },
@@ -130,10 +151,32 @@ export const RIVERS = [
   { name: 'Thunder Gap', cls: 'Class IV · hard', tier: 'hard', slope: 0.035, manning: 0.041, halfW: 5, widthVar: 0.45,
     meander: [[28, 100], [9, 42]], depth: 1.5, rocks: 130, rockR: [1.0, 3.0], emergent: 0.6,
     ledges: [[140, 1.0], [260, 1.2], [400, 1.0]], constrictions: 5, valleyH: 38, valleyScale: 70, seed: 39, len: 440,
+    biome: 'barren', waterTint: [0.09, 0.09, 0.08], waterClarity: 0.7,   // scoured grey-brown
     forks: [{ startZ: 190, mergeZ: 230, splitLen: 20, mergeLen: 20, separation: 18, widthScale: 0.7, shares: [0.45, 0.55] }],
     boulderIslands: [{ z: 330, len: 12, widthFrac: 0.7, bias: 0.1 }],
     waterfalls: [{ z: 370, drop: 5.0, len: 6 }],
     lanes: { count: 3, amp: 0.22, wander: 4, seedOffset: 39 } },
+];
+
+// hidden, lockable rivers — one per tier, not shown in the normal list (see RIVERS_HIDDEN below).
+// Unlocked by finding that tier's map item (see COLLECTIBLES / profile.mapCarrier).
+export const RIVERS_HIDDEN = [
+  { name: 'Silver Cache', cls: 'Class II · secret', tier: 'easy', slope: 0.002, manning: 0.032, halfW: 9, widthVar: 0.25,
+    meander: [[16, 160], [6, 58]], depth: 1.5, rocks: 14, rockR: [0.8, 2.0], emergent: 0.3, ledges: [],
+    biome: 'icy', waterTint: [0.05, 0.14, 0.22], waterClarity: 2.6,
+    constrictions: 1, valleyH: 10, valleyScale: 65, seed: 91, len: 300, hidden: true,
+    lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 91 } },
+  { name: 'Emerald Hollow', cls: 'Class III · secret', tier: 'medium', slope: 0.013, manning: 0.034, halfW: 8, widthVar: 0.35,
+    meander: [[20, 130], [7, 52]], depth: 1.5, rocks: 60, rockR: [0.9, 2.5], emergent: 0.5,
+    ledges: [[160, 0.6], [320, 0.7]], biome: 'deciduous', waterTint: [0.03, 0.15, 0.06], waterClarity: 1.2,
+    constrictions: 3, valleyH: 18, valleyScale: 55, seed: 92, len: 400, hidden: true,
+    lanes: { count: 3, amp: 0.16, wander: 3, seedOffset: 92 } },
+  { name: 'Obsidian Falls', cls: 'Class IV · secret', tier: 'hard', slope: 0.032, manning: 0.04, halfW: 5.5, widthVar: 0.4,
+    meander: [[24, 105], [8, 44]], depth: 1.5, rocks: 110, rockR: [0.9, 2.8], emergent: 0.55,
+    ledges: [[130, 0.9], [250, 1.1], [380, 1.0]], biome: 'barren', waterTint: [0.08, 0.08, 0.08], waterClarity: 0.6,
+    constrictions: 4, valleyH: 32, valleyScale: 70, seed: 93, len: 460, hidden: true,
+    waterfalls: [{ z: 300, drop: 4.5, len: 5 }],
+    lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 93 } },
 ];
 
 // tier-to-tier scale factor — everything (finish xp, pickup counts) grows by this ratio
@@ -163,6 +206,23 @@ export const PICKUPS = {
   fadeTime: 9.9,               // seconds from "seen up close" to gone — a brief harvesting window
   burstCount: 10,               // sparks spawned on pickup
   burstLife: 0.5,                 // seconds a burst spark lives
+};
+
+// varying collectible kinds. `type` picks which loot tally a pickup feeds when collected:
+// 'xp' → runLoot.paddles, 'currency' → runLoot.coins (scaled by `value`). A river can add one
+// extra kind on top of the default paddle/coin via RIVERS[].extraKind (see Split Rock).
+export const COLLECTIBLES = {
+  paddle: { mesh: 'paddle', type: 'xp', value: 1, color: [0.95, 0.82, 0.1] },
+  coin: { mesh: 'coin', type: 'currency', value: 1, color: [1.0, 0.86, 0.3] },
+  diamond: { mesh: 'diamond', type: 'currency', value: 3, color: [0.65, 0.92, 1.0] },
+};
+
+// the one-of-a-kind, per-tier "hidden map" pickup. One tier river is chosen at profile creation
+// (profile.mapCarrier[tier]) to carry it; it respawns at a fresh random spot on that river every
+// attempt until found, then never spawns again and unlocks that tier's RIVERS_HIDDEN entry.
+export const MAP_ITEM = {
+  mesh: 'map', color: [0.85, 0.72, 0.45], scale: 1.3, spinSpeed: 0.9,
+  hover: 0.7, collectRadius: 1.8,
 };
 
 export const CHARACTERS = {

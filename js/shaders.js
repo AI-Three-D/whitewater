@@ -360,12 +360,23 @@ struct TVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(
   return o;
 }
 // per-biome base palette for grass/dirt/rock/gravel — everything else (noise breakup, slope
-// blending, altitude scree, lighting) stays identical, only these anchor colours shift. biome 0
-// is the original look; 1 is the first new one (dry canyon: redder rock, sandier dirt, olive
-// scrub instead of lush grass); 2/3 are reserved slots, currently identical to 0.
+// blending, altitude scree, lighting) stays identical, only these anchor colours shift.
+// ids match BIOME_IDS in config.js: 0 alpine (default), 1 canyon, 2 desert, 3 deciduous, 4 icy, 5 barren.
 fn biomeColors(biome: i32) -> array<vec3f, 4> {
-  if (biome == 1) {
+  if (biome == 1) {          // dry canyon: redder rock, sandier dirt, olive scrub instead of lush grass
     return array<vec3f, 4>(vec3f(0.42, 0.38, 0.15), vec3f(0.55, 0.38, 0.22), vec3f(0.53, 0.35, 0.28), vec3f(0.58, 0.42, 0.27));
+  }
+  if (biome == 2) {          // desert: sun-bleached sand and pale sandstone, sparse dry scrub
+    return array<vec3f, 4>(vec3f(0.55, 0.48, 0.22), vec3f(0.62, 0.48, 0.28), vec3f(0.62, 0.52, 0.40), vec3f(0.58, 0.50, 0.35));
+  }
+  if (biome == 3) {          // deciduous: lush leafy green, rich forest-floor dirt
+    return array<vec3f, 4>(vec3f(0.18, 0.42, 0.13), vec3f(0.30, 0.23, 0.14), vec3f(0.42, 0.42, 0.40), vec3f(0.36, 0.31, 0.21));
+  }
+  if (biome == 4) {          // icy: frosted rock and scree, near-white snow patches, cold blue cast
+    return array<vec3f, 4>(vec3f(0.58, 0.62, 0.60), vec3f(0.55, 0.56, 0.59), vec3f(0.76, 0.79, 0.83), vec3f(0.68, 0.71, 0.75));
+  }
+  if (biome == 5) {          // barren: scoured grey-brown rock, almost nothing growing
+    return array<vec3f, 4>(vec3f(0.45, 0.42, 0.32), vec3f(0.40, 0.34, 0.26), vec3f(0.38, 0.36, 0.34), vec3f(0.42, 0.38, 0.32));
   }
   return array<vec3f, 4>(vec3f(0.24, 0.40, 0.13), vec3f(0.40, 0.32, 0.20), vec3f(0.45, 0.44, 0.42), vec3f(0.48, 0.40, 0.30));
 }

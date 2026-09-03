@@ -88,6 +88,24 @@ export function buildSparkMesh() {
   addSphere(mb, [0, 0, 0], [1, 1, 1], 4, 6, [1, 1, 1]);
   return mb;
 }
+// small faceted gem — a bipyramid (two stacked pyramid caps) around the vertical axis
+export function buildDiamondMesh() {
+  const mb = new MeshBuilder(), n = 6, col = [0.65, 0.92, 1.0];
+  const ring = a => [Math.cos(a) * 0.22, 0, Math.sin(a) * 0.22];
+  for (let i = 0; i < n; i++) {
+    const a0 = 6.2832 * i / n, a1 = 6.2832 * (i + 1) / n, p0 = ring(a0), p1 = ring(a1);
+    mb.tri([0, 0.32, 0], p0, p1, col);
+    mb.tri([0, -0.18, 0], p1, p0, col);
+  }
+  return mb;
+}
+// rolled scroll/map — a short parchment-tinted cylinder with a darker ribbon band round the middle
+export function buildMapMesh() {
+  const mb = new MeshBuilder(), parchment = [0.85, 0.72, 0.45], ribbon = [0.55, 0.32, 0.18];
+  addCylinder(mb, [-0.32, 0, 0], [0.32, 0, 0], 0.16, 0.16, 12, parchment);
+  addCylinder(mb, [-0.04, 0, 0], [0.04, 0, 0], 0.175, 0.175, 12, ribbon);
+  return mb;
+}
 export function buildVegetationMeshes() {
   const M = {};
   const tree = new MeshBuilder();

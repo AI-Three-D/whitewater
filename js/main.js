@@ -1,14 +1,14 @@
 'use strict';
-import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, TIERS, PICKUPS, CHARACTERS, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
+import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, MAP_ITEM, CHARACTERS, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
 
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW } from './shaders.js';
 import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec,
          mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, mat4Compose, mat4TRS, mat4Transform,
          mulberry32, clamp } from './math.js';
 import { generateRiver, nearestChan } from './river.js';
-import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh } from './meshes.js';
+import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh } from './meshes.js';
 import { loadProfile, newProfile, clearProfile, character, canRaise, anyRaisable,
-         awardRun, spendPoint, discardPending, pointsForLevel } from './progression.js';
+         awardRun, spendPoint, discardPending, pointsForLevel, unlockHidden } from './progression.js';
 
 const showErr = t => { const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = t; };
 addEventListener('error', e => showErr('Script error: ' + e.message + ' (line ' + e.lineno + ')'));
@@ -204,8 +204,11 @@ applyQuality(quality);
     return { vbuf, count: mb.count }; };
   const vegMeshes = {}; for (const [k, mb] of Object.entries(buildVegetationMeshes())) vegMeshes[k] = gpuMesh(mb);
   const kayakMeshes = {}; for (const [k, mb] of Object.entries(buildKayakParts())) kayakMeshes[k] = gpuMesh(mb);
-  const pickupMeshes = { paddle: kayakMeshes.paddle, coin: gpuMesh(buildCoinMesh()) };
-  const pickupInstBufs = { paddle: null, coin: null };
+  const pickupMeshes = { paddle: kayakMeshes.paddle, coin: gpuMesh(buildCoinMesh()), diamond: gpuMesh(buildDiamondMesh()), map: gpuMesh(buildMapMesh()) };
+  const pickupInstBufs = { paddle: null, coin: null, diamond: null };
+  // the map pickup is at most one instance ever, on any river, so its buffer never needs
+  // resizing — allocate it once here instead of in placePickups()'s per-river rebuild
+  pickupInstBufs.map = mkBuf(80, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
   // small spark burst shown when a paddle/coin is collected
   const sparkMesh = gpuMesh(buildSparkMesh());
   const SPARK_MAX = 160;
@@ -265,7 +268,8 @@ applyQuality(quality);
   //  STATE & PROGRESSION
   // ============================================================================
   let river = null, simTime = 0, gameState = 'menu', runTime = 0, camMode = 0, dbgMode = 0, fps = 60, warmingUp = false;
-  let runLoot = { paddles: 0, coins: 0 };
+  let runLoot = { paddles: 0, coins: 0, coinValue: 0 };
+  let mapFoundUntil = 0;   // simTime until which the "hidden map found" HUD line shows
   let profile = loadProfile();           // null → character selection
   const input = { fwd: false, back: false, left: false, right: false, leanL: false, leanR: false };
   const keymap = { ArrowUp: 'fwd', ArrowDown: 'back', ArrowLeft: 'left', ArrowRight: 'right', KeyA: 'leanL', KeyD: 'leanR', KeyW: 'fwd', KeyS: 'back' };
@@ -409,6 +413,22 @@ applyQuality(quality);
           <h3>${R.name}</h3><small>gradient ${(R.slope * 100).toFixed(1)} % · ${R.rocks} boulders · ${R.ledges.length} ledges${extra}</small>
           ${best ? `<br><span class="best">best ${best.toFixed(1)} s</span>` : ''}`;
         d.onclick = () => startRun(R);
+        row.appendChild(d);
+      }
+      // hidden per-tier secret river — greyed out and unclickable until its map item is found
+      const hiddenR = RIVERS_HIDDEN.find(r => r.tier === tier.id);
+      if (hiddenR) {
+        const unlocked = profile.unlockedHidden[tier.id];
+        const d = document.createElement('div'); d.className = unlocked ? 'riv' : 'riv locked';
+        if (unlocked) {
+          const best = profile.best[hiddenR.name];
+          d.innerHTML = `${artSlot('riv-thumb', hiddenR.name + ' art')}
+            <h3>${hiddenR.name}</h3><small>gradient ${(hiddenR.slope * 100).toFixed(1)} % · ${hiddenR.rocks} boulders · ${hiddenR.ledges.length} ledges</small>
+            ${best ? `<br><span class="best">best ${best.toFixed(1)} s</span>` : ''}`;
+          d.onclick = () => startRun(hiddenR);
+        } else {
+          d.innerHTML = `${artSlot('riv-thumb', '?')}<h3>???</h3><small>find the hidden map on this tier to unlock</small>`;
+        }
         row.appendChild(d);
       }
       rl.appendChild(row);
@@ -717,18 +737,34 @@ applyQuality(quality);
       list.forEach((it, i) => { it.floating = flags[i]; });
       return list;
     };
+    river.pickupKinds = ['paddle', 'coin', ...(river.R.extraKind ? [river.R.extraKind] : [])];
     river.pickups = { paddle: mkList(201), coin: mkList(301) };
-    for (const kind of ['paddle', 'coin']) {
+    if (river.R.extraKind) river.pickups[river.R.extraKind] = mkList(401);
+    for (const kind of river.pickupKinds) {
       if (pickupInstBufs[kind]) pickupInstBufs[kind].destroy();
       pickupInstBufs[kind] = mkBuf(Math.max(80, river.pickups[kind].length * 80), GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
     }
   }
+  // the tier's one-of-a-kind hidden-map pickup: only exists on that tier's predetermined carrier
+  // river (profile.mapCarrier), and re-rolls to a fresh random spot — via Math.random(), not the
+  // river's seed — every time this function runs, i.e. every attempt, until it's found for good.
+  function placeMapItem() {
+    const tier = river.R.tier;
+    const isCarrier = !river.R.hidden && profile.mapCarrier[tier] === river.R.name && !profile.unlockedHidden[tier];
+    if (!isCarrier) { river.pickups.map = []; return; }
+    const z = 45 + Math.random() * (river.finishZ - 65);
+    const j = clamp(Math.floor(z / dx), 0, L - 1), chans = river.rows[j];
+    const chan = chans[Math.floor(Math.random() * chans.length)];
+    const x = clamp(chan.c + (Math.random() * 1.4 - 0.7) * chan.hw, 1, W * dx - 1);
+    river.pickups.map = [{ x, z, floating: false, spinPh: Math.random() * 6.2832, bobPh: Math.random() * 6.2832, alive: true, collected: false, seenT: -1 }];
+  }
   // recompute pickup transforms/fade each frame and resolve collection against the paddler
   function updatePickups() {
     if (!river.pickups) return;
-    for (const kind of ['paddle', 'coin']) {
+    for (const kind of [...river.pickupKinds, 'map']) {
+      const isMap = kind === 'map';
       const list = river.pickups[kind], buf = pickupInstBufs[kind];
-      if (!list.length || !buf) continue;
+      if (!list || !list.length || !buf) continue;
       const data = new Float32Array(list.length * 20);
       list.forEach((it, n) => {
         let alpha = 0;
@@ -737,23 +773,37 @@ applyQuality(quality);
           const bob = it.floating ? PICKUPS.bobAmp * Math.sin(bobPhase) : 0;
 
           const jrow = clamp(Math.floor(it.z / dx), 0, L - 1);
-          const y = nearestChan(river.rows[jrow], it.x).eta + PICKUPS.hover + bob;
+          const y = nearestChan(river.rows[jrow], it.x).eta + (isMap ? MAP_ITEM.hover : PICKUPS.hover) + bob;
           const dist = Math.hypot(kayak.p[0] - it.x, kayak.p[2] - it.z);
-          if (it.seenT < 0 && dist < PICKUPS.proximityRadius) it.seenT = simTime;
-          if (it.seenT >= 0) {
-            const fadeT = simTime - it.seenT;
-            alpha = clamp(1 - fadeT / PICKUPS.fadeTime, 0, 1);
-            if (fadeT >= PICKUPS.fadeTime) it.alive = false;
-          } else alpha = 1;
-          const reachable = !it.floating || Math.sin(bobPhase) <= PICKUPS.reachBob;
-          if (it.alive && dist < PICKUPS.collectRadius && reachable) {
-            it.alive = false; it.collected = true; alpha = 0;
-            runLoot[kind === 'paddle' ? 'paddles' : 'coins']++;
-            spawnBurst(it.x, y, it.z, kind === 'paddle' ? [0.95, 0.82, 0.1] : [1.0, 0.86, 0.3]);
-            popLoot(kind);
+          // the map item is a rare key item — it stays fully visible/collectible for the whole
+          // run rather than fading like the regular scattered pickups do
+          if (isMap) alpha = 1;
+          else {
+            if (it.seenT < 0 && dist < PICKUPS.proximityRadius) it.seenT = simTime;
+            if (it.seenT >= 0) {
+              const fadeT = simTime - it.seenT;
+              alpha = clamp(1 - fadeT / PICKUPS.fadeTime, 0, 1);
+              if (fadeT >= PICKUPS.fadeTime) it.alive = false;
+            } else alpha = 1;
           }
-          const spin = simTime * PICKUPS.spinSpeed + it.spinPh;
-          const sc = kind === 'paddle' ? PICKUPS.paddleScale : 1;
+          const reachable = !it.floating || Math.sin(bobPhase) <= PICKUPS.reachBob;
+          const collectR = isMap ? MAP_ITEM.collectRadius : PICKUPS.collectRadius;
+          if (it.alive && dist < collectR && reachable) {
+            it.alive = false; it.collected = true; alpha = 0;
+            if (isMap) {
+              unlockHidden(profile, river.R.tier);
+              mapFoundUntil = simTime + 3.5;
+              spawnBurst(it.x, y, it.z, MAP_ITEM.color);
+            } else {
+              const C = COLLECTIBLES[kind], popAs = C.type === 'xp' ? 'paddle' : 'coin';
+              if (C.type === 'xp') runLoot.paddles++;
+              else { runLoot.coins++; runLoot.coinValue += C.value; }
+              spawnBurst(it.x, y, it.z, C.color);
+              popLoot(popAs);
+            }
+          }
+          const spin = simTime * (isMap ? MAP_ITEM.spinSpeed : PICKUPS.spinSpeed) + it.spinPh;
+          const sc = isMap ? MAP_ITEM.scale : kind === 'paddle' ? PICKUPS.paddleScale : 1;
           data.set(mat4TRS([it.x, y, it.z], spin, [sc, sc, sc]), n * 20);
         } else {
           data.set(mat4TRS([it.x, -1000, it.z], 0, [1, 1, 1]), n * 20);
@@ -789,8 +839,9 @@ applyQuality(quality);
       placeVegetation();
       placePickups();
     }
-    for (const kind of ['paddle', 'coin']) for (const it of river.pickups[kind]) { it.alive = true; it.collected = false; it.seenT = -1; }
-    runLoot = { paddles: 0, coins: 0 };
+    for (const kind of river.pickupKinds) for (const it of river.pickups[kind]) { it.alive = true; it.collected = false; it.seenT = -1; }
+    placeMapItem();   // re-rolled every attempt, not just on river regeneration
+    runLoot = { paddles: 0, coins: 0, coinValue: 0 };
     device.queue.writeBuffer(stateBufs[0], 0, river.state); device.queue.writeBuffer(kBufs[0], 0, river.kArr);
     device.queue.writeBuffer(partBuf, 0, new Float32Array(PARTS.count * 8));
     writeSimUniforms(0, 1);
@@ -946,10 +997,13 @@ applyQuality(quality);
     const c = character(profile);
     const dist = Math.max(0, kayak.p[2] - 15), total = river.finishZ - 15;
     if (river.pickups) {
-      pcountEl.innerHTML = `🛶 <b>${runLoot.paddles}</b>/${river.pickups.paddle.length}`;
-      ccountEl.innerHTML = `🪙 <b>${runLoot.coins}</b>/${river.pickups.coin.length}`;
+      const xpTotal = river.pickupKinds.filter(k => COLLECTIBLES[k].type === 'xp').reduce((s, k) => s + river.pickups[k].length, 0);
+      const currencyTotal = river.pickupKinds.filter(k => COLLECTIBLES[k].type === 'currency').reduce((s, k) => s + river.pickups[k].length, 0);
+      pcountEl.innerHTML = `🛶 <b>${runLoot.paddles}</b>/${xpTotal}`;
+      ccountEl.innerHTML = `🪙 <b>${runLoot.coins}</b>/${currencyTotal}`;
     }
-    hudEl.innerHTML = `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${profile.level}<br>speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · time <b>${runTime.toFixed(1)}</b> s`;
+    const mapMsg = simTime < mapFoundUntil ? '<br><b style="color:#ffe08a">🗺 Hidden map found!</b>' : '';
+    hudEl.innerHTML = `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${profile.level}<br>speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · time <b>${runTime.toFixed(1)}</b> s${mapMsg}`;
     stamFill.style.width = (100 * kayak.stamina / STAMINA.max) + '%';
     stamFill.className = kayak.tired ? 'tired' : '';
     stamTxt.textContent = kayak.tired ? 'TIRED — weak strokes' : 'stamina';
@@ -1066,9 +1120,9 @@ applyQuality(quality);
 
     if (river.pickups) {
       pass.setPipeline(pickupPipe);
-      for (const kind of ['paddle', 'coin']) {
+      for (const kind of [...river.pickupKinds, 'map']) {
         const list = river.pickups[kind], mesh = pickupMeshes[kind], ib = pickupInstBufs[kind];
-        if (!list.length || !ib) continue;
+        if (!list || !list.length || !ib) continue;
         pass.setVertexBuffer(0, mesh.vbuf); pass.setVertexBuffer(1, ib); pass.draw(mesh.count, list.length);
       }
       if (sparks.length) { pass.setVertexBuffer(0, sparkMesh.vbuf); pass.setVertexBuffer(1, sparkBuf); pass.draw(sparkMesh.count, sparks.length); }

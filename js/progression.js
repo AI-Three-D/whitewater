@@ -1,4 +1,4 @@
-import { CHARACTERS, TIER_POINTS, PICKUPS } from './config.js';
+import { CHARACTERS, TIER_POINTS, PICKUPS, RIVERS, TIERS } from './config.js';
 
 const KEY = 'whitewater.save.v1';
 
@@ -7,11 +7,25 @@ const KEY = 'whitewater.save.v1';
  *  but not everyone harvests every pickup, so the curve only scales 5x to compensate.) */
 export const pointsForLevel = level => 5 * 2 ** level;
 
+// one river per tier, randomly chosen to carry that tier's hidden-map pickup — decided once,
+// at profile creation, and kept for the life of the save (see profile.mapCarrier).
+function pickCarriers() {
+  const carriers = {};
+  for (const tier of TIERS) {
+    const pool = RIVERS.filter(r => r.tier === tier.id && !r.hidden);
+    carriers[tier.id] = pool[Math.floor(Math.random() * pool.length)].name;
+  }
+  return carriers;
+}
+const freshUnlocks = () => Object.fromEntries(TIERS.map(t => [t.id, false]));
+
 export function loadProfile() {
   try {
     const p = JSON.parse(localStorage.getItem(KEY));
     if (p && CHARACTERS[p.charId] && typeof p.level === 'number') {
       if (typeof p.coins !== 'number') p.coins = 0;   // upgrade older saves
+      if (!p.mapCarrier) p.mapCarrier = pickCarriers();
+      if (!p.unlockedHidden) p.unlockedHidden = freshUnlocks();
       return p;
     }
   } catch (_) { /* corrupt save → ignore */ }
@@ -22,10 +36,13 @@ export function clearProfile() { localStorage.removeItem(KEY); }
 
 export function newProfile(charId) {
   const c = CHARACTERS[charId];
-  const p = { charId, level: 0, points: 0, pending: 0, coins: 0, skill: c.start.skill, stamina: c.start.stamina, runs: 0, best: {} };
+  const p = { charId, level: 0, points: 0, pending: 0, coins: 0, skill: c.start.skill, stamina: c.start.stamina, runs: 0, best: {},
+    mapCarrier: pickCarriers(), unlockedHidden: freshUnlocks() };
   saveProfile(p);
   return p;
 }
+/** Called when the tier's map item is collected. Permanent — the hidden river stays unlocked. */
+export function unlockHidden(p, tier) { p.unlockedHidden[tier] = true; saveProfile(p); }
 
 export const character = p => CHARACTERS[p.charId];
 export const canRaise = (p, trait) => p[trait] < character(p).caps[trait];
@@ -33,10 +50,13 @@ export const anyRaisable = p => canRaise(p, 'skill') || canRaise(p, 'stamina');
 
 /** Called on a completed run. `loot` is only ever counted here — a capsize discards it.
  *  Returns { pts, basePts, paddleXp, coins, ups }. */
-export function awardRun(p, river, time, loot = { paddles: 0, coins: 0 }) {
+export function awardRun(p, river, time, loot = { paddles: 0, coins: 0, coinValue: 0 }) {
   const basePts = TIER_POINTS[river.tier] ?? 1;
   const paddleXp = loot.paddles * PICKUPS.paddleXp;
-  const coins = loot.coins * PICKUPS.coinValue;
+  // coinValue is the value-weighted sum across every currency-type collectible kind collected
+  // (plain coins plus any river-specific extras like diamonds); falls back to a plain coin
+  // count for callers that don't pass it.
+  const coins = (loot.coinValue ?? loot.coins) * PICKUPS.coinValue;
   const pts = basePts + paddleXp;
   p.points += pts; p.coins += coins; p.runs++;
   if (!p.best[river.name] || time < p.best[river.name]) p.best[river.name] = time;
