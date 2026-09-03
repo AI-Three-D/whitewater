@@ -692,25 +692,41 @@ applyQuality(quality);
     for (let k = 0; k < 3; k++) { pass.setPipeline(simPipes[k]); pass.setBindGroup(0, simBGs[k]); pass.dispatchWorkgroups(W / 8, Math.ceil(rows / 8)); }
     pass.end();
   }
+  // per-role size range and base-tint formula, shared by every biome — what actually varies per
+  // biome is which concrete mesh a role resolves to (biome.props) and how often each role is
+  // picked in a given terrain context (biome.mix), not these numbers
+  const ROLE_SIZE = { tree: [0.8, 1.7], bush: [0.6, 1.4], rock: [0.4, 1.4], grass: [0.6, 1.4], boulder: [1.6, 3.0] };
+  const ROLE_TINT = { tree: g => [g * 0.9, g, g * 0.9], bush: g => [g, g * 1.05, g * 0.9], rock: g => [g, g, g], boulder: g => [g * 0.95, g * 0.93, g * 0.9], grass: g => [g, 1, 0.9 * g] };
+  // weighted pick among a mix table's roles; weights need not sum to 1 — the remainder is "place nothing"
+  function pickRole(mix, r) {
+    let acc = 0;
+    for (const role in mix) { acc += mix[role]; if (r < acc) return role; }
+    return null;
+  }
   function placeVegetation() {
-    const rng = mulberry32(river.seed + 99), lists = { tree: [], bush: [], rock: [], grass: [] };
+    const rng = mulberry32(river.seed + 99);
     const biome = BIOMES[river.R.biome || 'alpine'];
+    // every prop mesh gets a (possibly empty) list so switching biomes always clears out
+    // whatever the previous river's biome placed, not just the roles this biome still uses
+    const lists = Object.fromEntries(Object.keys(vegMeshes).filter(k => k !== 'pole').map(k => [k, []]));
     const caps = Object.fromEntries(Object.entries(VEG.caps).map(([k, v]) => [k, Math.round(v * biome.vegDensity[k])]));
-    const push = (name, x, z, sc, tint) => {
-      if (lists[name].length >= caps[name]) return;
+    const push = (role, x, z) => {
+      const meshName = biome.props[role];
+      if (!meshName || lists[meshName].length >= caps[role]) return;
+      const [lo, hi] = ROLE_SIZE[role], sc = lo + rng() * (hi - lo);
+      const g = 0.8 + 0.4 * rng(), tint = ROLE_TINT[role](g), bt = biome.vegTint[role];
       const y = terrainH(x, z) - 0.05;
-      const bt = biome.vegTint[name];
-      lists[name].push({ m: mat4TRS([x, y, z], rng() * 6.2832, [sc, sc * (0.85 + 0.3 * rng()), sc]), tint: [tint[0] * bt[0], tint[1] * bt[1], tint[2] * bt[2], 1] });
+      lists[meshName].push({ m: mat4TRS([x, y, z], rng() * 6.2832, [sc, sc * (0.85 + 0.3 * rng()), sc]), tint: [tint[0] * bt[0], tint[1] * bt[1], tint[2] * bt[2], 1] });
     };
     for (let n = 0; n < VEG.attempts; n++) {
       const x = rng() * W * dx, z = rng() * L * dx, j = clamp(Math.floor(z / dx), 0, L - 1), row = nearestChan(river.rows[j], x);
       const ad = Math.abs((x - row.c) / row.hw);
       if (ad < 1.25) continue;
       const y = terrainH(x, z); if (y < row.eta + 0.35) continue;
-      const nrm = terrainN(x, z), m = (ad - 1) * row.hw, r = rng(), g = 0.8 + 0.4 * rng();
-      if (nrm[1] < 0.72) { if (r < 0.25) push('rock', x, z, 0.5 + rng() * 1.2, [g, g, g]); continue; }
-      if (m < 3) { if (r < 0.55) push('grass', x, z, 0.6 + rng() * 0.8, [g, 1, 0.9 * g]); else if (r < 0.8) push('bush', x, z, 0.6 + rng() * 0.8, [g, g * 1.05, g * 0.9]); else push('rock', x, z, 0.4 + rng() * 1.0, [g, g, g]); }
-      else { if (r < 0.36) push('tree', x, z, 0.8 + rng() * 0.9, [g * 0.9, g, g * 0.9]); else if (r < 0.55) push('bush', x, z, 0.7 + rng() * 0.9, [g, g * 1.05, g * 0.9]); else if (r < 0.64) push('rock', x, z, 0.5 + rng() * 1.3, [g, g, g]); else push('grass', x, z, 0.7 + rng() * 0.9, [g, 1, 0.9 * g]); }
+      const nrm = terrainN(x, z), m = (ad - 1) * row.hw, r = rng();
+      const mixTable = nrm[1] < 0.72 ? biome.mix.steep : m < 3 ? biome.mix.bank : biome.mix.open;
+      const role = pickRole(mixTable, r);
+      if (role) push(role, x, z);
     }
     for (const [k, v] of Object.entries(lists)) writeInstances(k, v);
     const jf = clamp(Math.floor(river.finishZ / dx), 0, L - 1), rowf = river.rows[jf][0], poles = [];
@@ -1099,7 +1115,7 @@ applyQuality(quality);
 
    
     pass.setPipeline(meshPipe);
-    for (const name of ['tree', 'bush', 'rock', 'grass', 'pole']) {
+    for (const name of Object.keys(vegMeshes)) {
       const ib = instBufs[name]; if (!ib || !ib.count) continue;
       pass.setVertexBuffer(0, vegMeshes[name].vbuf); 
       pass.setVertexBuffer(1, ib.buf); 

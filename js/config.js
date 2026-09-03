@@ -12,36 +12,71 @@ export const RENDER = { sunDir: [0.35, 0.55, 0.75], fogColor: [0.72, 0.80, 0.90]
 
 export const PARTS = { count: 24000, kayakShare: 4000, ambient: 0.055 };
 
-export const VEG = { caps: { tree: 900, bush: 700, rock: 500, grass: 3500 }, attempts: 26000 };
+export const VEG = { caps: { tree: 900, bush: 700, rock: 500, grass: 3500, boulder: 70 }, attempts: 26000 };
 
-export const BIOME_IDS = { alpine: 0, canyon: 1, desert: 2, deciduous: 3, icy: 4, barren: 5 };
-const neutralBiome = { vegTint: { tree: [1, 1, 1], bush: [1, 1, 1], rock: [1, 1, 1], grass: [1, 1, 1] }, vegDensity: { tree: 1, bush: 1, rock: 1, grass: 1 } };
+export const BIOME_IDS = { alpine: 0, canyon: 1, desert: 2, deciduous: 3, icy: 4, barren: 5, rainforest: 6, savannah: 7 };
+
+// each biome maps the 5 abstract placement "roles" (tree/bush/rock/grass/boulder) to a concrete
+// prop mesh (see buildVegetationMeshes in meshes.js), and gives each of the 3 terrain contexts
+// (steep ground, right at the water's edge, open ground) a weighted mix of roles to place —
+// weights don't need to sum to 1; whatever's left over is "place nothing here". This is what
+// actually varies which props show up and how densely, not just their tint.
+const DEFAULT_PROPS = { tree: 'tree', bush: 'bush', rock: 'rock', grass: 'grass', boulder: 'boulder' };
 export const BIOMES = {
-  alpine: neutralBiome,
-  // dry canyon: sparse olive/dusty scrub, redder rock, far fewer trees, more exposed boulders
+  alpine: {
+    props: DEFAULT_PROPS,
+    mix: { steep: { rock: 0.25 }, bank: { grass: 0.55, bush: 0.25, rock: 0.20 }, open: { tree: 0.36, bush: 0.19, rock: 0.09, grass: 0.36 } },
+    vegTint: { tree: [1, 1, 1], bush: [1, 1, 1], rock: [1, 1, 1], grass: [1, 1, 1], boulder: [1, 1, 1] },
+    vegDensity: { tree: 1, bush: 1, rock: 1, grass: 1, boulder: 0.4 },
+  },
+  // dry canyon: sparse olive/dusty scrub, cactuses instead of conifers, redder rock, exposed boulders
   canyon: {
-    vegTint: { tree: [1.05, 0.92, 0.72], bush: [1.12, 0.9, 0.55], rock: [1.2, 0.82, 0.68], grass: [1.2, 1.0, 0.5] },
-    vegDensity: { tree: 0.32, bush: 0.7, rock: 1.7, grass: 0.45 },
+    props: { ...DEFAULT_PROPS, tree: 'cactus' },
+    mix: { steep: { rock: 0.3, boulder: 0.05 }, bank: { grass: 0.25, bush: 0.35, rock: 0.2 }, open: { tree: 0.12, bush: 0.30, rock: 0.20, grass: 0.15 } },
+    vegTint: { tree: [1.05, 0.92, 0.72], bush: [1.12, 0.9, 0.55], rock: [1.2, 0.82, 0.68], grass: [1.2, 1.0, 0.5], boulder: [1.15, 0.85, 0.65] },
+    vegDensity: { tree: 0.5, bush: 0.7, rock: 1.7, grass: 0.45, boulder: 0.6 },
   },
-  // hot, sparse desert: sandy scrub, almost no trees, pale sun-bleached rock
+  // hot, sparse desert: scattered saguaros, sandy scrub, pale sun-bleached rock, mostly bare ground
   desert: {
-    vegTint: { tree: [1.1, 0.85, 0.5], bush: [1.15, 0.85, 0.45], rock: [1.15, 0.95, 0.75], grass: [1.3, 1.05, 0.4] },
-    vegDensity: { tree: 0.08, bush: 0.5, rock: 1.4, grass: 0.2 },
+    props: { ...DEFAULT_PROPS, tree: 'cactus' },
+    mix: { steep: { rock: 0.3, boulder: 0.08 }, bank: { grass: 0.20, bush: 0.35, rock: 0.20 }, open: { tree: 0.16, bush: 0.30, rock: 0.22, grass: 0.08 } },
+    vegTint: { tree: [0.85, 1.0, 0.7], bush: [1.15, 0.85, 0.45], rock: [1.15, 0.95, 0.75], grass: [1.3, 1.05, 0.4], boulder: [1.1, 0.9, 0.7] },
+    vegDensity: { tree: 0.55, bush: 0.6, rock: 1.3, grass: 0.2, boulder: 0.7 },
   },
-  // lush deciduous woodland: dense leafy trees and undergrowth, warm greens
+  // lush deciduous woodland: dense round-canopy broadleaf trees and undergrowth, warm greens
   deciduous: {
-    vegTint: { tree: [0.85, 1.08, 0.65], bush: [0.9, 1.1, 0.6], rock: [0.95, 1.0, 0.85], grass: [0.85, 1.15, 0.55] },
-    vegDensity: { tree: 1.6, bush: 1.5, rock: 0.8, grass: 1.3 },
+    props: { ...DEFAULT_PROPS, tree: 'treeDeciduous' },
+    mix: { steep: { rock: 0.22 }, bank: { grass: 0.45, bush: 0.35, rock: 0.10 }, open: { tree: 0.48, bush: 0.30, rock: 0.05, grass: 0.17 } },
+    vegTint: { tree: [0.85, 1.08, 0.65], bush: [0.9, 1.1, 0.6], rock: [0.95, 1.0, 0.85], grass: [0.85, 1.15, 0.55], boulder: [0.95, 1.0, 0.9] },
+    vegDensity: { tree: 1.8, bush: 1.6, rock: 0.7, grass: 1.3, boulder: 0.3 },
   },
-  // icy alpine: bare rock and snow, vegetation nearly gone, cold blue-white tint
+  // icy alpine: mostly bare rock, snow and boulders, a few gaunt withered trees near the treeline
   icy: {
-    vegTint: { tree: [0.8, 0.9, 1.05], bush: [0.8, 0.9, 1.05], rock: [0.9, 0.95, 1.08], grass: [0.85, 0.95, 1.05] },
-    vegDensity: { tree: 0.04, bush: 0.1, rock: 1.6, grass: 0.05 },
+    props: { ...DEFAULT_PROPS, tree: 'treeWithered' },
+    mix: { steep: { rock: 0.25, boulder: 0.35 }, bank: { grass: 0.15, rock: 0.35, boulder: 0.15 }, open: { tree: 0.05, rock: 0.30, boulder: 0.22, grass: 0.08, bush: 0.03 } },
+    vegTint: { tree: [0.8, 0.85, 0.9], bush: [0.8, 0.9, 1.05], rock: [0.9, 0.95, 1.08], grass: [0.85, 0.95, 1.05], boulder: [0.92, 0.95, 1.05] },
+    vegDensity: { tree: 0.18, bush: 0.1, rock: 1.6, grass: 0.2, boulder: 1.6 },
   },
-  // barren rock: scoured, dusty grey-brown, almost nothing growing
+  // barren rock: huge boulders and dense rough scree, scoured grey-brown, almost nothing growing
   barren: {
-    vegTint: { tree: [0.9, 0.85, 0.78], bush: [0.9, 0.85, 0.78], rock: [0.85, 0.83, 0.8], grass: [0.95, 0.88, 0.7] },
-    vegDensity: { tree: 0.02, bush: 0.15, rock: 1.8, grass: 0.08 },
+    props: { ...DEFAULT_PROPS, tree: 'treeWithered' },
+    mix: { steep: { rock: 0.35, boulder: 0.45 }, bank: { rock: 0.5, boulder: 0.2, grass: 0.08 }, open: { boulder: 0.35, rock: 0.42, tree: 0.02, grass: 0.04, bush: 0.02 } },
+    vegTint: { tree: [0.75, 0.68, 0.6], bush: [0.9, 0.85, 0.78], rock: [0.85, 0.83, 0.8], grass: [0.95, 0.88, 0.7], boulder: [0.82, 0.80, 0.77] },
+    vegDensity: { tree: 0.05, bush: 0.12, rock: 1.9, grass: 0.12, boulder: 1.9 },
+  },
+  // tropical rainforest: tall tiered-canopy trees packed dense, thick undergrowth, canopy shades out grass
+  rainforest: {
+    props: { ...DEFAULT_PROPS, tree: 'treeRainforest' },
+    mix: { steep: { rock: 0.2, boulder: 0.08 }, bank: { bush: 0.5, grass: 0.25, rock: 0.08 }, open: { tree: 0.55, bush: 0.35, rock: 0.03, grass: 0.06 } },
+    vegTint: { tree: [0.85, 1.05, 0.7], bush: [0.8, 1.1, 0.65], rock: [0.85, 0.95, 0.85], grass: [0.8, 1.15, 0.6], boulder: [0.85, 0.95, 0.85] },
+    vegDensity: { tree: 2.2, bush: 2.0, rock: 0.5, grass: 0.5, boulder: 0.25 },
+  },
+  // savannah: rolling open grassland, rare flat-topped acacias, occasional scrub and rock
+  savannah: {
+    props: { ...DEFAULT_PROPS, tree: 'treeSavannah' },
+    mix: { steep: { rock: 0.3 }, bank: { grass: 0.65, bush: 0.15, rock: 0.1 }, open: { tree: 0.08, bush: 0.12, rock: 0.04, grass: 0.62 } },
+    vegTint: { tree: [1.0, 0.92, 0.55], bush: [1.05, 0.95, 0.55], rock: [1.1, 0.95, 0.7], grass: [1.15, 1.0, 0.45], boulder: [1.05, 0.95, 0.75] },
+    vegDensity: { tree: 0.35, bush: 0.55, rock: 0.6, grass: 2.2, boulder: 0.4 },
   },
 };
 
@@ -49,14 +84,14 @@ export const QUALITY = {
   high: {
     grid: { W: 256, L: 1024, dx: 0.5 },
     particles: 24000, kayakShare: 4000,
-    veg: { caps: { tree: 900, bush: 700, rock: 500, grass: 3500 }, attempts: 26000 },
+    veg: { caps: { tree: 900, bush: 700, rock: 500, grass: 3500, boulder: 70 }, attempts: 26000 },
     dprCap: 1.5, warmupSteps: 400, macCormack: 1, turbA: 0.6, simpleShading: false, substeps: 2,
     lod: { near: 80, mid: 140 }, viewAhead: 170, viewBehind: 30, computeAhead: 220, computeBehind: 60, fogDensity: 0.0024
   },
   medium: {
     grid: { W: 216, L: 864, dx: 128 / 216 },
     particles: 3000, kayakShare: 1000,
-    veg: { caps: { tree: 400, bush: 300, rock: 250, grass: 2500 }, attempts: 12000 },
+    veg: { caps: { tree: 400, bush: 300, rock: 250, grass: 2500, boulder: 35 }, attempts: 12000 },
     dprCap: 1.0, warmupSteps: 300, macCormack: 1, turbA: 0.6, simpleShading: false, substeps: 2,
     // computeAhead/Behind stay a healthy margin past viewAhead/Behind: rows beyond the compute
     // window only hold the one-time load warmup state (no live turbulence/foam) until the moving
@@ -66,7 +101,7 @@ export const QUALITY = {
   low: {
     grid: { W: 216, L: 864, dx: 128 / 216 },
     particles: 800, kayakShare: 400,
-    veg: { caps: { tree: 100, bush: 80, rock: 80, grass: 500 }, attempts: 12000 },
+    veg: { caps: { tree: 100, bush: 80, rock: 80, grass: 500, boulder: 15 }, attempts: 12000 },
     dprCap: 0.75, warmupSteps: 300, macCormack: 1, turbA: 0.6, simpleShading: false, substeps: 2,
     lod: { near: 40, mid:  80 }, viewAhead: 120, viewBehind: 20, computeAhead: 140, computeBehind: 35, fogDensity: 0.0040
   },
@@ -120,38 +155,40 @@ export const RIVERS = [
   // ---------- medium ----------
   { name: 'Boulder Garden', cls: 'Class III · medium', tier: 'medium', slope: 0.015, manning: 0.035, halfW: 8, widthVar: 0.35,
     meander: [[22, 140], [7, 55]], depth: 1.5, rocks: 70, rockR: [0.9, 2.6], emergent: 0.5,
-    ledges: [[150, 0.5], [300, 0.7], [420, 0.5]], constrictions: 3, valleyH: 18, valleyScale: 55, seed: 23, len: 470,
+    ledges: [[150, 0.5], [300, 0.7], [420, 0.5]], constrictions: 3, valleyH: 9, valleyScale: 95, seed: 23, len: 470,
+    biome: 'savannah', waterTint: [0.08, 0.13, 0.06], waterClarity: 1.3,   // open grassland, flat and broad
     boulderIslands: [{ z: 200, len: 8, widthFrac: 0.55 }],
     lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 32 } },
   { name: 'Cedar Chute', cls: 'Class III · medium', tier: 'medium', slope: 0.012, manning: 0.034, halfW: 7, widthVar: 0.4,
     meander: [[20, 120], [6, 50]], depth: 1.5, rocks: 55, rockR: [0.9, 2.4], emergent: 0.45,
-    ledges: [[70, 0.6], [130, 0.6], [190, 0.8]], constrictions: 4, valleyH: 20, valleyScale: 50, seed: 24, len: 240,
-    biome: 'deciduous', waterTint: [0.03, 0.14, 0.05], waterClarity: 1.1,   // leafy green, dappled
+    ledges: [[70, 0.6], [130, 0.6], [190, 0.8]], constrictions: 4, valleyH: 24, valleyScale: 48, seed: 24, len: 240,
+    biome: 'deciduous', waterTint: [0.03, 0.14, 0.05], waterClarity: 1.1,   // leafy green, dappled, enclosed hills
     lanes: { count: 2, amp: 0.18, wander: 3, seedOffset: 36 } },
   { name: 'Split Rock', cls: 'Class III · medium', tier: 'medium', slope: 0.014, manning: 0.036, halfW: 9, widthVar: 0.3,
     meander: [[18, 160], [9, 62]], depth: 1.6, rocks: 60, rockR: [1.0, 2.8], emergent: 0.55,
-    ledges: [[200, 0.6], [360, 0.7]], constrictions: 2, valleyH: 16, valleyScale: 60, seed: 25, len: 410,
-    biome: 'desert', waterTint: [0.14, 0.11, 0.05], waterClarity: 0.5, extraKind: 'diamond',   // murky sandy
+    ledges: [[200, 0.6], [360, 0.7]], constrictions: 2, valleyH: 8, valleyScale: 95, seed: 25, len: 410,
+    biome: 'desert', waterTint: [0.14, 0.11, 0.05], waterClarity: 0.5, extraKind: 'diamond',   // murky sandy, flat desert basin
     forks: [{ startZ: 150, mergeZ: 200, splitLen: 25, mergeLen: 25, separation: 22, widthScale: 0.7, shares: [0.6, 0.4] }],
     boulderIslands: [{ z: 300, len: 9, widthFrac: 0.6, bias: 0.2 }],
     lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 37 } },
   // ---------- hard ----------
   { name: 'The Gorge', cls: 'Class IV · hard', tier: 'hard', slope: 0.03, manning: 0.04, halfW: 5.5, widthVar: 0.4,
     meander: [[26, 110], [8, 45]], depth: 1.4, rocks: 120, rockR: [0.9, 2.8], emergent: 0.55,
-    ledges: [[120, 0.8], [210, 1.0], [330, 1.2], [440, 0.9]], constrictions: 4, valleyH: 30, valleyScale: 75, seed: 37, len: 475,
-    biome: 'icy', waterTint: [0.05, 0.12, 0.20], waterClarity: 2.8,   // pale glacial blue, very clear
+    ledges: [[120, 0.8], [210, 1.0], [330, 1.2], [440, 0.9]], constrictions: 4, valleyH: 42, valleyScale: 60, seed: 37, len: 475,
+    biome: 'icy', waterTint: [0.05, 0.12, 0.20], waterClarity: 2.8,   // pale glacial blue, very clear, steep peaks
     boulderIslands: [{ z: 250, len: 10, widthFrac: 0.65, bias: -0.15 }],
     waterfalls: [{ z: 320, drop: 4.0, len: 5 }],
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 33 } },
   { name: "Devil's Staircase", cls: 'Class IV · hard', tier: 'hard', slope: 0.028, manning: 0.04, halfW: 6, widthVar: 0.35,
     meander: [[20, 130], [7, 40]], depth: 1.4, rocks: 100, rockR: [0.9, 2.6], emergent: 0.5,
-    ledges: [[100, 0.9], [160, 0.9], [220, 1.0], [280, 1.0], [340, 1.1], [400, 0.9]], constrictions: 3, valleyH: 34, valleyScale: 65, seed: 38, len: 485,
+    ledges: [[100, 0.9], [160, 0.9], [220, 1.0], [280, 1.0], [340, 1.1], [400, 0.9]], constrictions: 3, valleyH: 36, valleyScale: 55, seed: 38, len: 485,
+    biome: 'rainforest', waterTint: [0.03, 0.16, 0.10], waterClarity: 0.9,   // deep jungle green, steep ravine
     waterfalls: [{ z: 460, drop: 3.0, len: 4 }],
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 38 } },
   { name: 'Thunder Gap', cls: 'Class IV · hard', tier: 'hard', slope: 0.035, manning: 0.041, halfW: 5, widthVar: 0.45,
     meander: [[28, 100], [9, 42]], depth: 1.5, rocks: 130, rockR: [1.0, 3.0], emergent: 0.6,
-    ledges: [[140, 1.0], [260, 1.2], [400, 1.0]], constrictions: 5, valleyH: 38, valleyScale: 70, seed: 39, len: 440,
-    biome: 'barren', waterTint: [0.09, 0.09, 0.08], waterClarity: 0.7,   // scoured grey-brown
+    ledges: [[140, 1.0], [260, 1.2], [400, 1.0]], constrictions: 5, valleyH: 46, valleyScale: 58, seed: 39, len: 440,
+    biome: 'barren', waterTint: [0.09, 0.09, 0.08], waterClarity: 0.7,   // scoured grey-brown, jagged peaks
     forks: [{ startZ: 190, mergeZ: 230, splitLen: 20, mergeLen: 20, separation: 18, widthScale: 0.7, shares: [0.45, 0.55] }],
     boulderIslands: [{ z: 330, len: 12, widthFrac: 0.7, bias: 0.1 }],
     waterfalls: [{ z: 370, drop: 5.0, len: 6 }],
@@ -164,17 +201,17 @@ export const RIVERS_HIDDEN = [
   { name: 'Silver Cache', cls: 'Class II · secret', tier: 'easy', slope: 0.002, manning: 0.032, halfW: 9, widthVar: 0.25,
     meander: [[16, 160], [6, 58]], depth: 1.5, rocks: 14, rockR: [0.8, 2.0], emergent: 0.3, ledges: [],
     biome: 'icy', waterTint: [0.05, 0.14, 0.22], waterClarity: 2.6,
-    constrictions: 1, valleyH: 10, valleyScale: 65, seed: 91, len: 300, hidden: true,
+    constrictions: 1, valleyH: 18, valleyScale: 50, seed: 91, len: 300, hidden: true,
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 91 } },
   { name: 'Emerald Hollow', cls: 'Class III · secret', tier: 'medium', slope: 0.013, manning: 0.034, halfW: 8, widthVar: 0.35,
     meander: [[20, 130], [7, 52]], depth: 1.5, rocks: 60, rockR: [0.9, 2.5], emergent: 0.5,
     ledges: [[160, 0.6], [320, 0.7]], biome: 'deciduous', waterTint: [0.03, 0.15, 0.06], waterClarity: 1.2,
-    constrictions: 3, valleyH: 18, valleyScale: 55, seed: 92, len: 400, hidden: true,
+    constrictions: 3, valleyH: 22, valleyScale: 48, seed: 92, len: 400, hidden: true,
     lanes: { count: 3, amp: 0.16, wander: 3, seedOffset: 92 } },
   { name: 'Obsidian Falls', cls: 'Class IV · secret', tier: 'hard', slope: 0.032, manning: 0.04, halfW: 5.5, widthVar: 0.4,
     meander: [[24, 105], [8, 44]], depth: 1.5, rocks: 110, rockR: [0.9, 2.8], emergent: 0.55,
     ledges: [[130, 0.9], [250, 1.1], [380, 1.0]], biome: 'barren', waterTint: [0.08, 0.08, 0.08], waterClarity: 0.6,
-    constrictions: 4, valleyH: 32, valleyScale: 70, seed: 93, len: 460, hidden: true,
+    constrictions: 4, valleyH: 44, valleyScale: 58, seed: 93, len: 460, hidden: true,
     waterfalls: [{ z: 300, drop: 4.5, len: 5 }],
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 93 } },
 ];

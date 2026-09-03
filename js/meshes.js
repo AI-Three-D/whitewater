@@ -108,6 +108,7 @@ export function buildMapMesh() {
 }
 export function buildVegetationMeshes() {
   const M = {};
+  // conifer — default alpine/canyon tree
   const tree = new MeshBuilder();
   addCylinder(tree, [0, 0, 0], [0, 1.5, 0], 0.14, 0.1, 7, [0.36, 0.24, 0.13]);
   addCylinder(tree, [0, 0.9, 0], [0, 3.3, 0], 1.25, 0.0, 9, [0.08, 0.30, 0.12]);
@@ -131,5 +132,48 @@ export function buildVegetationMeshes() {
   addSphere(pole, [0, 3.35, 0], [0.22, 0.22, 0.22], 5, 8, [1.0, 0.9, 0.2]);
   pole.quad([0, 3.1, 0], [0, 2.5, 0], [1.1, 2.7, 0], [1.1, 3.0, 0], [1.0, 1.0, 1.0]);
   M.pole = pole;
+
+  // deciduous — round broadleaf canopy on a trunk (temperate woodland)
+  const treeDeciduous = new MeshBuilder();
+  addCylinder(treeDeciduous, [0, 0, 0], [0, 1.3, 0], 0.13, 0.09, 7, [0.32, 0.22, 0.12]);
+  addSphere(treeDeciduous, [0, 2.1, 0], [1.15, 1.05, 1.15], 7, 10, [0.22, 0.5, 0.16], d => 0.85 + 0.35 * vnoise3(d[0] * 2, d[1] * 2 + 3, d[2] * 2, 4));
+  M.treeDeciduous = treeDeciduous;
+
+  // saguaro cactus (desert) — fluted trunk with two upturned arms
+  const cactus = new MeshBuilder(); const cactusCol = [0.27, 0.52, 0.30];
+  addCylinder(cactus, [0, 0, 0], [0, 2.6, 0], 0.16, 0.13, 8, cactusCol);
+  addCylinder(cactus, [0, 1.1, 0], [0.5, 1.1, 0], 0.09, 0.08, 6, cactusCol);
+  addCylinder(cactus, [0.5, 1.1, 0], [0.5, 1.9, 0], 0.08, 0.06, 6, cactusCol);
+  addCylinder(cactus, [0, 1.5, 0], [-0.45, 1.5, 0], 0.08, 0.07, 6, cactusCol);
+  addCylinder(cactus, [-0.45, 1.5, 0], [-0.45, 2.1, 0], 0.07, 0.05, 6, cactusCol);
+  M.cactus = cactus;
+
+  // rainforest — tall trunk, tiered broad canopy
+  const treeRainforest = new MeshBuilder();
+  addCylinder(treeRainforest, [0, 0, 0], [0, 3.4, 0], 0.16, 0.12, 7, [0.30, 0.20, 0.11]);
+  addSphere(treeRainforest, [0, 3.6, 0], [1.6, 1.0, 1.6], 7, 11, [0.10, 0.42, 0.14], d => 0.85 + 0.35 * vnoise3(d[0] * 1.6, d[1] * 1.6 + 8, d[2] * 1.6, 5));
+  addSphere(treeRainforest, [0.4, 4.3, 0.3], [1.1, 0.8, 1.1], 6, 9, [0.14, 0.48, 0.17], d => 0.85 + 0.3 * vnoise3(d[0] * 2, d[1] * 2 + 2, d[2] * 2, 6));
+  M.treeRainforest = treeRainforest;
+
+  // acacia (savannah) — long thin trunk, flat wide umbrella canopy
+  const treeSavannah = new MeshBuilder(); const acaciaCol = [0.32, 0.42, 0.14];
+  addCylinder(treeSavannah, [0, 0, 0], [0, 2.6, 0], 0.10, 0.06, 7, [0.34, 0.24, 0.14]);
+  addCylinder(treeSavannah, [0, 2.35, 0], [0, 2.7, 0], 0.25, 1.55, 9, acaciaCol);
+  addCylinder(treeSavannah, [0, 2.7, 0], [0, 2.78, 0], 1.55, 1.4, 9, acaciaCol);
+  M.treeSavannah = treeSavannah;
+
+  // withered/dead tree (icy, barren) — bare trunk and a few thin bare branches, no canopy
+  const treeWithered = new MeshBuilder(); const witherCol = [0.35, 0.30, 0.26];
+  addCylinder(treeWithered, [0, 0, 0], [0, 2.2, 0], 0.10, 0.04, 6, witherCol);
+  addCylinder(treeWithered, [0, 1.3, 0], [0.5, 2.0, 0], 0.04, 0.015, 5, witherCol);
+  addCylinder(treeWithered, [0, 1.6, 0], [-0.4, 2.3, 0], 0.035, 0.01, 5, witherCol);
+  addCylinder(treeWithered, [0, 1.9, 0], [0.15, 2.6, 0], 0.03, 0.01, 5, witherCol);
+  M.treeWithered = treeWithered;
+
+  // boulder — a single large, heavily-irregular rock (icy/barren biomes)
+  const boulder = new MeshBuilder();
+  addSphere(boulder, [0, 0.5, 0], [1.6, 1.2, 1.5], 7, 10, [0.42, 0.41, 0.39], d => 0.75 + 0.5 * vnoise3(d[0] * 1.3 + 11, d[1] * 1.3, d[2] * 1.3 + 4, 9));
+  M.boulder = boulder;
+
   return M;
 }
