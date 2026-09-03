@@ -3,8 +3,8 @@ import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, 
 
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW } from './shaders.js';
 import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec,
-         mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, mat4Compose, mat4TRS, mat4Transform,
-         mulberry32, clamp } from './math.js';
+  mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, mat4Compose, mat4TRS, mat4Transform,
+  mulberry32, clamp, smoothstep } from './math.js';
 import { generateRiver, nearestChan } from './river.js';
 import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh, buildObstacleMeshes } from './meshes.js';
 import { loadProfile, newProfile, clearProfile, character, canRaise, anyRaisable,
@@ -16,7 +16,7 @@ addEventListener('unhandledrejection', e => showErr('Promise error: ' + ((e.reas
 const $ = id => document.getElementById(id);
 // bumped by hand on every edit — lets a stale/cached page or a not-yet-reloaded tab be spotted
 // on sight instead of chasing "am I even testing the current code" through several rounds
-const BUILD = 'build 25';
+const BUILD = 'build 26';
 { const v = document.getElementById('ver'); if (v) v.textContent = BUILD; }
 // ---------- platform ----------
 // modern-browser signals only: a touch screen (maxTouchPoints) whose primary pointer is coarse
@@ -198,6 +198,9 @@ applyQuality(quality);
   ];
   const meshPipe = mkRender(WGSL_MESH, 'vsMesh', 'fsMesh', { buffers: meshBuffers });
   const pickupPipe = mkRender(WGSL_MESH, 'vsMesh', 'fsMeshFade', { buffers: meshBuffers, blend: alphaBlend, depthWrite: false });
+  // floating obstacles: opaque lighting, depth-written, but alpha-blended so they can fade out
+  const obstPipe = mkRender(WGSL_MESH, 'vsMesh', 'fsMeshAlpha', { buffers: meshBuffers, blend: alphaBlend });
+  
   // ---------- GPU meshes ----------
   const gpuMesh = mb => { const d = mb.data(); const vbuf = mkBuf(d.byteLength, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST); 
     device.queue.writeBuffer(vbuf, 0, d); 
@@ -209,7 +212,11 @@ applyQuality(quality);
   // the map pickup is at most one instance ever, on any river, so its buffer never needs
   // resizing — allocate it once here instead of in placePickups()'s per-river rebuild
   pickupInstBufs.map = mkBuf(80, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
-  const obstMeshes = {}; for (const [k, mb] of Object.entries(buildObstacleMeshes())) obstMeshes[k] = gpuMesh(mb);
+  // floating obstacles: each GPU mesh keeps its builder's nominal metres (len/rad/draft/vol) so an
+  // instance can be scaled uniformly to a chosen length and get its physics numbers from that
+  const obstMeshes = {};
+  for (const [k, v] of Object.entries(buildObstacleMeshes())) obstMeshes[k] = { ...gpuMesh(v.mb), len: v.len, rad: v.rad, draft: v.draft, vol: v.vol };
+  const obstInstBufs = {};   // per mesh name, sized to the active quota in placeObstacles()
 
   // small spark burst shown when a paddle/coin is collected
   const sparkMesh = gpuMesh(buildSparkMesh());
@@ -886,71 +893,97 @@ applyQuality(quality);
     const x = clamp(chan.c + (Math.random() * 1.4 - 0.7) * chan.hw, 1, W * dx - 1);
     river.pickups.map = [{ x, z, floating: false, spinPh: Math.random() * 6.2832, bobPh: Math.random() * 6.2832, alive: true, collected: false, seenT: -1 }];
   }
-    // ---------- floating obstacles ----------
-  // Laid out deterministically from the river seed, so every attempt at a river presents the same
-  // starting arrangement (it then drifts differently depending on where you paddle). Counts come
-  // from RIVERS[].obstacles as "per 100 m of playable river"; sizes from OBSTACLES.kinds, with
-  // optional per-river overrides.
+  // ---------- floating obstacles ----------
+  // The floating-height reference. waterAt() switches hard between the live simulated surface
+  // (inside the 16 m readback band around the boat) and the channel's nominal level outside it,
+  // and in a riffle the two differ by tens of centimetres — fine for forces, but a log riding
+  // that step visibly jumped, and a thin one jumped under the water and flickered out of sight.
+  // Blend across the band edge instead; the caller additionally low-passes the result.
+  function surfaceAt(x, z) {
+    const jr = clamp(Math.floor(z / dx), 0, L - 1);
+    const nominal = Math.max(nearestChan(river.rows[jr], x).eta, terrainH(x, z));
+    if (!band.ready) return nominal;
+    const dj = Math.abs(z / dx - (band.j0 + BAND_ROWS / 2));
+    const wgt = 1 - smoothstep(BAND_ROWS / 2 - 8, BAND_ROWS / 2 - 3.5, dj);
+    return wgt <= 0 ? nominal : nominal + (waterAt(x, z).eta - nominal) * wgt;
+  }
+  // per-run setup: parses RIVERS[].obstacles into spawn entries, sizes the instance buffers to the
+  // quota, and pre-populates the reach ahead so the run doesn't start on an empty river.
+  // Must run after kayak.reset() — the seeding is relative to the boat.
   function placeObstacles() {
-    for (const g of Object.values(river.obstGroups || {})) g.buf.destroy();
-    river.obstacles = []; river.obstGroups = {}; river.obstNear = [];
+    river.obstacles = []; river.obstNear = []; river.obstSpawn = []; river.obstDraw = [];
+    river.obstCap = 0;
     const cfg = river.R.obstacles;
     if (!cfg || !OBSTACLES.enabled) return;
-    const rng = mulberry32(river.seed + 501);
-    const z0 = 45, z1 = Math.max(z0 + 20, river.finishZ - 25);
-    const pond = river.R.pond;
+    river.obstCap = cfg.max ?? OBSTACLES.maxActive;
+    river.obstAhead = cfg.spawnAhead ?? OBSTACLES.spawnAhead;
+    river.obstRng = mulberry32(river.seed + 501);
+    river.obstLastZ = kayak.p[2];
     for (const [kindName, kindCfg] of Object.entries(cfg)) {
       const kind = OBSTACLES.kinds[kindName];
-      if (!kind) continue;
+      if (!kind) continue;                                   // `max`, `spawnAhead` … aren't kinds
       for (const clsName of Object.keys(OBSTACLES.classes)) {
         const entry = kindCfg[clsName];
-        if (entry == null) continue;
+        if (entry == null || !kind[clsName]) continue;
         const spec = typeof entry === 'number' ? { per100m: entry } : entry;
-        const base = kind[clsName], cls = OBSTACLES.classes[clsName];
-        if (!base) continue;
-        const n = Math.round((spec.per100m ?? 0) * (z1 - z0) / 100);
-        const lenR = spec.len ?? base.len, radR = spec.rad ?? base.rad, radYR = spec.radY ?? base.radY ?? [1, 1];
-        for (let k = 0; k < n; k++) {
-          const len = lenR[0] + rng() * (lenR[1] - lenR[0]);
-          const rad = radR[0] + rng() * (radR[1] - radR[0]);
-          const radY = radYR[0] + rng() * (radYR[1] - radYR[0]);
-          let x = 0, z = 0, ok = false;
-          for (let tries = 0; tries < 12 && !ok; tries++) {
-            z = z0 + rng() * (z1 - z0);
-            if (pond && z > pond.z - pond.len / 2 - 5 && z < pond.z + pond.len / 2 + 5) continue;   // keep the pond clear
-            const j = clamp(Math.floor(z / dx), 0, L - 1), chans = river.rows[j];
-            const chan = chans[Math.floor(rng() * chans.length)];
-            x = clamp(chan.c + (rng() * 1.3 - 0.65) * chan.hw, 1, W * dx - 1);
-            // don't start the run with obstacles already interpenetrating — they'd shove each
-            // other across the river on the first frame
-            ok = river.obstacles.every(o => Math.hypot(o.x - x, o.z - z) > (o.len + len) * 0.5 + 1);
-          }
-          if (!ok) continue;
-          const g = 0.85 + 0.3 * rng(), t = kind.tint;
-          river.obstacles.push({
-            kind: kindName, cls: clsName, mesh: base.meshes[Math.floor(rng() * base.meshes.length)],
-            len, rad, radY, mass: Math.max(8, kind.density * kind.volFactor * rad * rad * radY * len),
-            draft: Math.max(0.06, rad * radY * kind.draftFrac),
-            samples: cls.samples, hitK: cls.hitK, lift: cls.lift,
-            x, z, y: 0, yaw: rng() * 6.2832, roll: kind.roll ? rng() * 6.2832 : 0,
-            vx: 0, vz: 0, w: (rng() - 0.5) * 0.2, bobPh: rng() * 6.2832,
-            fx: 0, fz: 0, tq: 0, grounded: false, gone: false,
-            tint: [t[0] * g, t[1] * g, t[2] * g, 1],
-          });
-        }
+        river.obstSpawn.push({ kindName, clsName, kind, cls: OBSTACLES.classes[clsName], base: kind[clsName], spec, acc: 0 });
       }
     }
-    for (const ob of river.obstacles) {
-      const g = river.obstGroups[ob.mesh] || (river.obstGroups[ob.mesh] = { list: [] });
-      g.list.push(ob);
+    const need = Math.max(80, river.obstCap * 80);
+    for (const name of Object.keys(obstMeshes)) {
+      if (obstInstBufs[name] && obstInstBufs[name].size >= need) continue;
+      if (obstInstBufs[name]) obstInstBufs[name].destroy();
+      obstInstBufs[name] = mkBuf(need, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
     }
-    for (const g of Object.values(river.obstGroups))
-      g.buf = mkBuf(Math.max(80, g.list.length * 80), GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
+    const z0 = kayak.p[2] + OBSTACLES.seedAheadFrom, z1 = kayak.p[2] + river.obstAhead[1];
+    for (const e of river.obstSpawn) {
+      const n = Math.floor((e.spec.per100m ?? 0) * (z1 - z0) / 100 + river.obstRng());
+      for (let k = 0; k < n; k++) spawnObstacle(e, z0 + river.obstRng() * (z1 - z0));
+    }
   }
-  // one body, one substep. Drag is sampled along the length and split into along-axis and
-  // across-axis components (see OBSTACLES) — in a river with any cross-channel velocity gradient
-  // that asymmetry produces a real torque, which is what swings a trunk round until it points
-  // downstream, and what makes one pinned on a boulder pivot around the contact.
+  // one obstacle of spawn entry `e`, somewhere in the channel at z. Returns false if the quota is
+  // full or the spot is unusable (past the take-out, in a pond, on top of another obstacle).
+  function spawnObstacle(e, z) {
+    const list = river.obstacles, rng = river.obstRng;
+    if (list.length >= river.obstCap || z > river.finishZ - 5) return false;
+    const pond = river.R.pond;
+    if (pond && Math.abs(z - pond.z) < pond.len / 2 + 5) return false;
+    const lenR = e.spec.len ?? e.base.len, len = lenR[0] + rng() * (lenR[1] - lenR[0]);
+    const mesh = e.base.meshes[Math.floor(rng() * e.base.meshes.length)], V = obstMeshes[mesh];
+    const sc = len / V.len, rad = V.rad * sc;
+    const j = clamp(Math.floor(z / dx), 0, L - 1), chans = river.rows[j];
+    const chan = chans[Math.floor(rng() * chans.length)];
+    let x = 0, ok = false;
+    for (let tries = 0; tries < 8 && !ok; tries++) {
+      x = clamp(chan.c + (rng() * 1.3 - 0.65) * chan.hw, 1, W * dx - 1);
+      ok = list.every(o => Math.hypot(o.x - x, o.z - z) > (o.len + len) * 0.5 + 1);
+    }
+    if (!ok) return false;
+    const g = 0.85 + 0.3 * rng(), w = waterAt(x, z);
+    list.push({
+      kind: e.kindName, cls: e.clsName, mesh, len, rad, sc,
+      draft: V.draft * sc, mass: Math.max(20, e.kind.density * V.vol * sc * sc * sc),
+      samples: e.cls.samples, hitK: e.cls.hitK, lift: e.cls.lift,
+      x, z, y: surfaceAt(x, z), yaw: rng() * 6.2832, roll: e.kind.roll ? rng() * 6.2832 : 0,
+      vx: w.u, vz: w.v, w: (rng() - 0.5) * 0.2, bobPh: rng() * 6.2832,   // born already moving with the current
+      fx: 0, fz: 0, tq: 0, grounded: false, sinking: false, sinkT: 0, y0: 0, alpha: 1,
+      tint: [g, g, g, 1],
+    });
+    return true;
+  }
+  // density-based: per100m spawns accrue per metre of downstream progress (not per second — an
+  // idle boat doesn't fill the river up), dropped in `spawnAhead` metres downstream
+  function spawnObstacles() {
+    if (!river.obstSpawn.length) return;
+    const kz = kayak.p[2], prog = Math.max(0, kz - river.obstLastZ);
+    river.obstLastZ = Math.max(river.obstLastZ, kz);
+    const [a0, a1] = river.obstAhead;
+    for (const e of river.obstSpawn) {
+      e.acc += prog * (e.spec.per100m ?? 0) / 100;
+      while (e.acc >= 1) { e.acc -= 1; spawnObstacle(e, kz + a0 + river.obstRng() * (a1 - a0)); }
+    }
+  }
+  // one body, one substep (see OBSTACLES in config.js for the model)
   function stepObstacle(ob, dt) {
     const dirx = Math.sin(ob.yaw), dirz = Math.cos(ob.yaw), half = ob.len / 2, S = ob.samples;
     let Fx = ob.fx, Fz = ob.fz, T = ob.tq, grounded = false;
@@ -990,8 +1023,7 @@ applyQuality(quality);
     ob.grounded = grounded;
   }
   // A's axis sampled against B's axis, pushing the pair apart where the capsules overlap. Called
-  // both ways round per pair, which is what lets several logs stack up behind one that's jammed
-  // instead of sliding through each other.
+  // both ways round per pair — what lets logs pile up behind a jammed one instead of passing through.
   function contactSegs(A, B, dt) {
     const adx = Math.sin(A.yaw), adz = Math.cos(A.yaw);
     const bdx = Math.sin(B.yaw), bdz = Math.cos(B.yaw), bh = B.len / 2;
@@ -1018,16 +1050,23 @@ applyQuality(quality);
     }
   }
   function updateObstacles(dtReal) {
+    spawnObstacles();
     const list = river.obstacles;
-    if (!list || !list.length) return;
-    const zk = kayak.p[2], steps = OBSTACLES.substeps, dt = dtReal / steps;
+    if (!list.length) return;
+    const kz = kayak.p[2], steps = OBSTACLES.substeps, dt = dtReal / steps;
     const active = [];
     for (const ob of list) {
-      if (ob.gone) continue;
-      if (ob.z > river.finishZ + 25) { ob.gone = true; continue; }   // drifted out of the run
-      if (ob.z < zk - OBSTACLES.simBehind || ob.z > zk + OBSTACLES.simAhead) { ob.fx = 0; ob.fz = 0; ob.tq = 0; continue; }
+      if (!ob.sinking && (ob.z < kz - OBSTACLES.despawnBehind || ob.z > river.finishZ + 15)) { ob.sinking = true; ob.sinkT = 0; ob.y0 = ob.y; }
+      if (ob.sinking) {      // retiring: frozen, sinks on an ease-in while fading, then leaves the list
+        ob.sinkT += dtReal;
+        const s = clamp(ob.sinkT / OBSTACLES.sinkTime, 0, 1);
+        ob.alpha = 1 - s; ob.y = ob.y0 - OBSTACLES.sinkDepth * s * s;
+        ob.fx = 0; ob.fz = 0; ob.tq = 0;
+        continue;
+      }
       active.push(ob);
     }
+    for (let i = list.length - 1; i >= 0; i--) if (list[i].sinking && list[i].sinkT >= OBSTACLES.sinkTime) list.splice(i, 1);
     for (let s = 0; s < steps; s++) {
       for (const ob of active) stepObstacle(ob, dt);
       for (let a = 0; a < active.length; a++) for (let b = a + 1; b < active.length; b++) {
@@ -1036,27 +1075,31 @@ applyQuality(quality);
         contactSegs(A, B, dt); contactSegs(B, A, dt);
       }
     }
-    for (const ob of active) { ob.fx = 0; ob.fz = 0; ob.tq = 0; }
-    // broad phase for the kayak contact test, consumed by kayak.step next frame. Non-interacting
-    // (small) obstacles are filtered out here rather than inside the physics loop.
+    // floating height: blended surface reference (surfaceAt) plus a low-pass, so neither the
+    // readback-band edge nor a grounding transition can make one jump
+    const ky = 1 - Math.exp(-dtReal * OBSTACLES.ySmooth);
+    for (const ob of active) {
+      ob.fx = 0; ob.fz = 0; ob.tq = 0;
+      const target = surfaceAt(ob.x, ob.z) + (ob.grounded ? 0 : OBSTACLES.bob * Math.sin(simTime * OBSTACLES.bobSpeed + ob.bobPh));
+      ob.y += (target - ob.y) * ky;
+    }
+    // broad phase for the kayak contact test, consumed by kayak.step next frame
     river.obstNear = active.filter(ob => ob.hitK > 0 &&
       Math.hypot(ob.x - kayak.p[0], ob.z - kayak.p[2]) < ob.len / 2 + ob.rad + 4);
   }
   function writeObstacleInstances() {
-    for (const g of Object.values(river.obstGroups || {})) {
-      if (!g.list.length) continue;
-      const data = new Float32Array(g.list.length * 20);
-      g.list.forEach((ob, n) => {
-        if (ob.gone) { data.set(mat4TRS([ob.x, -1000, ob.z], 0, [1, 1, 1]), n * 20); data.set([1, 1, 1, 1], n * 20 + 16); return; }
-        // waterAt().eta is the live simulated surface near the boat and the channel's normal
-        // depth further out, and falls back to the bed height where it's dry — so a beached or
-        // rock-pinned obstacle sits on the ground with no extra case
-        ob.y = waterAt(ob.x, ob.z).eta + (ob.grounded ? 0 : OBSTACLES.bob * Math.sin(simTime * OBSTACLES.bobSpeed + ob.bobPh));
+    const groups = {};
+    for (const ob of river.obstacles || []) (groups[ob.mesh] || (groups[ob.mesh] = [])).push(ob);
+    river.obstDraw = [];
+    for (const [name, list] of Object.entries(groups)) {
+      const data = new Float32Array(list.length * 20);
+      list.forEach((ob, n) => {
         const q = qMul(qAxisAngle([0, 1, 0], ob.yaw), qAxisAngle([0, 0, 1], ob.roll));
-        data.set(mat4Compose([ob.x, ob.y, ob.z], q, [ob.rad, ob.rad * ob.radY, ob.len]), n * 20);
-        data.set(ob.tint, n * 20 + 16);
+        data.set(mat4Compose([ob.x, ob.y, ob.z], q, [ob.sc, ob.sc, ob.sc]), n * 20);
+        data.set([ob.tint[0], ob.tint[1], ob.tint[2], ob.alpha], n * 20 + 16);
       });
-      device.queue.writeBuffer(g.buf, 0, data);
+      device.queue.writeBuffer(obstInstBufs[name], 0, data);
+      river.obstDraw.push({ name, count: list.length });
     }
   }
   // recompute pickup transforms/fade each frame and resolve collection against the paddler
@@ -1158,7 +1201,7 @@ applyQuality(quality);
     for (const it of river.pickups.rucksack) { it.alive = false; it.collected = false; it.vx = 0; it.vz = 0; it.nudging = false; }
     river.rucksackSpawnT = 0;
     placeMapItem();   // re-rolled every attempt, not just on river regeneration
-    placeObstacles();   // re-laid from the river seed every attempt, so a retry is identical
+    
 
     runLoot = { paddles: 0, coins: 0, coinValue: 0 };
     device.queue.writeBuffer(stateBufs[0], 0, river.state); device.queue.writeBuffer(kBufs[0], 0, river.kArr);
@@ -1166,7 +1209,9 @@ applyQuality(quality);
     writeSimUniforms(0, 1);
     await runWarmup();
     band.ready = false;
-    kayak.reset(); cam.reset();
+    kayak.reset(); 
+    cam.reset();
+    placeObstacles();   // seeded relative to the boat, so after reset; redone every attempt
     if (isMobile) gyro.calibrate();          // however the phone is held right now counts as level
     document.body.classList.add('inrun');
     simTime = 0; runTime = 0;
@@ -1430,13 +1475,7 @@ applyQuality(quality);
       pass.setVertexBuffer(1, ib.buf);
       pass.draw(vegMeshes[name].count, ib.count);
     }
-    // floating obstacles — opaque, same pipeline as the props
-    for (const [name, g] of Object.entries(river.obstGroups || {})) {
-      if (!g.list.length) continue;
-      pass.setVertexBuffer(0, obstMeshes[name].vbuf);
-      pass.setVertexBuffer(1, g.buf);
-      pass.draw(obstMeshes[name].count, g.list.length);
-    }
+
 
     for (const name of ['hull', 'cockpit', 'torso', 'head', 'paddle']) {
        pass.setVertexBuffer(0, kayakMeshes[name].vbuf); 
@@ -1444,6 +1483,14 @@ applyQuality(quality);
        pass.draw(kayakMeshes[name].count, 1); }
     pass.setVertexBuffer(0, armBuf); pass.setVertexBuffer(1, kayakInst.arms); 
     pass.draw(armVertCount, 1);
+    // floating obstacles — drawn last among the solids, with their own alpha-capable pipeline
+    if (river.obstDraw && river.obstDraw.length) {
+      pass.setPipeline(obstPipe);
+      for (const d of river.obstDraw) {
+        pass.setVertexBuffer(0, obstMeshes[d.name].vbuf); pass.setVertexBuffer(1, obstInstBufs[d.name]);
+        pass.draw(obstMeshes[d.name].count, d.count);
+      }
+    }
     pass.setPipeline(waterPipe);
     for (const sl of waterSlices) { 
       pass.setIndexBuffer(sl.buf, 'uint32'); 

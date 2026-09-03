@@ -1,4 +1,4 @@
-import { v3, vnoise3 } from './math.js';
+import { v3, vnoise3, mulberry32 } from './math.js';
 
 export class MeshBuilder {
   constructor() { this.d = []; }
@@ -200,33 +200,49 @@ export function buildVegetationMeshes() {
 
   return M;
 }
-
 // ---------- floating obstacles ----------
-// Every obstacle mesh is modelled in one canonical frame: the long axis runs along local +Z from
-// -0.5 to +0.5, the cross-section fits a unit radius in X/Y, and y = 0 is the waterline (whatever
-// sits below y = 0 is the submerged part). The instance matrix then scales it by
-// [rad, rad*radY, len], so one mesh covers a whole range of lengths and thicknesses.
-//
-// That scale is strongly non-uniform (len/rad is often 20:1), which is exactly why all the
-// geometry here is axis-aligned along Z: a Z-aligned cylinder's barrel normals lie in XY, which
-// scale together, so the lighting stays correct. A tilted branch stub would have its
-// cross-section stretched 20x along Z and come out as a flat fin, so shape variation is done
-// through separate mesh variants + the per-instance radY/len/tint instead.
-const OBST_BARK = [0.34, 0.25, 0.16], OBST_DARK = [0.25, 0.18, 0.11], OBST_CUT = [0.66, 0.52, 0.33];
+// Modelled in metres: long axis along local Z (centred), y = 0 at the waterline. Instances are
+// scaled *uniformly* to their chosen length and never stretched, so branch stubs and tapers keep
+// their shape. Each builder returns the mesh plus the nominal numbers the physics needs:
+// len, rad (collision capsule radius), draft (depth below the waterline) and vol (m³, for mass).
+const OBST_BARK = [0.34, 0.25, 0.16], OBST_DARK = [0.24, 0.17, 0.11], OBST_CUT = [0.66, 0.52, 0.33];
+const ICE_UP = [0.88, 0.94, 1.0], ICE_DOWN = [0.48, 0.66, 0.78];
 
-// a log is just a stack of Z-aligned tapered sections: [z0, z1, r0, r1, colour]
-function buildLogMesh(sections, sides) {
-  const mb = new MeshBuilder();
-  for (const [z0, z1, r0, r1, col] of sections) addCylinder(mb, [0, 0, z0], [0, 0, z1], r0, r1, sides, col);
-  return mb;
+// broken-off branch stubs poking out at random angles. Purely cosmetic — the physics treats the
+// log as a plain capsule — so they're kept under half a metre so the boat never visibly passes
+// through one. Whichever ones land on the underside are simply hidden by the water.
+function addStubs(mb, rng, len, rad, count, col) {
+  for (let k = 0; k < count; k++) {
+    const z = (rng() - 0.5) * len * 0.8, a = rng() * 6.2832;
+    const out = [Math.cos(a), Math.sin(a), 0];
+    const dir = v3.norm([out[0], out[1], (rng() - 0.5) * 1.2]);     // leans fore/aft a little
+    const base = v3.scale(out, rad * 0.8); base[2] = z;
+    const tip = v3.add(base, v3.scale(dir, rad * 0.2 + 0.15 + rng() * 0.27));   // ≤ ~0.45 m proud of the bark
+    addCylinder(mb, base, tip, Math.min(0.06, rad * 0.3), 0.012, 5, col);
+  }
 }
-
-// extrude a 2-D cross-section polygon along Z through a list of stations ({ z, sx, sy }). Flat
-// facets and hard edges read as ice, where the noise-displaced spheres used for rock read as
+// one trunk section: tapered barrel, pale cut faces, optional root flare at the butt (`flare` m)
+// or a splintered snapped-off top (`snap` m), and `stubs` branch stubs
+function buildLog(seed, len, r0, r1, sides, o = {}) {
+  const mb = new MeshBuilder(), rng = mulberry32(seed), h = len / 2;
+  let zb = -h, rb = r0;
+  if (o.flare) { rb = r0 * 1.35; addCylinder(mb, [0, 0, -h], [0, 0, -h + o.flare], rb, r0, sides, OBST_DARK); zb = -h + o.flare; }
+  const ze = o.snap ? h - o.snap : h;
+  addCylinder(mb, [0, 0, zb], [0, 0, ze], r0, r1, sides, OBST_BARK);
+  if (o.snap) addCylinder(mb, [0, 0, ze], [0, 0, h], r1, r1 * 0.35, sides, OBST_CUT);
+  // cut faces: thin discs a hair proud of the ends, so they win the depth test against the barrel caps
+  addCylinder(mb, [0, 0, -h - 0.012], [0, 0, -h + 0.02], rb * 0.97, rb * 0.97, sides, OBST_CUT);
+  if (!o.snap) addCylinder(mb, [0, 0, h - 0.02], [0, 0, h + 0.012], r1 * 0.97, r1 * 0.97, sides, OBST_CUT);
+  addStubs(mb, rng, len, (r0 + r1) / 2, o.stubs || 0, OBST_DARK);
+  const rm = (r0 + r1) / 2;
+  return { mb, len, rad: r0, draft: r0, vol: Math.PI * rm * rm * len };
+}
+// extrude a 2-D cross-section polygon along Z through a list of stations ([zFrac, sx, sy]) —
+// flat facets and hard edges read as ice where the noise-displaced spheres used for rock read as
 // stone. Quads above the waterline get the bright colour, submerged ones the darker blue-green.
 function addStack(mb, poly, stations, colUp, colDown) {
   const n = poly.length;
-  const pt = (st, k) => [poly[k][0] * st.sx, poly[k][1] * st.sy + (st.dy || 0), st.z];
+  const pt = (st, k) => [poly[k][0] * st.sx, poly[k][1] * st.sy, st.z];
   for (let s = 0; s < stations.length - 1; s++) {
     const A = stations[s], B = stations[s + 1];
     for (let k = 0; k < n; k++) {
@@ -241,46 +257,30 @@ function addStack(mb, poly, stations, colUp, colDown) {
     }
   }
 }
-
-// irregular convex cross-section: wide, thin, and sitting mostly below y = 0 like real ice
-function icePoly(n, top, bot, sd) {
+// irregular convex slab cross-section: `hw` half-width [m], spanning y = bot … top [m]
+function icePoly(n, hw, top, bot, sd) {
   return Array.from({ length: n }, (_, k) => {
     const a = 6.2832 * (k + 0.18 * vnoise3(k * 0.9, sd, 0.5, 31)) / n;
     const r = 0.78 + 0.26 * vnoise3(k * 0.7 + 1.3, sd, 2.1, 30);
-    return [Math.cos(a) * r, bot + (Math.sin(a) * r + 1) * 0.5 * (top - bot)];
+    return [Math.cos(a) * r * hw, bot + (Math.sin(a) * r + 1) * 0.5 * (top - bot)];
   });
 }
-
+function buildIce(seed, sides, len, hw, top, bot, stations) {
+  const mb = new MeshBuilder();
+  addStack(mb, icePoly(sides, hw, top, bot, seed), stations.map(([zf, sx, sy]) => ({ z: zf * len, sx, sy })), ICE_UP, ICE_DOWN);
+  return { mb, len, rad: hw, draft: -bot, vol: 1.3 * hw * (top - bot) * len };
+}
 export function buildObstacleMeshes() {
-  const M = {};
-  const bark = OBST_BARK, dark = OBST_DARK, cut = OBST_CUT;
-  // small: a stubby waterlogged branch, thick at one end
-  M.logSmall = buildLogMesh([[-0.5, -0.12, 0.55, 0.95, dark], [-0.12, 0.5, 0.95, 0.35, bark]], 6);
-  // medium: barked trunk section with pale cut faces at both ends and a knot collar
-  M.logMedium = buildLogMesh([[-0.5, -0.47, 0.96, 0.98, cut], [-0.47, 0.47, 1.0, 0.86, bark],
-                              [-0.10, -0.02, 1.10, 1.10, dark], [0.47, 0.5, 0.86, 0.84, cut]], 9);
-  M.logMediumB = buildLogMesh([[-0.5, -0.44, 0.80, 0.92, cut], [-0.44, 0.30, 0.95, 0.90, bark],
-                               [0.30, 0.5, 0.90, 0.55, dark]], 8);
-  // large: root flare at the butt, snapped splintered top
-  M.logLarge = buildLogMesh([[-0.5, -0.38, 1.30, 1.02, dark], [-0.38, 0.40, 1.0, 0.84, bark],
-                             [0.04, 0.12, 1.08, 1.08, dark], [0.40, 0.5, 0.84, 0.50, cut]], 12);
-  M.logLargeB = buildLogMesh([[-0.5, -0.46, 0.95, 0.98, cut], [-0.46, 0.20, 1.0, 0.93, bark],
-                              [0.20, 0.44, 0.93, 0.86, bark], [0.44, 0.5, 0.86, 0.86, cut],
-                              [-0.20, -0.12, 1.12, 1.12, dark]], 12);
-
-  const iceUp = [0.88, 0.94, 1.0], iceDown = [0.48, 0.66, 0.78];
-  const floe = (sd, stations) => { const mb = new MeshBuilder(); addStack(mb, icePoly(7, 0.30, -0.70, sd), stations, iceUp, iceDown); return mb; };
-  M.iceSmall = floe(1, [{ z: -0.5, sx: 0.55, sy: 0.70 }, { z: -0.2, sx: 0.95, sy: 1 }, { z: 0.22, sx: 1, sy: 1 }, { z: 0.5, sx: 0.60, sy: 0.75 }]);
-  M.iceMedium = floe(2, [{ z: -0.5, sx: 0.50, sy: 0.65 }, { z: -0.25, sx: 0.90, sy: 0.95 }, { z: 0.1, sx: 1, sy: 1 }, { z: 0.34, sx: 0.85, sy: 0.9 }, { z: 0.5, sx: 0.45, sy: 0.6 }]);
-  M.iceMediumB = floe(3, [{ z: -0.5, sx: 0.65, sy: 0.8 }, { z: -0.1, sx: 1, sy: 1 }, { z: 0.28, sx: 0.80, sy: 0.95 }, { z: 0.5, sx: 0.70, sy: 0.7 }]);
-  // icebergs: same slab construction, but a much taller cross-section so a jagged mass stands
-  // clear of the water with the bulk of it hidden underneath
-  const berg = (sd, stations) => { const mb = new MeshBuilder(); addStack(mb, icePoly(8, 0.95, -0.80, sd), stations, iceUp, iceDown); return mb; };
-  M.iceberg = berg(4, [{ z: -0.5, sx: 0.45, sy: 0.45 }, { z: -0.28, sx: 0.85, sy: 0.80 },
-                       { z: -0.05, sx: 1, sy: 1 }, { z: 0.18, sx: 0.92, sy: 0.85 },
-                       { z: 0.36, sx: 0.70, sy: 0.95 }, { z: 0.5, sx: 0.40, sy: 0.50 }]);
-  M.icebergB = berg(5, [{ z: -0.5, sx: 0.55, sy: 0.60 }, { z: -0.2, sx: 0.95, sy: 0.85 },
-                        { z: 0.02, sx: 0.80, sy: 1 }, { z: 0.24, sx: 1, sy: 0.75 },
-                        { z: 0.5, sx: 0.50, sy: 0.55 }]);
-  return M;
+  return {
+    logMedium:  buildLog(1, 4.6,  0.28, 0.22, 10, { stubs: 3 }),
+    logMediumB: buildLog(2, 5.4,  0.24, 0.20, 9,  { snap: 0.35, stubs: 2 }),
+    logLarge:   buildLog(3, 9.0,  0.52, 0.42, 12, { flare: 0.9, stubs: 4 }),
+    logLargeB:  buildLog(4, 10.5, 0.46, 0.40, 12, { snap: 0.6, stubs: 5 }),
+    // floes: thin wide slabs, ~10 % freeboard
+    iceMedium:  buildIce(5, 7, 2.6, 1.1, 0.35, -0.75, [[-0.5, 0.55, 0.70], [-0.2, 0.95, 1], [0.22, 1, 1], [0.5, 0.60, 0.75]]),
+    iceMediumB: buildIce(6, 7, 3.0, 0.9, 0.30, -0.70, [[-0.5, 0.50, 0.65], [-0.25, 0.9, 0.95], [0.1, 1, 1], [0.34, 0.85, 0.9], [0.5, 0.45, 0.6]]),
+    // small icebergs: a jagged mass standing clear of the water with most of the bulk below it
+    iceberg:    buildIce(7, 8, 6.0, 2.2, 1.6, -1.8, [[-0.5, 0.45, 0.45], [-0.28, 0.85, 0.80], [-0.05, 1, 1], [0.18, 0.92, 0.85], [0.36, 0.70, 0.95], [0.5, 0.40, 0.50]]),
+    icebergB:   buildIce(8, 8, 7.0, 1.9, 2.0, -1.6, [[-0.5, 0.55, 0.60], [-0.2, 0.95, 0.85], [0.02, 0.80, 1], [0.24, 1, 0.75], [0.5, 0.50, 0.55]]),
+  };
 }

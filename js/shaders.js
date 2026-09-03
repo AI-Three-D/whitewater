@@ -568,8 +568,14 @@ struct MVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(
   let m = mat4x4f(in.m0, in.m1, in.m2, in.m3);
   let wp = (m * vec4f(in.pos, 1.0)).xyz;
   var o: MVOut;
-  o.pos = C.vp * vec4f(wp, 1.0); o.wp = wp;
-  o.n = normalize((m * vec4f(in.nrm, 0.0)).xyz);
+  o.pos = C.vp * vec4f(wp, 1.0); 
+  o.wp = wp;
+  // inverse-transpose normal transform (cofactor columns of the upper 3x3). Instance matrices can
+  // carry non-uniform scale, and the plain M*n used before skewed the normals of anything tapered
+  // or tilted — on long thin objects badly enough that the shading popped as the camera moved.
+  let a = in.m0.xyz; let b = in.m1.xyz; let c = in.m2.xyz;
+  o.n = normalize(cross(b, c) * in.nrm.x + cross(c, a) * in.nrm.y + cross(a, b) * in.nrm.z);
+  
   o.col = in.col * in.tint.rgb;
   o.a = in.tint.a;
   return o;
@@ -597,6 +603,13 @@ fn litMesh(in: MVOut) -> vec3f {
   var lit = in.col * (0.85 + 0.25 * n.y + sun * 0.55) + in.col * rim * 0.6;
   lit = applyFog(lit, length(in.wp - C.camPos.xyz));
   return vec4f(lit, in.a);
+}
+  // lit exactly like the opaque props but honouring the instance alpha — floating obstacles use
+// it so they can fade as they sink away. Fully transparent fragments are discarded so a retired
+// obstacle doesn't keep writing depth.
+@fragment fn fsMeshAlpha(in: MVOut) -> @location(0) vec4f {
+  if (in.a <= 0.01) { discard; }
+  return vec4f(litMesh(in), in.a);
 }
 `;
 

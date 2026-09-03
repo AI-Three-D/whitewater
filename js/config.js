@@ -147,10 +147,8 @@ export const RIVERS = [
     meander: [[18, 170], [6, 61]], depth: 1.6, rocks: 10, rockR: [0.8, 2.0], emergent: 0.3, ledges: [],
     constrictions: 0, valleyH: 12, valleyScale: 70, seed: 11, len: 350,
     waterTint: [0.02, 0.17, 0.06], waterClarity: 1.0,   // emerald
-    // wide (24 m), slow and shallow-graded — the one river roomy enough to carry every log size at
-    // once, so it's the test bed. Counts are per 100 m of playable length, i.e. ~26 branches,
-    // ~14 medium logs and ~7 full trunks over its 350 m.
-    obstacles: { log: { small: 9, medium: 5, large: 2.5 } },
+
+obstacles: { log: { medium: 5, large: 2.5 } },
     forks: [{ startZ: 70, mergeZ: 83, splitLen: 22, mergeLen: 22, separation: 20, widthScale: 0.75, shares: [0.55, 0.45] }],
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 31 } },
 
@@ -313,62 +311,61 @@ export const RUCKSACK = {
   drag: 2.2, checkInterval: 4, stuckDist: 0.6, nudgeSpeed: 0.8,
 };
 // ---------- floating obstacles: drifting logs and ice ----------
-// A "size class" decides only how an obstacle behaves against the kayak; a "kind" (log / ice)
-// decides what it looks like, how big it is and what it weighs. Any river can carry any subset
-// of kinds and classes — see RIVERS[].obstacles.
-//
-//   small  — hitK 0: never touches the boat at all. Floating branches / brash ice: they drift,
-//            rotate, ground out on rocks and bump each other, but the kayak goes straight through.
+// A size class decides how an obstacle behaves against the kayak; a kind (log / ice) decides what
+// it looks like, how big it is and what it weighs. Any river can carry any subset of kinds and
+// classes — see RIVERS[].obstacles.
 //   medium — a fraction of a rock's contact stiffness plus some upward lift, so a paddler rides
 //            over it or shoves it aside with a noticeable bump instead of being stopped.
 //   large  — full KAYAK.collK stiffness, i.e. exactly as solid as the bed: a real wall.
 //
-// Physics: every obstacle is a floating capsule (long axis, circular-ish cross-section) sampled
-// at `samples` points along its length. Each sample is dragged toward the locally simulated water
-// velocity, with much more drag across the axis than along it — that anisotropy in a sheared
-// river is what makes a long trunk swing round and line itself up with the current, and what
-// makes a trunk pinned on a rock pivot instead of sliding off. Where the local depth is less
-// than the obstacle's draft it grounds: pushed downhill by the bed slope and heavily damped, so
-// logs really do beach on bars and jam on emergent boulders.
+// Spawning is live, like the rucksacks, not pre-placed. As the kayak makes downstream progress
+// each configured kind/class accrues `per100m` spawns per 100 m travelled; each one is dropped
+// into the channel `spawnAhead` metres downstream of the boat — the default lower bound sits past
+// RENDER.viewAhead (170 m on high) plus fog, so nothing is ever seen popping into existence — and
+// the current then carries it back toward the paddler. Once the boat has left one `despawnBehind`
+// metres upstream (or it has drifted past the take-out) it retires: it sinks `sinkDepth` metres
+// while fading out over `sinkTime` seconds, then its slot in the quota is freed.
+//
+// Physics: a floating capsule sampled at `samples` points along its length. Each sample is
+// dragged toward the locally simulated water velocity, with far more drag across the axis than
+// along it — in a sheared river that asymmetry is a real torque, which is what swings a trunk
+// round until it points downstream and makes one pinned on a boulder pivot about the contact.
+// Where the depth drops below its draft it grounds: pushed downhill by the bed slope, heavily
+// damped, so logs beach on bars and jam on emergent rocks. Obstacles also collide with each other.
 export const OBSTACLES = {
-  enabled: true,                    // master switch, handy when debugging something else
-  substeps: 2,                      // physics substeps per rendered frame
-  simAhead: 130, simBehind: 45,     // only obstacles this close to the boat are simulated [m]
-  dragAxial: 0.5, dragLat: 2.2,     // [1/s] velocity relaxation toward the current along / across
-  yawDrag: 0.9,                     // [1/s] spin damping
-  groundPush: 45, groundFric: 6,    // grounded-out behaviour (see above)
-  pairK: 70, pairDamp: 10,          // obstacle-vs-obstacle contact — this is what builds log jams
-  vmax: 8, wmax: 2.5,               // sanity clamps [m/s], [rad/s]
-  hullR: 0.34,                      // kayak hull radius used by the contact test [m]
-  bob: 0.05, bobSpeed: 1.6,         // gentle vertical bob while afloat
+  enabled: true,
+  maxActive: 40,                 // hard cap on obstacles existing at once (a river's `max` overrides)
+  spawnAhead: [190, 260],        // [m] downstream of the kayak where new ones are dropped in
+  seedAheadFrom: 50,             // at run start the reach from here to spawnAhead[1] is pre-populated
+                                 // at the same density, so the first stretch isn't empty
+  despawnBehind: 70,             // [m] upstream of the kayak before one retires
+  sinkTime: 4.0, sinkDepth: 1.6, // the retirement animation
+  substeps: 2,                   // physics substeps per rendered frame
+  dragAxial: 0.5, dragLat: 2.2,  // [1/s] velocity relaxation toward the current along / across the axis
+  yawDrag: 0.9,                  // [1/s] spin damping
+  groundPush: 45, groundFric: 6, // grounded-out behaviour (see above)
+  pairK: 70, pairDamp: 10,       // obstacle-vs-obstacle contact — this is what builds log jams
+  vmax: 8, wmax: 2.5,            // sanity clamps [m/s], [rad/s]
+  hullR: 0.34,                   // kayak hull radius used by the contact test [m]
+  bob: 0.04, bobSpeed: 1.6,      // gentle vertical bob while afloat
+  ySmooth: 4,                    // [1/s] low-pass on the floating height (see surfaceAt in main.js)
   classes: {
-    small:  { hitK: 0,    lift: 0,    samples: 3 },
     medium: { hitK: 0.16, lift: 0.45, samples: 4 },
     large:  { hitK: 1.0,  lift: 0.05, samples: 6 },
   },
-  // Per kind: `density` kg/m³, `volFactor` the cross-section area of that kind's mesh in units of
-  // rad² (so mass = density · volFactor · rad² · radY · len — a 9 m × 1 m trunk comes out at
-  // ~3.5 t, a 6 m berg at ~39 t, a floating branch at ~45 kg). `draftFrac` is how deep it sits as
-  // a fraction of its half-thickness, and therefore how shallow the water has to get before it
-  // grounds. `radY` flattens the cross-section per instance — the main shape variation knob.
+  // Each class lists mesh variants (built in metres, see buildObstacleMeshes) and the length
+  // range instances are drawn from. An instance picks a variant and a length, and is scaled
+  // uniformly to that length — thickness, draft and mass (density × the variant's volume × scale³)
+  // all follow, so shape variation comes from the variants and the scale, never from stretching.
   kinds: {
-    log: {
-      label: 'driftwood', density: 650, volFactor: 2.6, draftFrac: 1.0, roll: true,
-      tint: [1, 1, 1],
-      small:  { meshes: ['logSmall'],                 len: [1.2, 2.8], rad: [0.09, 0.16], radY: [0.85, 1.0] },
-      medium: { meshes: ['logMedium', 'logMediumB'],  len: [3.5, 6.0], rad: [0.20, 0.32], radY: [0.85, 1.0] },
-      large:  { meshes: ['logLarge', 'logLargeB'],    len: [7.0, 11.0], rad: [0.38, 0.62], radY: [0.85, 1.0] },
-    },
-    ice: {
-      label: 'drift ice', density: 900, volFactor: 1.35, draftFrac: 0.75, roll: false,
-      tint: [1, 1, 1],
-      small:  { meshes: ['iceSmall'],                 len: [0.8, 2.2], rad: [0.45, 1.0], radY: [0.45, 0.8] },
-      medium: { meshes: ['iceMedium', 'iceMediumB'],  len: [1.8, 3.2], rad: [0.80, 1.4], radY: [0.45, 0.7] },
-      large:  { meshes: ['iceberg', 'icebergB'],      len: [4.0, 8.0], rad: [1.60, 2.6], radY: [0.80, 1.4] },
-    },
+    log: { label: 'driftwood', density: 650, roll: true,
+      medium: { meshes: ['logMedium', 'logMediumB'], len: [3.5, 6.0] },
+      large:  { meshes: ['logLarge', 'logLargeB'],   len: [7.0, 11.0] } },
+    ice: { label: 'drift ice', density: 900, roll: false,
+      medium: { meshes: ['iceMedium', 'iceMediumB'], len: [1.8, 3.4] },
+      large:  { meshes: ['iceberg', 'icebergB'],     len: [4.0, 8.0] } },
   },
 };
-
 export const CHARACTERS = {
   ronja: { name: 'Ronja', title: 'the Technician',
     desc: 'Grew up slalom racing. Reads water like a book and has hips of steel — but she tires quickly.',
