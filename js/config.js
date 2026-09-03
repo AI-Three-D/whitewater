@@ -374,6 +374,29 @@ export const CHARACTERS = {
     desc: 'Ex-rower. Can paddle all day without slowing down, but the boat still surprises him now and then.',
     caps: { skill: 6, stamina: 10 }, start: { skill: 0, stamina: 1 }, talent: 'stamina' },
 };
+// ---------- watercraft ----------
+// Every boat the player can own. `mods` multiply the matching KAYAK physics numbers for a run in
+// that craft (see craftKayakParams in main.js), so a new hull is a config entry, not code. `color`
+// is the deck colour (the hull mesh is white/grey and takes it as tint). Non-kayak craft (a raft,
+// say) fit the same shape — they'd mod mass/drag/stability and, once they have their own mesh,
+// pick it via an extra field. price 0 = owned from the start.
+export const CRAFTS = {
+  classic: { name: 'River Runner', type: 'kayak', price: 0, color: [0.92, 0.22, 0.12],
+    desc: 'The all-rounder you started in. Forgiving, steady, no surprises.', mods: {} },
+  slalom: { name: 'Slalom Blade', type: 'kayak', price: 20, color: [0.15, 0.55, 0.95],
+    desc: 'Shorter, harder-edged hull: sweep strokes bite and swing the boat round noticeably faster.',
+    mods: { sweepTorque: 1.45, sweepFwd: 1.15 } },
+};
+// ---------- consumables ----------
+export const ITEMS = {
+  snack: { name: 'Trail snack', icon: '🥜', price: 3, stamina: 45, maxStack: 9,
+    desc: 'Eat it mid-run to get 45 stamina back. Up to 9 fit in your pack.' },
+};
+// the store shelf, top to bottom. Crafts you already own show as owned rather than disappearing.
+export const STORE_LISTING = [
+  { type: 'item', id: 'snack' },
+  { type: 'craft', id: 'slalom' },
+];
 
 export const STAMINA = {
   max: 100,

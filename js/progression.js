@@ -1,4 +1,4 @@
-import { CHARACTERS, TIER_POINTS, PICKUPS, RIVERS, TIERS } from './config.js';
+import { CHARACTERS, TIER_POINTS, PICKUPS, RIVERS, TIERS, CRAFTS, ITEMS } from './config.js';
 
 const KEY = 'whitewater.save.v1';
 
@@ -26,6 +26,10 @@ export function loadProfile() {
       if (typeof p.coins !== 'number') p.coins = 0;   // upgrade older saves
       if (!p.mapCarrier) p.mapCarrier = pickCarriers();
       if (!p.unlockedHidden) p.unlockedHidden = freshUnlocks();
+      if (!p.inventory) p.inventory = {};
+      if (!p.crafts) p.crafts = ['classic'];
+      if (!p.craft || !CRAFTS[p.craft]) p.craft = 'classic';
+
       return p;
     }
   } catch (_) { /* corrupt save → ignore */ }
@@ -37,7 +41,8 @@ export function clearProfile() { localStorage.removeItem(KEY); }
 export function newProfile(charId) {
   const c = CHARACTERS[charId];
   const p = { charId, level: 0, points: 0, pending: 0, coins: 0, skill: c.start.skill, stamina: c.start.stamina, runs: 0, best: {},
-    mapCarrier: pickCarriers(), unlockedHidden: freshUnlocks() };
+    mapCarrier: pickCarriers(), unlockedHidden: freshUnlocks(),
+    inventory: {}, crafts: ['classic'], craft: 'classic' };
   saveProfile(p);
   return p;
 }
@@ -74,3 +79,27 @@ export function spendPoint(p, trait) {
 }
 /** Both traits capped — a pending point can't be used; throw it away so the dialog doesn't loop. */
 export function discardPending(p) { p.pending = 0; saveProfile(p); }
+
+// ---------- store / inventory ----------
+export const craftOf = p => CRAFTS[p.craft] || CRAFTS.classic;
+export const itemCount = (p, id) => p.inventory[id] || 0;
+export const canBuyItem = (p, id) => !!ITEMS[id] && p.coins >= ITEMS[id].price && itemCount(p, id) < ITEMS[id].maxStack;
+export const canBuyCraft = (p, id) => !!CRAFTS[id] && !p.crafts.includes(id) && p.coins >= CRAFTS[id].price;
+export function buyItem(p, id) {
+if (!canBuyItem(p, id)) return false;
+p.coins -= ITEMS[id].price; p.inventory[id] = itemCount(p, id) + 1; saveProfile(p);
+return true;
+}
+/** Buying a boat also makes it the selected one — that's what you bought it for. */
+export function buyCraft(p, id) {
+if (!canBuyCraft(p, id)) return false;
+p.coins -= CRAFTS[id].price; p.crafts.push(id); p.craft = id; saveProfile(p);
+return true;
+}
+export function selectCraft(p, id) { if (p.crafts.includes(id)) { p.craft = id; saveProfile(p); } }
+/** Consume one of an item. Saved immediately — eating isn't undone by a capsize. */
+export function useItem(p, id) {
+if (itemCount(p, id) <= 0) return false;
+p.inventory[id]--; saveProfile(p);
+return true;
+}

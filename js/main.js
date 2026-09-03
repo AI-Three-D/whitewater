@@ -1,5 +1,6 @@
 'use strict';
-import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, MAP_ITEM, RUCKSACK, OBSTACLES, CHARACTERS, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
+import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, MAP_ITEM, RUCKSACK, OBSTACLES, CHARACTERS, CRAFTS, ITEMS, STORE_LISTING, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
+
 
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW } from './shaders.js';
 import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec,
@@ -8,7 +9,8 @@ import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec,
 import { generateRiver, nearestChan } from './river.js';
 import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh, buildObstacleMeshes } from './meshes.js';
 import { loadProfile, newProfile, clearProfile, character, canRaise, anyRaisable,
-         awardRun, spendPoint, discardPending, pointsForLevel, unlockHidden } from './progression.js';
+  awardRun, spendPoint, discardPending, pointsForLevel, unlockHidden,
+  craftOf, itemCount, canBuyItem, canBuyCraft, buyItem, buyCraft, selectCraft, useItem } from './progression.js';
 
 const showErr = t => { const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = t; };
 addEventListener('error', e => showErr('Script error: ' + e.message + ' (line ' + e.lineno + ')'));
@@ -16,7 +18,7 @@ addEventListener('unhandledrejection', e => showErr('Promise error: ' + ((e.reas
 const $ = id => document.getElementById(id);
 // bumped by hand on every edit — lets a stale/cached page or a not-yet-reloaded tab be spotted
 // on sight instead of chasing "am I even testing the current code" through several rounds
-const BUILD = 'build 26';
+const BUILD = 'build 27';
 { const v = document.getElementById('ver'); if (v) v.textContent = BUILD; }
 // ---------- platform ----------
 // modern-browser signals only: a touch screen (maxTouchPoints) whose primary pointer is coarse
@@ -280,6 +282,16 @@ applyQuality(quality);
   const KAYAK_TICKS = 2;     // kayak/physics ticks per rendered frame (see frame())
   
   let runLoot = { paddles: 0, coins: 0, coinValue: 0 };
+  let snackMsgUntil = 0;   // simTime until which the "snack eaten" HUD line shows
+  // the boat for the current run: its KAYAK parameters with the craft's mods applied (see
+  // craftKayakParams) and the craft itself for the hull colour. Set in startRun.
+  let effK = KAYAK, runCraft = CRAFTS.classic;
+  function craftKayakParams(craft) {
+    const K = Object.assign({}, KAYAK);
+    for (const [k, m] of Object.entries(craft.mods || {})) if (typeof K[k] === 'number') K[k] *= m;
+    return K;
+  }
+
   let mapFoundUntil = 0;   // simTime until which the "hidden map found" HUD line shows
   let profile = loadProfile();           // null → character selection
   const input = { fwd: false, back: false, left: false, right: false, leanL: false, leanR: false };
@@ -290,11 +302,15 @@ applyQuality(quality);
     if (isMobile && padKeys[e.code]) { if (!e.repeat) for (const s of padKeys[e.code]) padDown(s); e.preventDefault(); return; }
     if (keymap[e.code] !== undefined) { input[keymap[e.code]] = true; e.preventDefault(); }
     if (e.code === 'KeyC') camMode = (camMode + 1) % 3;
+    if (e.code === 'KeyE') eatSnack();
     if (e.code === 'F1') { toggleDbg(); e.preventDefault(); }
     if (e.code === 'KeyR') retryRun();
+    
     if (e.code === 'KeyF' && gameState === 'run') endRun(true);
     if (e.code === 'Escape') { if ($('charsheet').style.display === 'flex') hideCharSheet(); else if ($('store').style.display === 'flex') hideStore(); else if ($('lvl').style.display !== 'flex') showMenu(); }
+    
   });
+  
   addEventListener('keyup', e => {
     if (isMobile && padKeys[e.code]) { for (const s of padKeys[e.code]) padUp(s); return; }
     if (keymap[e.code] !== undefined) input[keymap[e.code]] = false;
@@ -333,6 +349,7 @@ applyQuality(quality);
   $('mCam').onclick = () => { camMode = (camMode + 1) % 3; };
   function toggleDbg() { dbgMode = (dbgMode + 1) % 5; $('dbg').style.display = dbgMode ? 'block' : 'none'; }
   $('mDbg').onclick = toggleDbg;
+  $('mEat').onclick = eatSnack;
   // best effort: fullscreen hides the browser chrome and (Android) allows a landscape lock.
   // iPhone Safari has no requestFullscreen and lock() rejects — both are simply skipped.
   function enterFullscreen() {
@@ -341,6 +358,18 @@ applyQuality(quality);
       .then(() => screen.orientation && screen.orientation.lock ? screen.orientation.lock('landscape') : null)
       .catch(() => {});
   }
+    // eat one snack from the pack: only mid-run, only if there's one, and not when the stamina bar is
+  // already (nearly) full — it'd just be thrown away
+  function eatSnack() {
+    if (gameState !== 'run' || !profile) return;
+    if (itemCount(profile, 'snack') <= 0 || kayak.stamina >= STAMINA.max - 2) return;
+    useItem(profile, 'snack');
+    kayak.stamina = clamp(kayak.stamina + ITEMS.snack.stamina, 0, STAMINA.max);
+    kayak.tired = kayak.stamina < STAMINA.max * STAMINA.tiredFrac;
+    snackMsgUntil = simTime + 2.5;
+    popLoot('snack');
+  }
+
   // R key and the Retry button share the same guard
   function retryRun() { if (river && gameState !== 'menu' && !warmingUp && $('lvl').style.display !== 'flex') startRun(river.R); }
 
@@ -358,6 +387,7 @@ applyQuality(quality);
     `<i class="${i < val ? 'on' : ''}${i >= cap ? ' cap' : ''}"></i>`).join('')}</div>`;
   // stand-in for art that isn't in yet — swap the label for a real <img> or background-image later
   const artSlot = (cls, label) => `<div class="art-slot ${cls}">${label}</div>`;
+  const swatch = c => `<i class="swatch" style="background:rgb(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)})"></i>`;
 
   // ---------- menu ----------
   function showMenu() {
@@ -386,8 +416,13 @@ applyQuality(quality);
     renderQuality();
     const cs = $('charsel'), tb = $('topbar'), rl = $('riverlist');
     if (!profile) {
-      cs.style.display = 'flex'; tb.style.display = 'none'; rl.style.display = 'none';
+      
       cs.innerHTML = `<p style="width:100%;margin:0 0 6px">Choose your paddler</p>`;
+      cs.style.display = 'flex'; 
+      tb.style.display = 'none'; 
+      rl.style.display = 'none'; 
+      $('craftbar').style.display = 'none';
+
       for (const [id, c] of Object.entries(CHARACTERS)) {
         const d = document.createElement('div'); d.className = 'chr';
         d.innerHTML = `${artSlot('chr-portrait', c.name + ' art')}
@@ -411,6 +446,16 @@ applyQuality(quality);
       <div class="topbar-btns"><button id="openCharSheet">Character</button><button id="openStoreBtn">Store</button></div>`;
     $('openCharSheet').onclick = showCharSheet;
     $('openStoreBtn').onclick = showStore;
+        // boat picker: one toggle per owned craft, the selected one highlighted. Selection persists
+    // in the profile and is read by startRun.
+    const cb = $('craftbar');
+    cb.style.display = 'flex';
+    const unowned = Object.keys(CRAFTS).filter(id => !profile.crafts.includes(id)).length;
+    cb.innerHTML = `<span>boat</span>` + profile.crafts.map(id => {
+      const c = CRAFTS[id];
+      return `<button class="craftbtn ${id === profile.craft ? 'on' : ''}" data-craft="${id}" title="${c.desc}">${swatch(c.color)}${c.name}</button>`;
+    }).join('') + (unowned ? `<span>· ${unowned} more in the store</span>` : '');
+    for (const btn of cb.querySelectorAll('button')) btn.onclick = () => { selectCraft(profile, btn.dataset.craft); renderMenu(); };
     rl.innerHTML = '';
     for (const tier of TIERS) {
       const h = document.createElement('div'); h.className = 'tier'; h.textContent = `${tier.label} · ${tier.points} pt`; rl.appendChild(h);
@@ -466,15 +511,28 @@ applyQuality(quality);
     if (!profile) return;
     const el = $('store');
     el.style.display = 'flex';
+    const row = entry => {
+      if (entry.type === 'item') {
+        const it = ITEMS[entry.id], have = itemCount(profile, entry.id), ok = canBuyItem(profile, entry.id);
+        return `<div class="item">${artSlot('', it.icon)}
+          <div class="info"><h3>${it.name}</h3><p>${it.desc}</p></div>
+          <div class="buy"><span class="price">${it.price} 🪙</span><span class="have">${have} in pack${have >= it.maxStack ? ' (full)' : ''}</span>
+            <button data-item="${entry.id}" ${ok ? '' : 'disabled'}>Buy</button></div></div>`;
+      }
+      const c = CRAFTS[entry.id], owned = profile.crafts.includes(entry.id), ok = canBuyCraft(profile, entry.id);
+      return `<div class="item ${owned ? 'owned' : ''}">${artSlot('', c.name + ' art')}
+        <div class="info"><h3>${swatch(c.color)} ${c.name}</h3><p>${c.desc}</p></div>
+        <div class="buy"><span class="price">${owned ? 'owned' : c.price + ' 🪙'}</span>
+          ${owned ? `<span class="have">${profile.craft === entry.id ? 'in use' : 'pick it on the main screen'}</span>`
+                  : `<button data-craft="${entry.id}" ${ok ? '' : 'disabled'}>Buy</button>`}</div></div>`;
+    };
     el.innerHTML = `<h2>Store</h2>
       ${artSlot('store-banner', 'store banner art')}
       <div><b style="color:#ffd35c">${profile.coins || 0}</b> coin${profile.coins === 1 ? '' : 's'} collected on the water</div>
-      <div class="opts">
-        <div class="opt">${artSlot('opt-icon', 'paddle art')}<h3>Paddles</h3><p>Higher-grade blades for faster, more efficient strokes.</p><button disabled>Coming soon</button></div>
-        <div class="opt">${artSlot('opt-icon', 'kayak art')}<h3>Kayaks</h3><p>New hulls with their own handling and looks.</p><button disabled>Coming soon</button></div>
-        <div class="opt">${artSlot('opt-icon', 'gear art')}<h3>River access</h3><p>Further upgrades are on their way.</p><button disabled>Coming soon</button></div>
-      </div>
-      <button id="storeClose" style="margin-top:16px">Close</button>`;
+      <div class="shelf">${STORE_LISTING.map(row).join('')}</div>
+      <button id="storeClose">Close</button>`;
+    for (const b of el.querySelectorAll('button[data-item]')) b.onclick = () => { if (buyItem(profile, b.dataset.item)) { showStore(); renderMenu(); } };
+    for (const b of el.querySelectorAll('button[data-craft]')) b.onclick = () => { if (buyCraft(profile, b.dataset.craft)) { showStore(); renderMenu(); } };
     $('storeClose').onclick = hideStore;
   }
   function hideStore() { $('store').style.display = 'none'; }
@@ -493,6 +551,13 @@ applyQuality(quality);
           <div class="stat-row"><small>skill ${profile.skill}/${c.caps.skill}</small>${pips(profile.skill, c.caps.skill)}</div>
           <div class="stat-row"><small>stamina ${profile.stamina}/${c.caps.stamina}</small>${pips(profile.stamina, c.caps.stamina)}</div>
           <div style="margin-top:8px">${profile.runs} run${profile.runs === 1 ? '' : 's'} · <b style="color:#ffd35c">${profile.coins || 0}</b> coin${profile.coins === 1 ? '' : 's'}</div>
+          <div class="inv"><h4>Pack</h4>
+            ${Object.entries(ITEMS).filter(([id]) => itemCount(profile, id) > 0).map(([id, it]) =>
+              `<div class="row">${it.icon} ${it.name} × <b>${itemCount(profile, id)}</b></div>`).join('') || '<div class="row">empty — visit the store</div>'}
+          </div>
+          <div class="inv"><h4>Boathouse</h4>
+            ${profile.crafts.map(id => `<div class="row">${swatch(CRAFTS[id].color)} ${CRAFTS[id].name}${id === profile.craft ? ' <small style="color:#ffe08a">· in use</small>' : ''}</div>`).join('')}
+          </div>
         </div>
       </div>
       <div class="charsheet-actions">
@@ -574,7 +639,7 @@ applyQuality(quality);
       this.lastSide = s; this.side = s; this.strokeT = 0; this.strokeActive = true;
     },
     step(dt) {
-      const K = KAYAK, m = K.mass, q = this.q, p = this.p, tr = traits();
+      const K = effK, m = K.mass, q = this.q, p = this.p, tr = traits();
       const R = v => qRotate(q, v);
       const fwd = R([0, 0, 1]);
       const fwdH = v3.norm([fwd[0], 0, fwd[2]]), rightH = [fwdH[2], 0, -fwdH[0]];
@@ -1183,6 +1248,8 @@ applyQuality(quality);
   async function startRun(R) {
     if (warmingUp) return;
     if (!profile) return showMenu();
+    runCraft = craftOf(profile); effK = craftKayakParams(runCraft);
+
     if (isMobile) { gyro.request(); enterFullscreen(); }   // both must run inside the tap that brought us here
     warmingUp = true;
     $('menu').style.display = 'none'; $('lvl').style.display = 'none'; $('stam').style.display = 'block'; $('loot').style.display = 'flex';
@@ -1309,8 +1376,8 @@ applyQuality(quality);
     const k = kayak, M = mat4Compose(k.p, k.q, [1, 1, 1]);
     const I = mat4Compose([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]);
     const inst = (name, local, tint = [1, 1, 1, 1]) => { const m = mat4Mul(M, local), d = new Float32Array(20); d.set(m, 0); d.set(tint, 16); device.queue.writeBuffer(kayakInst[name], 0, d); return m; };
-    const flash = 1 + 0.6 * k.hitFlash;
-    inst('hull', I, [flash, flash, flash, 1]); inst('cockpit', I);
+        const flash = 1 + 0.6 * k.hitFlash, hc = runCraft.color;
+    inst('hull', I, [hc[0] * flash, hc[1] * flash, hc[2] * flash, 1]); inst('cockpit', I);
     const vk = Math.min(1, dtReal * 9);
     k.visSide += (k.side - k.visSide) * vk;
     k.visAmp += ((k.mode === 'sweep' ? 1.0 : 0.6) - k.visAmp) * vk;
@@ -1344,13 +1411,11 @@ applyQuality(quality);
   }
   // ---------- HUD ----------
   const hudEl = $('hud'), glEl = $('gl'), mkEl = $('mk'), dbgEl = $('dbg'), stamFill = $('stamfill'), stamTxt = $('stamtxt');
-  const pcountEl = $('pcount'), ccountEl = $('ccount');
-  // brief "pop" flash on the paddle/coin counter to draw the eye when one is collected.
-  // if a pop is already mid-flight, let it finish rather than restarting it — yanking the
-  // class off and back on while it's mid-shrink makes the scale jump discontinuously.
+  const pcountEl = $('pcount'), ccountEl = $('ccount'), scountEl = $('scount'), mEatEl = $('mEat');
+  const lootEls = { paddle: pcountEl, coin: ccountEl, snack: scountEl };
   function popLoot(kind) {
-    const el = kind === 'paddle' ? pcountEl : ccountEl;
-    if (el.classList.contains('pop')) return;
+    const el = lootEls[kind];
+    if (!el || el.classList.contains('pop')) return;
     el.classList.add('pop');
     const done = () => { el.classList.remove('pop'); el.removeEventListener('animationend', done); clearTimeout(fallback); };
     const fallback = setTimeout(done, 700);
@@ -1365,9 +1430,17 @@ applyQuality(quality);
       const currencyTotal = river.pickupKinds.filter(k => COLLECTIBLES[k].type === 'currency').reduce((s, k) => s + river.pickups[k].length, 0);
       pcountEl.innerHTML = `🛶 <b>${runLoot.paddles}</b>/${xpTotal}`;
       ccountEl.innerHTML = `🪙 <b>${runLoot.coins}</b>/${currencyTotal}`;
+      const snacks = itemCount(profile, 'snack');
+      scountEl.innerHTML = `🥜 <b>${snacks}</b>${isMobile ? '' : ' <kbd style="font-size:11px">E</kbd>'}`;
+      scountEl.style.opacity = snacks ? 1 : 0.45;
+      mEatEl.textContent = `🥜 ${snacks}`;
+      mEatEl.style.opacity = snacks ? 1 : 0.45;
+
     }
     const mapMsg = simTime < mapFoundUntil ? '<br><b style="color:#ffe08a">🗺 Hidden map found!</b>' : '';
-    hudEl.innerHTML = `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${profile.level}<br>speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · time <b>${runTime.toFixed(1)}</b> s${mapMsg}`;
+    const snackMsg = simTime < snackMsgUntil ? `<br><b style="color:#9f7">🥜 Snack! +${ITEMS.snack.stamina} stamina</b>` : '';
+    hudEl.innerHTML = `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${profile.level} · ${runCraft.name}<br>speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · time <b>${runTime.toFixed(1)}</b> s${mapMsg}${snackMsg}`;
+    
     stamFill.style.width = (100 * kayak.stamina / STAMINA.max) + '%';
     stamFill.className = kayak.tired ? 'tired' : '';
     stamTxt.textContent = kayak.tired ? 'TIRED — weak strokes' : 'stamina';

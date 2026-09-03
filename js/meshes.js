@@ -52,7 +52,9 @@ function buildHull() {
     return [w * cx, rocker + y, (t - 0.5) * Lk];
   };
   for (let k = 0; k < ns; k++) for (let ai = 0; ai < m; ai++) {
-    const a = 6.2832 * (ai + 0.5) / m, col = Math.sin(a) >= 0 ? [0.92, 0.22, 0.12] : [0.55, 0.09, 0.06];
+    // white deck / grey underside: the real colour comes from the per-craft instance tint
+    const a = 6.2832 * (ai + 0.5) / m, col = Math.sin(a) >= 0 ? [1, 1, 1] : [0.58, 0.45, 0.45];
+
     mb.quad(sec(k, ai), sec(k + 1, ai), sec(k + 1, ai + 1), sec(k, ai + 1), col);
   }
   return mb;
