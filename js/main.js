@@ -1,12 +1,12 @@
 'use strict';
-import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, MAP_ITEM, CHARACTERS, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
+import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, MAP_ITEM, RUCKSACK, CHARACTERS, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
 
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW } from './shaders.js';
 import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec,
          mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, mat4Compose, mat4TRS, mat4Transform,
          mulberry32, clamp } from './math.js';
 import { generateRiver, nearestChan } from './river.js';
-import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh } from './meshes.js';
+import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh } from './meshes.js';
 import { loadProfile, newProfile, clearProfile, character, canRaise, anyRaisable,
          awardRun, spendPoint, discardPending, pointsForLevel, unlockHidden } from './progression.js';
 
@@ -106,7 +106,7 @@ applyQuality(quality);
   const terrainBuf = mkBuf(N * 4, STOR), maskBuf = mkBuf(N * 4, STOR);
   const stateBufs = [0, 1, 2].map(() => mkBuf(N * 16, STOR));
   const kBufs = [0, 1, 2].map(() => mkBuf(N * 4, STOR));
-  const simUBuf = mkBuf(96, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+  const simUBuf = mkBuf(112, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
   const camUBuf = mkBuf(272, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
   const partUBuf = mkBuf(112, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
   const partBuf = mkBuf(PARTS.count * 32, STOR);
@@ -204,8 +204,8 @@ applyQuality(quality);
     return { vbuf, count: mb.count }; };
   const vegMeshes = {}; for (const [k, mb] of Object.entries(buildVegetationMeshes())) vegMeshes[k] = gpuMesh(mb);
   const kayakMeshes = {}; for (const [k, mb] of Object.entries(buildKayakParts())) kayakMeshes[k] = gpuMesh(mb);
-  const pickupMeshes = { paddle: kayakMeshes.paddle, coin: gpuMesh(buildCoinMesh()), diamond: gpuMesh(buildDiamondMesh()), map: gpuMesh(buildMapMesh()) };
-  const pickupInstBufs = { paddle: null, coin: null, diamond: null };
+  const pickupMeshes = { paddle: kayakMeshes.paddle, coin: gpuMesh(buildCoinMesh()), diamond: gpuMesh(buildDiamondMesh()), map: gpuMesh(buildMapMesh()), rucksack: gpuMesh(buildRucksackMesh()) };
+  const pickupInstBufs = { paddle: null, coin: null, diamond: null, rucksack: null };
   // the map pickup is at most one instance ever, on any river, so its buffer never needs
   // resizing — allocate it once here instead of in placePickups()'s per-river rebuild
   pickupInstBufs.map = mkBuf(80, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
@@ -678,12 +678,15 @@ applyQuality(quality);
   //  RUN CONTROL
   // ============================================================================
   function writeSimUniforms(time, inQ, jOffset = 0) {
-    const ab = new ArrayBuffer(96), f = new Float32Array(ab), u = new Uint32Array(ab);
+    const ab = new ArrayBuffer(112), f = new Float32Array(ab), u = new Uint32Array(ab);
     u[0] = W; u[1] = L; f[2] = dx; f[3] = SIM.dt; f[4] = SIM.g; f[5] = river.R.manning; f[6] = SIM.hmin; f[7] = SIM.umax;
     f[8] = time; f[9] = river.inEta; f[10] = inQ; f[11] = river.inVelScale;
     f[12] = SIM.turbA; f[13] = SIM.turbL; f[14] = SIM.turbT; f[15] = SIM.foamDecay;
     f[16] = SIM.kDecay; f[17] = SIM.macCormack; f[18] = SIM.kGen; f[19] = SIM.foamGen;
     f[20] = jOffset;
+    const vx = river.R.vortex;
+    f[21] = vx ? vx.x : 0; f[22] = vx ? vx.z : 0; f[23] = vx ? vx.strength : 0;
+    f[24] = vx ? vx.radius : 0;
     device.queue.writeBuffer(simUBuf, 0, ab);
   }
 
@@ -753,13 +756,86 @@ applyQuality(quality);
       list.forEach((it, i) => { it.floating = flags[i]; });
       return list;
     };
-    river.pickupKinds = ['paddle', 'coin', ...(river.R.extraKind ? [river.R.extraKind] : [])];
-    river.pickups = { paddle: mkList(201), coin: mkList(301) };
+    // dropped rucksacks aren't pre-placed like the rest — they spawn live, behind the kayak, as
+    // the run goes (see spawnRucksacks). This just reserves RUCKSACK.count inactive slots up
+    // front so the instance buffer never needs resizing; each slot only becomes real (a position,
+    // floating, driftable) once the spawner activates it.
+    const mkRucksackSlots = () => Array.from({ length: RUCKSACK.count }, () => (
+      { x: 0, z: 0, vx: 0, vz: 0, boostDist: 0, floating: true, spinPh: Math.random() * 6.2832, bobPh: Math.random() * 6.2832,
+        alive: false, collected: false, seenT: -1, checkT: 0, checkX: 0, checkZ: 0, nudging: false }));
+    river.pickupKinds = ['paddle', 'coin', 'rucksack', ...(river.R.extraKind ? [river.R.extraKind] : [])];
+    river.pickups = { paddle: mkList(201), coin: mkList(301), rucksack: mkRucksackSlots() };
+    river.rucksackSpawnT = 0;
     if (river.R.extraKind) river.pickups[river.R.extraKind] = mkList(401);
     for (const kind of river.pickupKinds) {
       if (pickupInstBufs[kind]) pickupInstBufs[kind].destroy();
       pickupInstBufs[kind] = mkBuf(Math.max(80, river.pickups[kind].length * 80), GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
     }
+  }
+  // pushes each alive rucksack with the locally-sampled water velocity (waterAt is already the
+  // right tool: real simulated flow — eddies, recirculation — near the boat, a Manning's-equation
+  // downstream estimate further out). A dry/near-still cell naturally gives ~0 velocity, which is
+  // exactly "washed up on the bank" with no extra logic. Every RUCKSACK.checkInterval seconds we
+  // check how far it's actually moved; if it's under RUCKSACK.stuckDist (beached, or stuck in a
+  // dead eddy) we blend in a small nudge back toward mid-channel — not a random direction, since
+  // a random push near the bank is as likely to shove it further onto the shore as off it.
+  function updateRucksackDrift(dtReal) {
+    const list = river.pickups && river.pickups.rucksack;
+    if (!list || !list.length) return;
+    const k = 1 - Math.exp(-RUCKSACK.drag * dtReal);   // frame-rate-independent ease toward the current
+    for (const it of list) {
+      if (!it.alive) continue;
+      const w = waterAt(it.x, it.z);
+      it.checkT += dtReal;
+      if (it.checkT >= RUCKSACK.checkInterval) {
+        const moved = Math.hypot(it.x - it.checkX, it.z - it.checkZ);
+        it.nudging = moved < RUCKSACK.stuckDist;
+        it.checkT = 0; it.checkX = it.x; it.checkZ = it.z;
+      }
+      let targU = w.u * RUCKSACK.baseFactor, targV = w.v * RUCKSACK.baseFactor;
+      if (it.boostDist > 0) {
+        // held at the boosted target for a distance, not a duration — a fast stretch and a slow
+        // one both get the same few extra metres of "shooting past the player" before tapering
+        it.boostDist -= Math.abs(it.vz) * dtReal;
+        targV = Math.sign(w.v || 1) * Math.max(Math.abs(w.v) * RUCKSACK.spawnBoost, RUCKSACK.spawnBoostMin);
+      } else if (it.nudging) {
+        const jrow = clamp(Math.floor(it.z / dx), 0, L - 1), chan = nearestChan(river.rows[jrow], it.x);
+        const toCenter = clamp(chan.c - it.x, -RUCKSACK.nudgeSpeed, RUCKSACK.nudgeSpeed);
+        targU += toCenter; targV += RUCKSACK.nudgeSpeed * 0.5;   // plus a little push back downstream
+      }
+      // real inertia, like everything else afloat in this sim, instead of snapping straight to
+      // the water velocity — it visibly spins up to speed as the current catches it
+      it.vx += (targU - it.vx) * k;
+      it.vz += (targV - it.vz) * k;
+      it.x = clamp(it.x + it.vx * dtReal, 1, W * dx - 1);
+      it.z = clamp(it.z + it.vz * dtReal, 0, river.finishZ + 15);
+    }
+  }
+  // dropped rucksacks aren't laid out along the river up front — up to RUCKSACK.count of them
+  // spawn live, one every RUCKSACK.spawnInterval seconds, just upstream of the kayak's current
+  // position. That way, if the player slows or stops paddling, the current is likely to carry
+  // one right past them instead of it always being somewhere already behind on the map.
+  function spawnRucksacks(dtReal) {
+    const list = river.pickups && river.pickups.rucksack;
+    if (!list) return;
+    river.rucksackSpawnT += dtReal;
+    if (river.rucksackSpawnT < RUCKSACK.spawnInterval) return;
+    const slot = list.find(it => !it.alive && !it.collected);
+    if (!slot) return;
+    river.rucksackSpawnT = 0;
+    const behind = RUCKSACK.spawnBehindMin + Math.random() * (RUCKSACK.spawnBehindMax - RUCKSACK.spawnBehindMin);
+    const z = clamp(kayak.p[2] - behind, 20, river.finishZ - 10);
+    const j = clamp(Math.floor(z / dx), 0, L - 1), chans = river.rows[j];
+    const chan = chans[Math.floor(Math.random() * chans.length)];
+    const x = clamp(chan.c + (Math.random() * 1.4 - 0.7) * chan.hw, 1, W * dx - 1);
+    // launched downstream faster than the current, held there for RUCKSACK.spawnBoostDist metres
+    // of actual travel, then eased back down to normal floating speed by the same drag relaxation
+    // in updateRucksackDrift — so it visibly overtakes and pulls ahead of a slowed-down player
+    // for a stretch before settling, instead of just gently appearing nearby
+    const w = waterAt(x, z);
+    Object.assign(slot, { x, z, vx: w.u, vz: w.v * RUCKSACK.spawnBoost, boostDist: RUCKSACK.spawnBoostDist,
+      spinPh: Math.random() * 6.2832, bobPh: Math.random() * 6.2832,
+      alive: true, collected: false, seenT: -1, checkT: 0, checkX: x, checkZ: z, nudging: false });
   }
   // the tier's one-of-a-kind hidden-map pickup: only exists on that tier's predetermined carrier
   // river (profile.mapCarrier), and re-rolls to a fresh random spot — via Math.random(), not the
@@ -778,7 +854,7 @@ applyQuality(quality);
   function updatePickups() {
     if (!river.pickups) return;
     for (const kind of [...river.pickupKinds, 'map']) {
-      const isMap = kind === 'map';
+      const isMap = kind === 'map', isRucksack = kind === 'rucksack';
       const list = river.pickups[kind], buf = pickupInstBufs[kind];
       if (!list || !list.length || !buf) continue;
       const data = new Float32Array(list.length * 20);
@@ -789,21 +865,26 @@ applyQuality(quality);
           const bob = it.floating ? PICKUPS.bobAmp * Math.sin(bobPhase) : 0;
 
           const jrow = clamp(Math.floor(it.z / dx), 0, L - 1);
-          const y = nearestChan(river.rows[jrow], it.x).eta + (isMap ? MAP_ITEM.hover : PICKUPS.hover) + bob;
+          const y = nearestChan(river.rows[jrow], it.x).eta + (isMap ? MAP_ITEM.hover : isRucksack ? RUCKSACK.hover : PICKUPS.hover) + bob;
           const dist = Math.hypot(kayak.p[0] - it.x, kayak.p[2] - it.z);
           // the map item is a rare key item — it stays fully visible/collectible for the whole
           // run rather than fading like the regular scattered pickups do
           if (isMap) alpha = 1;
           else {
+            const fadeTime = isRucksack ? RUCKSACK.fadeTime : PICKUPS.fadeTime;
             if (it.seenT < 0 && dist < PICKUPS.proximityRadius) it.seenT = simTime;
             if (it.seenT >= 0) {
               const fadeT = simTime - it.seenT;
-              alpha = clamp(1 - fadeT / PICKUPS.fadeTime, 0, 1);
-              if (fadeT >= PICKUPS.fadeTime) it.alive = false;
+              alpha = clamp(1 - fadeT / fadeTime, 0, 1);
+              if (fadeT >= fadeTime) it.alive = false;
             } else alpha = 1;
           }
-          const reachable = !it.floating || Math.sin(bobPhase) <= PICKUPS.reachBob;
-          const collectR = isMap ? MAP_ITEM.collectRadius : PICKUPS.collectRadius;
+          // the bob-phase collection gate exists so the small scattered floaters don't feel like
+          // they can be grabbed "through" their bob arc — but the rucksack is a large, deliberate
+          // target you're actively chasing down, so it shouldn't have a hidden window where
+          // paddling right up to it still whiffs; always reachable while in range instead
+          const reachable = isRucksack || !it.floating || Math.sin(bobPhase) <= PICKUPS.reachBob;
+          const collectR = isMap ? MAP_ITEM.collectRadius : isRucksack ? RUCKSACK.collectRadius : PICKUPS.collectRadius;
           if (it.alive && dist < collectR && reachable) {
             it.alive = false; it.collected = true; alpha = 0;
             if (isMap) {
@@ -811,15 +892,22 @@ applyQuality(quality);
               mapFoundUntil = simTime + 3.5;
               spawnBurst(it.x, y, it.z, MAP_ITEM.color);
             } else {
-              const C = COLLECTIBLES[kind], popAs = C.type === 'xp' ? 'paddle' : 'coin';
+              let C = COLLECTIBLES[kind];
+              if (C.type === 'random') {   // rucksack: roll what's actually inside, then treat it exactly like that kind
+                const totalW = C.roll.reduce((s, r) => s + r.weight, 0);
+                let roll = Math.random() * totalW, picked = null;
+                for (const r of C.roll) { roll -= r.weight; if (roll <= 0) { picked = r.kind; break; } }
+                C = COLLECTIBLES[picked || C.roll[C.roll.length - 1].kind];
+              }
+              const popAs = C.type === 'xp' ? 'paddle' : 'coin';
               if (C.type === 'xp') runLoot.paddles++;
               else { runLoot.coins++; runLoot.coinValue += C.value; }
               spawnBurst(it.x, y, it.z, C.color);
               popLoot(popAs);
             }
           }
-          const spin = simTime * (isMap ? MAP_ITEM.spinSpeed : PICKUPS.spinSpeed) + it.spinPh;
-          const sc = isMap ? MAP_ITEM.scale : kind === 'paddle' ? PICKUPS.paddleScale : 1;
+          const spin = simTime * (isMap ? MAP_ITEM.spinSpeed : isRucksack ? RUCKSACK.spinSpeed : PICKUPS.spinSpeed) + it.spinPh;
+          const sc = isMap ? MAP_ITEM.scale : isRucksack ? RUCKSACK.scale : kind === 'paddle' ? PICKUPS.paddleScale : 1;
           data.set(mat4TRS([it.x, y, it.z], spin, [sc, sc, sc]), n * 20);
         } else {
           data.set(mat4TRS([it.x, -1000, it.z], 0, [1, 1, 1]), n * 20);
@@ -855,7 +943,11 @@ applyQuality(quality);
       placeVegetation();
       placePickups();
     }
-    for (const kind of river.pickupKinds) for (const it of river.pickups[kind]) { it.alive = true; it.collected = false; it.seenT = -1; }
+    for (const kind of river.pickupKinds) if (kind !== 'rucksack') for (const it of river.pickups[kind]) { it.alive = true; it.collected = false; it.seenT = -1; }
+    // rucksacks aren't pre-placed, so a restart deactivates every slot instead of reviving it in
+    // place — spawnRucksacks() will place fresh ones behind wherever the kayak starts this attempt
+    for (const it of river.pickups.rucksack) { it.alive = false; it.collected = false; it.vx = 0; it.vz = 0; it.nudging = false; }
+    river.rucksackSpawnT = 0;
     placeMapItem();   // re-rolled every attempt, not just on river regeneration
     runLoot = { paddles: 0, coins: 0, coinValue: 0 };
     device.queue.writeBuffer(stateBufs[0], 0, river.state); device.queue.writeBuffer(kBufs[0], 0, river.kArr);
@@ -1064,7 +1156,7 @@ applyQuality(quality);
     const computeRows = cj1 - cj0;
     writeSimUniforms(t, inQ, cj0);
     cam.update(dtReal); writeCam(); updateKayakInstances(dtReal);
-    if (running) updatePickups();
+    if (running) { spawnRucksacks(dtReal); updateRucksackDrift(dtReal); updatePickups(); }
     updateSparks(dtReal);
     // particle emitters
     const wB = waterAt(kayak.p[0], kayak.p[2]);

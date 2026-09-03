@@ -71,7 +71,11 @@ export function generateRiver(R) {
     let hw = R.halfW * (1 + R.widthVar * (vnoise2(z * 0.012, 3.7, seed) * 2 - 1));
     for (const k of constr) hw *= 1 - k.s * Math.exp(-(((z - k.z) / 18) ** 2));
     for (const wf of waterfalls) if (wf.branch == null) hw *= 1 - (wf.pinch ?? clamp(wf.drop / 14, 0, 0.3)) * Math.exp(-(((z - wf.z) / ((wf.len ?? 5) * 1.4)) ** 2));
-    hw = Math.max(hw, 2.5) * (1 + 1.0 * calm);                // the pool (or pond) is twice as wide
+    // the put-in pool only ever needs to read as "calm", but a pond is a real destination and
+    // should be unmistakably a pond, not a wide spot in the river — so it gets its own, much
+    // bigger width multiplier on top of the put-in pool's, independently configurable per river
+    // (R.pond.widthMult, default 4x) rather than sharing the pool's 2x.
+    hw = Math.max(hw, 2.5) * (1 + 1.0 * calmPutin + ((R.pond && R.pond.widthMult) ?? 4.0) * calmPond);
     // the pond flattens the bed's downhill slope through its span, then resumes it afterward from
     // the same elevation as if the pond's length had simply been skipped — no slope discontinuity
     const zEff = R.pond ? z - clamp(z - pond0, 0, pond1 - pond0) : z;

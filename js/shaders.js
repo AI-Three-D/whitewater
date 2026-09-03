@@ -35,7 +35,8 @@ struct SimU {
   time: f32, inEta: f32, inQ: f32, inVelScale: f32,
   turbA: f32, turbL: f32, turbT: f32, foamDecay: f32,
   kDecay: f32, macCormack: f32, kGen: f32, foamGen: f32,
-  jOffset: f32, p1: f32, p2: f32, p3: f32,   // jOffset: first row of this dispatch's moving compute window
+  jOffset: f32, vortexX: f32, vortexZ: f32, vortexStrength: f32,   // jOffset: first row of this dispatch's moving compute window
+  vortexRadius: f32, p2: f32, p3: f32, p4: f32,    // vortexRadius <= 0 → no vortex this river
 };
 @group(0) @binding(0) var<uniform> P: SimU;
 @group(0) @binding(1) var<storage, read> B: array<f32>;
@@ -156,6 +157,19 @@ fn noiseGrad(p: vec2f, t: f32) -> vec2f {
          + 0.5 * (noise3(n2 + vec3f(0.0,e,0.0)) - noise3(n2 - vec3f(0.0,e,0.0))) / (2.0 * e);
   return vec2f(px, py);
 }
+// a placeable Rankine vortex: solid-body rotation inside a core (30% of vortexRadius), decaying
+// like 1/r outside it, faded smoothly to zero at vortexRadius so it doesn't end with a hard
+// edge. Sign of vortexStrength sets spin direction (CCW positive). vortexRadius <= 0 disables it.
+fn vortexVel(p: vec2f) -> vec2f {
+  if (P.vortexRadius <= 0.0) { return vec2f(0.0); }
+  let d = p - vec2f(P.vortexX, P.vortexZ);
+  let r = length(d);
+  if (r > P.vortexRadius || r < 0.02) { return vec2f(0.0); }
+  let core = P.vortexRadius * 0.3;
+  let vt = select(P.vortexStrength / r, P.vortexStrength * r / (core * core), r < core);
+  let fall = smoothstep(P.vortexRadius, P.vortexRadius * 0.7, r);
+  return normalize(vec2f(-d.y, d.x)) * vt * fall;
+}
 @compute @workgroup_size(8, 8)
 fn momentum(@builtin(global_invocation_id) gid: vec3u) {
   let i = i32(gid.x); let j = i32(gid.y) + i32(P.jOffset);
@@ -191,6 +205,7 @@ fn momentum(@builtin(global_invocation_id) gid: vec3u) {
       let gr = noiseGrad(facePosU(i, j), P.time);
       u += dt * P.turbA * clamp(kf, 0.0, 1.0) * gr.y;
     }
+    if (wetL && wetR) { u += dt * vortexVel(facePosU(i, j)).x; }
     u = clamp(u, -P.umax, P.umax);
   }
   let sB = SI[ci(i, j-1)]; let hB = sB.x; let bB = B[ci(i, j-1)];
@@ -211,6 +226,7 @@ fn momentum(@builtin(global_invocation_id) gid: vec3u) {
       let gr = noiseGrad(facePosV(i, j), P.time);
       v += dt * P.turbA * clamp(kf, 0.0, 1.0) * (-gr.x);
     }
+    if (wetB && wetT) { v += dt * vortexVel(facePosV(i, j)).y; }
     v = clamp(v, -P.umax, P.umax);
   }
   var foam = s.w; var k = KI[id];
@@ -362,7 +378,7 @@ struct TVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(
 // per-biome base palette for grass/dirt/rock/gravel — everything else (noise breakup, slope
 // blending, altitude scree, lighting) stays identical, only these anchor colours shift.
 // ids match BIOME_IDS in config.js: 0 alpine (default), 1 canyon, 2 desert, 3 deciduous, 4 icy,
-// 5 barren, 6 rainforest, 7 savannah.
+// 5 barren, 6 rainforest, 7 savannah, 8 glacier.
 fn biomeColors(biome: i32) -> array<vec3f, 4> {
   if (biome == 1) {          // dry canyon: redder rock, sandier dirt, olive scrub instead of lush grass
     return array<vec3f, 4>(vec3f(0.42, 0.38, 0.15), vec3f(0.55, 0.38, 0.22), vec3f(0.53, 0.35, 0.28), vec3f(0.58, 0.42, 0.27));
@@ -384,6 +400,9 @@ fn biomeColors(biome: i32) -> array<vec3f, 4> {
   }
   if (biome == 7) {          // savannah: dry golden grass, sun-baked red-brown earth
     return array<vec3f, 4>(vec3f(0.62, 0.52, 0.20), vec3f(0.52, 0.34, 0.18), vec3f(0.55, 0.46, 0.32), vec3f(0.56, 0.42, 0.24));
+  }
+  if (biome == 8) {          // glacier: nothing but snow and ice — every channel pushed pale white-blue
+    return array<vec3f, 4>(vec3f(0.80, 0.86, 0.93), vec3f(0.70, 0.77, 0.86), vec3f(0.86, 0.91, 0.98), vec3f(0.72, 0.78, 0.87));
   }
   return array<vec3f, 4>(vec3f(0.24, 0.40, 0.13), vec3f(0.40, 0.32, 0.20), vec3f(0.45, 0.44, 0.42), vec3f(0.48, 0.40, 0.30));
 }

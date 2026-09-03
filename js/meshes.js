@@ -99,6 +99,15 @@ export function buildDiamondMesh() {
   }
   return mb;
 }
+// a dropped canvas rucksack — lumpy rounded body, a smaller flap on top, two thin straps
+export function buildRucksackMesh() {
+  const mb = new MeshBuilder(), sackCol = [0.45, 0.34, 0.20], strapCol = [0.30, 0.22, 0.12];
+  addSphere(mb, [0, 0.16, 0], [0.26, 0.22, 0.18], 6, 8, sackCol, d => 0.85 + 0.3 * vnoise3(d[0] * 3, d[1] * 3 + 4, d[2] * 3, 20));
+  addSphere(mb, [0, 0.34, -0.02], [0.16, 0.10, 0.14], 5, 7, sackCol, d => 0.85 + 0.25 * vnoise3(d[0] * 4, d[1] * 4 + 2, d[2] * 4, 21));
+  addCylinder(mb, [-0.20, 0.08, -0.16], [-0.13, 0.40, -0.12], 0.025, 0.02, 5, strapCol);
+  addCylinder(mb, [0.20, 0.08, -0.16], [0.13, 0.40, -0.12], 0.025, 0.02, 5, strapCol);
+  return mb;
+}
 // rolled scroll/map — a short parchment-tinted cylinder with a darker ribbon band round the middle
 export function buildMapMesh() {
   const mb = new MeshBuilder(), parchment = [0.85, 0.72, 0.45], ribbon = [0.55, 0.32, 0.18];
@@ -155,11 +164,13 @@ export function buildVegetationMeshes() {
   addSphere(treeRainforest, [0.4, 4.3, 0.3], [1.1, 0.8, 1.1], 6, 9, [0.14, 0.48, 0.17], d => 0.85 + 0.3 * vnoise3(d[0] * 2, d[1] * 2 + 2, d[2] * 2, 6));
   M.treeRainforest = treeRainforest;
 
-  // acacia (savannah) — long thin trunk, flat wide umbrella canopy
+  // acacia (savannah) — long thin trunk, flat but lumpy/irregular umbrella canopy (a noise-
+  // displaced flattened blob, not a smooth geometric disc — a perfectly even cone reads as a
+  // flying saucer rather than foliage)
   const treeSavannah = new MeshBuilder(); const acaciaCol = [0.32, 0.42, 0.14];
-  addCylinder(treeSavannah, [0, 0, 0], [0, 2.6, 0], 0.10, 0.06, 7, [0.34, 0.24, 0.14]);
-  addCylinder(treeSavannah, [0, 2.35, 0], [0, 2.7, 0], 0.25, 1.55, 9, acaciaCol);
-  addCylinder(treeSavannah, [0, 2.7, 0], [0, 2.78, 0], 1.55, 1.4, 9, acaciaCol);
+  addCylinder(treeSavannah, [0, 0, 0], [0, 2.5, 0], 0.10, 0.06, 7, [0.34, 0.24, 0.14]);
+  addSphere(treeSavannah, [0, 2.62, 0], [1.5, 0.32, 1.5], 6, 11, acaciaCol,
+    d => 0.7 + 0.45 * vnoise3(d[0] * 1.8, d[1] * 1.8 + 9, d[2] * 1.8, 12) + 0.15 * vnoise3(d[0] * 5 + 3, d[1] * 5, d[2] * 5 + 6, 17));
   M.treeSavannah = treeSavannah;
 
   // withered/dead tree (icy, barren) — bare trunk and a few thin bare branches, no canopy
@@ -170,10 +181,22 @@ export function buildVegetationMeshes() {
   addCylinder(treeWithered, [0, 1.9, 0], [0.15, 2.6, 0], 0.03, 0.01, 5, witherCol);
   M.treeWithered = treeWithered;
 
-  // boulder — a single large, heavily-irregular rock (icy/barren biomes)
+  // boulder — a single large rock. Two noise octaves: a broad low-frequency one for the
+  // overall lumpy/asymmetric shape (not a round ball) plus a finer high-frequency one for
+  // surface roughness — kept subtle so it reads as rock, not a spiky mess
   const boulder = new MeshBuilder();
-  addSphere(boulder, [0, 0.5, 0], [1.6, 1.2, 1.5], 7, 10, [0.42, 0.41, 0.39], d => 0.75 + 0.5 * vnoise3(d[0] * 1.3 + 11, d[1] * 1.3, d[2] * 1.3 + 4, 9));
+  addSphere(boulder, [0, 0.5, 0], [1.6, 1.2, 1.5], 7, 10, [0.42, 0.41, 0.39],
+    d => 0.68 + 0.45 * vnoise3(d[0] * 1.3 + 11, d[1] * 1.3, d[2] * 1.3 + 4, 9) + 0.14 * vnoise3(d[0] * 4.5 + 2, d[1] * 4.5, d[2] * 4.5 + 7, 15));
   M.boulder = boulder;
+
+  // ice formation (glacier) — a cluster of angular faceted shards, no noise displacement —
+  // sharp flat facets read as ice, where rock/boulder's organic lumpiness reads as stone
+  const iceFormation = new MeshBuilder();
+  addCylinder(iceFormation, [0.02, 0, 0.02], [0.08, 1.35, 0.06], 0.36, 0.02, 5, [0.80, 0.90, 0.98]);
+  addCylinder(iceFormation, [-0.32, 0, 0.12], [-0.38, 0.85, 0.08], 0.20, 0.015, 5, [0.75, 0.87, 0.96]);
+  addCylinder(iceFormation, [0.30, 0, -0.20], [0.35, 0.6, -0.24], 0.18, 0.015, 5, [0.85, 0.93, 1.0]);
+  addCylinder(iceFormation, [-0.05, 0, -0.28], [-0.08, 0.45, -0.34], 0.14, 0.01, 5, [0.78, 0.89, 0.97]);
+  M.iceFormation = iceFormation;
 
   return M;
 }

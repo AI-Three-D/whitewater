@@ -14,7 +14,7 @@ export const PARTS = { count: 24000, kayakShare: 4000, ambient: 0.055 };
 
 export const VEG = { caps: { tree: 900, bush: 700, rock: 500, grass: 3500, boulder: 70 }, attempts: 26000 };
 
-export const BIOME_IDS = { alpine: 0, canyon: 1, desert: 2, deciduous: 3, icy: 4, barren: 5, rainforest: 6, savannah: 7 };
+export const BIOME_IDS = { alpine: 0, canyon: 1, desert: 2, deciduous: 3, icy: 4, barren: 5, rainforest: 6, savannah: 7, glacier: 8 };
 
 // each biome maps the 5 abstract placement "roles" (tree/bush/rock/grass/boulder) to a concrete
 // prop mesh (see buildVegetationMeshes in meshes.js), and gives each of the 3 terrain contexts
@@ -74,9 +74,18 @@ export const BIOMES = {
   // savannah: rolling open grassland, rare flat-topped acacias, occasional scrub and rock
   savannah: {
     props: { ...DEFAULT_PROPS, tree: 'treeSavannah' },
-    mix: { steep: { rock: 0.3 }, bank: { grass: 0.65, bush: 0.15, rock: 0.1 }, open: { tree: 0.08, bush: 0.12, rock: 0.04, grass: 0.62 } },
+    mix: { steep: { rock: 0.3 }, bank: { grass: 0.65, bush: 0.15, rock: 0.1 }, open: { tree: 0.05, bush: 0.12, rock: 0.04, grass: 0.62 } },
     vegTint: { tree: [1.0, 0.92, 0.55], bush: [1.05, 0.95, 0.55], rock: [1.1, 0.95, 0.7], grass: [1.15, 1.0, 0.45], boulder: [1.05, 0.95, 0.75] },
-    vegDensity: { tree: 0.35, bush: 0.55, rock: 0.6, grass: 2.2, boulder: 0.4 },
+    vegDensity: { tree: 0.22, bush: 0.55, rock: 0.6, grass: 2.2, boulder: 0.4 },
+  },
+  // glacier: nothing grows here at all — bare ice and snow, jagged ice-shard formations and
+  // ice-sheathed boulders, cold white-blue cast throughout. `tree`/`bush`/`grass` are left out
+  // of every mix table below (not just given low weight), so no vegetation is ever rolled.
+  glacier: {
+    props: { ...DEFAULT_PROPS, rock: 'iceFormation' },
+    mix: { steep: { rock: 0.4, boulder: 0.35 }, bank: { rock: 0.35, boulder: 0.15 }, open: { rock: 0.38, boulder: 0.22 } },
+    vegTint: { tree: [1, 1, 1], bush: [1, 1, 1], rock: [0.95, 0.97, 1.05], grass: [1, 1, 1], boulder: [0.85, 0.92, 1.05] },
+    vegDensity: { tree: 0, bush: 0, rock: 1.8, grass: 0, boulder: 1.3 },
   },
 };
 
@@ -143,7 +152,18 @@ export const RIVERS = [
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 31 } },
   { name: 'Willow Bend', cls: 'Class II · easy', tier: 'easy', slope: 0.002, manning: 0.031, halfW: 11, widthVar: 0.3,
     meander: [[24, 190], [5, 48]], depth: 1.5, rocks: 12, rockR: [0.8, 1.9], emergent: 0.3, ledges: [],
-    pond: { z: 120, len: 30 },
+    pond: { z: 70, len: 80 },
+    // a placeable whirlpool: x/z is world position (metres), strength sets both spin speed and
+    // direction (+CCW/-CW, roughly the peak tangential m/s at the core edge — clamped hard by
+    // SIM.umax=12, so don't push strength/radius far enough that peak = strength/(radius*0.3)
+    // blows past that or it just saturates into a flat clipped disc instead of a real gradient),
+    // radius is where its effect fades to zero. x must track the river's actual meandering
+    // centerline at that z (it is NOT constant down the river) — verify with generateRiver()
+    // before moving z, a channel-center x that was right at one z can land on dry land at another.
+    // z=110 sits right at the pond's tail edge (pond1, where it's already narrowing back toward a
+    // normal rapid) rather than its widest/calmest middle (z=70) — fine as "an obstacle near the
+    // exit" but reposition to z:70/x:64 instead if you want it more centrally in the open pond.
+    vortex: { x: 24, z: 110, strength: 25, radius: 24 },
     constrictions: 1, valleyH: 10, valleyScale: 60, seed: 12, len: 170,
     waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,   // crystal clear
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 } },
@@ -175,7 +195,7 @@ export const RIVERS = [
   { name: 'The Gorge', cls: 'Class IV · hard', tier: 'hard', slope: 0.03, manning: 0.04, halfW: 5.5, widthVar: 0.4,
     meander: [[26, 110], [8, 45]], depth: 1.4, rocks: 120, rockR: [0.9, 2.8], emergent: 0.55,
     ledges: [[120, 0.8], [210, 1.0], [330, 1.2], [440, 0.9]], constrictions: 4, valleyH: 42, valleyScale: 60, seed: 37, len: 475,
-    biome: 'icy', waterTint: [0.05, 0.12, 0.20], waterClarity: 2.8,   // pale glacial blue, very clear, steep peaks
+    biome: 'glacier', waterTint: [0.10, 0.20, 0.28], waterClarity: 3.0,   // pale, near-white glacial melt, steep peaks
     boulderIslands: [{ z: 250, len: 10, widthFrac: 0.65, bias: -0.15 }],
     waterfalls: [{ z: 320, drop: 4.0, len: 5 }],
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 33 } },
@@ -252,14 +272,39 @@ export const COLLECTIBLES = {
   paddle: { mesh: 'paddle', type: 'xp', value: 1, color: [0.95, 0.82, 0.1] },
   coin: { mesh: 'coin', type: 'currency', value: 1, color: [1.0, 0.86, 0.3] },
   diamond: { mesh: 'diamond', type: 'currency', value: 3, color: [0.65, 0.92, 1.0] },
+  // opening one doesn't give a fixed reward — on pickup a kind is rolled from `roll` (weights
+  // need not sum to 1; a roll past the end just falls through to the last entry) and that
+  // kind's own type/value/color is used, so a rucksack is really a wrapper around the others.
+  rucksack: { mesh: 'rucksack', type: 'random', roll: [
+    { kind: 'coin', weight: 0.5 },
+    { kind: 'paddle', weight: 0.3 },
+    { kind: 'diamond', weight: 0.2 },
+  ], color: [0.55, 0.42, 0.28] },
 };
 
-// the one-of-a-kind, per-tier "hidden map" pickup. One tier river is chosen at profile creation
-// (profile.mapCarrier[tier]) to carry it; it respawns at a fresh random spot on that river every
-// attempt until found, then never spawns again and unlocks that tier's RIVERS_HIDDEN entry.
+
 export const MAP_ITEM = {
   mesh: 'map', color: [0.85, 0.72, 0.45], scale: 1.3, spinSpeed: 0.9,
   hover: 0.7, collectRadius: 1.8,
+};
+export const RUCKSACK = {
+  count: 10, spinSpeed: 0.5, scale: 2, hover: 0.12, fadeTime: 99,   // fadeTime = 10x the base PICKUPS.fadeTime
+  collectRadius: 2.2,   // bigger than the default PICKUPS.collectRadius (1.6) to match its size
+  spawnInterval: 6, spawnBehindMin: 12, spawnBehindMax: 28,
+  // 4.5x/8m wasn't enough to actually pass a paddling player — a lazy stretch of river can be
+  // only ~1.3 m/s, so even a big multiplier stays slower than a paddling kayak's cruise speed.
+  // spawnBoostMin is an absolute floor (m/s) on top of the multiplier so the launch is always
+  // fast in absolute terms too, not just relative to whatever the local current happens to be.
+  spawnBoost: 3, spawnBoostMin: 2,   // downstream speed at launch = max(local current × 9, 7 m/s)
+  spawnBoostDist: 42,  // …held at that boosted target for about this many metres of actual
+                        // travel (not seconds — a fast river and a slow one hold it the same
+                        // distance) before tapering back to normal floating speed via the drag
+                        // relaxation below
+  baseFactor: 1.7,   // even its "settled" baseline speed (after the boost tapers off, or once
+                      // nudged free of a stuck spot) is this many times the raw local current —
+                      // a light bag genuinely does drift a bit faster than the bulk flow, and it
+                      // keeps the rucksack from exactly pacing an idle kayak forever
+  drag: 2.2, checkInterval: 4, stuckDist: 0.6, nudgeSpeed: 0.8,
 };
 
 export const CHARACTERS = {
