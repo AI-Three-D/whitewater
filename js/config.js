@@ -374,6 +374,48 @@ export const CHARACTERS = {
     desc: 'Ex-rower. Can paddle all day without slowing down, but the boat still surprises him now and then.',
     caps: { skill: 6, stamina: 10 }, start: { skill: 0, stamina: 1 }, talent: 'stamina' },
 };
+// ---------- watercraft ----------
+// Every runnable craft lives here. `mods` are plain multipliers on the matching KAYAK constants,
+// applied in main.js traits(), so a new hull is numbers only — no new code. `kind` is what a
+// future non-kayak craft (an inflatable raft, a packraft…) will switch meshes, paddle animation
+// and control feel on; for now every entry draws the kayak hull, recoloured by `tint`.
+export const BOATS = {
+  creeker: {
+    name: 'Creek Boat', kind: 'kayak',
+    desc: 'The club loaner. Stable and forgiving, but slow to come round.',
+    tint: [1, 1, 1],
+    mods: {},
+  },
+  slicer: {
+    name: 'Slalom Slicer', kind: 'kayak',
+    desc: 'Short, edgy race hull. Sweep strokes bite half again as hard and it holds a turn instead of straightening out — at the price of being twitchier on edge.',
+    tint: [0.45, 0.78, 1.25],
+    mods: { sweepTorque: 1.5, sweepFwd: 1.2, yawDamp: 0.75, rollInstab: 1.15 },
+  },
+};
+export const DEFAULT_BOAT = 'creeker';
+
+export const SNACK = {
+  stamina: 45,        // stamina points restored by one snack
+  max: 9,             // how many a paddler may carry
+  key: 'KeyE',
+};
+
+// ---------- store ----------
+// One flat listing (no categories — there will never be enough items to justify them).
+// `kind` decides what buying one does, in progression.buyItem():
+//   'consumable' → +1 in profile.inventory[id], spendable during a run
+//   'boat'       → profile.boats gains `boat`, selectable on the main screen
+// Anything with a `stackMax` can't be bought past that count.
+export const STORE_ITEMS = [
+  { id: 'snack', kind: 'consumable', name: 'Energy snack', icon: '🍫', price: 2, stackMax: SNACK.max,
+    desc: `A bar of pressed fruit and nuts. Eat it mid-run to get ${SNACK.stamina} stamina back instantly.` },
+  { id: 'boat.slicer', kind: 'boat', boat: 'slicer', icon: '🛶', price: 20,
+    name: BOATS.slicer.name, desc: BOATS.slicer.desc },
+];
+
+// display metadata for anything that can sit in the inventory — looked up by id
+export const ITEMS = Object.fromEntries(STORE_ITEMS.filter(i => i.kind === 'consumable').map(i => [i.id, i]));
 
 export const STAMINA = {
   max: 100,

@@ -1,5 +1,6 @@
 'use strict';
-import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, MAP_ITEM, RUCKSACK, OBSTACLES, CHARACTERS, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
+import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, MAP_ITEM, RUCKSACK, OBSTACLES, CHARACTERS, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE, BOATS, DEFAULT_BOAT, STORE_ITEMS, ITEMS, SNACK } from './config.js';
+
 
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW } from './shaders.js';
 import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec,
@@ -8,7 +9,9 @@ import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec,
 import { generateRiver, nearestChan } from './river.js';
 import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh, buildObstacleMeshes } from './meshes.js';
 import { loadProfile, newProfile, clearProfile, character, canRaise, anyRaisable,
-         awardRun, spendPoint, discardPending, pointsForLevel, unlockHidden } from './progression.js';
+  awardRun, spendPoint, discardPending, pointsForLevel, unlockHidden,
+  itemCount, ownsBoat, canBuy, buyItem, selectBoat, consumeItem } from './progression.js';
+
 
 const showErr = t => { const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = t; };
 addEventListener('error', e => showErr('Script error: ' + e.message + ' (line ' + e.lineno + ')'));
@@ -16,7 +19,7 @@ addEventListener('unhandledrejection', e => showErr('Promise error: ' + ((e.reas
 const $ = id => document.getElementById(id);
 // bumped by hand on every edit — lets a stale/cached page or a not-yet-reloaded tab be spotted
 // on sight instead of chasing "am I even testing the current code" through several rounds
-const BUILD = 'build 26';
+const BUILD = 'build 27';
 { const v = document.getElementById('ver'); if (v) v.textContent = BUILD; }
 // ---------- platform ----------
 // modern-browser signals only: a touch screen (maxTouchPoints) whose primary pointer is coarse
@@ -121,6 +124,22 @@ applyQuality(quality);
     const idx = new Uint32Array((cols - 1) * (rows - 1) * 6);
     return { s, cols, rows, idx, rowIdx: (cols - 1) * 6, buf: mkBuf(idx.byteLength, GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST) };
   });
+
+    // owned craft, as a toggle row: the highlighted one is used for the next run
+    function renderBoats() {
+      const el = $('boatsel');
+      if (!profile) { el.style.display = 'none'; return; }
+      el.style.display = 'flex';
+      el.innerHTML = `<div class="hint">boat for the next run</div>` + profile.boats.map(id => {
+        const b = BOATS[id]; if (!b) return '';
+        const on = id === profile.boat;
+        return `<div class="boat ${on ? 'on' : ''}" data-boat="${id}">
+          <span class="kind">${b.kind}</span><br><b>${b.name}</b>
+          <small>${b.desc}</small>${on ? '<span class="sel">▸ selected</span>' : ''}</div>`;
+      }).join('');
+      for (const d of el.querySelectorAll('.boat')) d.onclick = () => { selectBoat(profile, d.dataset.boat); renderBoats(); };
+    }
+
   function fillTerrainIndex(b) {
     for (const lod of lods) {
       const { s, cols, rows, idx } = lod; let qi = 0;
@@ -290,6 +309,8 @@ applyQuality(quality);
     if (isMobile && padKeys[e.code]) { if (!e.repeat) for (const s of padKeys[e.code]) padDown(s); e.preventDefault(); return; }
     if (keymap[e.code] !== undefined) { input[keymap[e.code]] = true; e.preventDefault(); }
     if (e.code === 'KeyC') camMode = (camMode + 1) % 3;
+    if (e.code === SNACK.key) useSnack();
+    
     if (e.code === 'F1') { toggleDbg(); e.preventDefault(); }
     if (e.code === 'KeyR') retryRun();
     if (e.code === 'KeyF' && gameState === 'run') endRun(true);
@@ -330,6 +351,8 @@ applyQuality(quality);
     el.addEventListener('contextmenu', e => e.preventDefault());   // no long-press menu
   }
   $('mExit').onclick = () => { if (gameState !== 'menu' && $('lvl').style.display !== 'flex') showMenu(); };
+  $('mSnack').onclick = useSnack; //??
+
   $('mCam').onclick = () => { camMode = (camMode + 1) % 3; };
   function toggleDbg() { dbgMode = (dbgMode + 1) % 5; $('dbg').style.display = dbgMode ? 'block' : 'none'; }
   $('mDbg').onclick = toggleDbg;
@@ -344,16 +367,38 @@ applyQuality(quality);
   // R key and the Retry button share the same guard
   function retryRun() { if (river && gameState !== 'menu' && !warmingUp && $('lvl').style.display !== 'flex') startRun(river.R); }
 
-
+  // ---------- snacks ----------
+  let snackMsg = '', snackMsgUntil = 0;
+  function useSnack() {
+    if (gameState !== 'run' || !profile) return;
+    if (itemCount(profile, 'snack') <= 0) { snackMsg = 'no snacks left'; snackMsgUntil = simTime + 1.6; return; }
+    if (kayak.stamina > STAMINA.max - 1) { snackMsg = 'not tired — snack kept'; snackMsgUntil = simTime + 1.6; return; }
+    consumeItem(profile, 'snack');     // banked immediately: a capsize doesn't hand it back
+    kayak.stamina = clamp(kayak.stamina + SNACK.stamina, 0, STAMINA.max);
+    kayak.tired = kayak.stamina < STAMINA.max * STAMINA.tiredFrac;
+    spawnBurst(kayak.p[0], kayak.p[1] + 0.7, kayak.p[2], [0.95, 0.78, 0.35]);
+    popLoot('snack');
+    snackMsg = `+${SNACK.stamina} stamina`; snackMsgUntil = simTime + 1.6;
+  }
 
   // effective kayak parameters derived from the character's traits
-  const traits = () => ({
-    skill: profile ? profile.skill : 0,
-    stamina: profile ? profile.stamina : 0,
-    instabK: KAYAK.formStab + Math.max(0, KAYAK.rollInstab - SKILL.instabPerPt * (profile ? profile.skill : 0)),
-    leanTorque: KAYAK.leanTorque + SKILL.leanPerPt * (profile ? profile.skill : 0),
-    drain: STAMINA.drain * (1 - STAMINA.drainPerPt * (profile ? profile.stamina : 0)),
-  });
+  // the selected craft (falls back to the default if a save references one that's gone)
+  const boatDef = () => BOATS[(profile && profile.boat) || DEFAULT_BOAT] || BOATS[DEFAULT_BOAT];
+  // effective kayak parameters: character traits first, then the boat's multipliers on top. Every
+  // handling number a boat is allowed to change goes through here, so BOATS stays data-only.
+  const traits = () => {
+    const skill = profile ? profile.skill : 0, stamina = profile ? profile.stamina : 0;
+    const m = boatDef().mods || {};
+    const mul = k => KAYAK[k] * (m[k] ?? 1);
+    return {
+      skill, stamina, boat: boatDef(),
+      instabK: KAYAK.formStab + Math.max(0, KAYAK.rollInstab * (m.rollInstab ?? 1) - SKILL.instabPerPt * skill),
+      leanTorque: (KAYAK.leanTorque + SKILL.leanPerPt * skill) * (m.leanTorque ?? 1),
+      drain: STAMINA.drain * (1 - STAMINA.drainPerPt * stamina) * (m.drain ?? 1),
+      paddleFwd: mul('paddleFwd'), paddleBack: mul('paddleBack'),
+      sweepTorque: mul('sweepTorque'), sweepFwd: mul('sweepFwd'), yawDamp: mul('yawDamp'),
+    };
+  };
   const pips = (val, cap, max = 10) => `<div class="bar">${Array.from({ length: max }, (_, i) =>
     `<i class="${i < val ? 'on' : ''}${i >= cap ? ' cap' : ''}"></i>`).join('')}</div>`;
   // stand-in for art that isn't in yet — swap the label for a real <img> or background-image later
@@ -386,7 +431,10 @@ applyQuality(quality);
     renderQuality();
     const cs = $('charsel'), tb = $('topbar'), rl = $('riverlist');
     if (!profile) {
-      cs.style.display = 'flex'; tb.style.display = 'none'; rl.style.display = 'none';
+      cs.style.display = 'flex'; 
+      tb.style.display = 'none'; 
+      rl.style.display = 'none';
+      $('boatsel').style.display = 'none'; 
       cs.innerHTML = `<p style="width:100%;margin:0 0 6px">Choose your paddler</p>`;
       for (const [id, c] of Object.entries(CHARACTERS)) {
         const d = document.createElement('div'); d.className = 'chr';
@@ -462,6 +510,21 @@ applyQuality(quality);
     $('lvSkill').onclick = () => { spendPoint(profile, 'skill'); showLevelUp(); };
     $('lvStam').onclick = () => { spendPoint(profile, 'stamina'); showLevelUp(); };
   }
+  function storeCard(it) {
+    const owned = it.kind === 'boat' && ownsBoat(profile, it.boat);
+    const have = it.kind === 'consumable' ? itemCount(profile, it.id) : 0;
+    const full = !!it.stackMax && have >= it.stackMax;
+    const poor = (profile.coins || 0) < it.price;
+    const label = owned ? 'Owned' : full ? `Carrying ${have} (max)` : poor ? 'Not enough coins' : `Buy · ${it.price}`;
+    return `<div class="item">
+      ${artSlot('opt-icon', it.name + ' art')}
+      <h3>${it.icon || ''} ${it.name}</h3>
+      <div class="price">${it.price} coin${it.price === 1 ? '' : 's'}</div>
+      <p>${it.desc}</p>
+      ${it.kind === 'consumable' ? `<div class="have">in inventory: <b>${have}</b>${it.stackMax ? ` / ${it.stackMax}` : ''}</div>` : ''}
+      <button data-buy="${it.id}" ${canBuy(profile, it) ? '' : 'disabled'} style="margin-top:8px">${label}</button>
+    </div>`;
+  }
   function showStore() {
     if (!profile) return;
     const el = $('store');
@@ -469,12 +532,12 @@ applyQuality(quality);
     el.innerHTML = `<h2>Store</h2>
       ${artSlot('store-banner', 'store banner art')}
       <div><b style="color:#ffd35c">${profile.coins || 0}</b> coin${profile.coins === 1 ? '' : 's'} collected on the water</div>
-      <div class="opts">
-        <div class="opt">${artSlot('opt-icon', 'paddle art')}<h3>Paddles</h3><p>Higher-grade blades for faster, more efficient strokes.</p><button disabled>Coming soon</button></div>
-        <div class="opt">${artSlot('opt-icon', 'kayak art')}<h3>Kayaks</h3><p>New hulls with their own handling and looks.</p><button disabled>Coming soon</button></div>
-        <div class="opt">${artSlot('opt-icon', 'gear art')}<h3>River access</h3><p>Further upgrades are on their way.</p><button disabled>Coming soon</button></div>
-      </div>
-      <button id="storeClose" style="margin-top:16px">Close</button>`;
+      <div class="items">${STORE_ITEMS.map(storeCard).join('')}</div>
+      <button id="storeClose" style="margin-top:8px">Close</button>`;
+    for (const btn of el.querySelectorAll('button[data-buy]')) btn.onclick = () => {
+      const item = STORE_ITEMS.find(i => i.id === btn.dataset.buy);
+      if (buyItem(profile, item)) { showStore(); renderMenu(); }   // refresh the balance and the boat row
+    };
     $('storeClose').onclick = hideStore;
   }
   function hideStore() { $('store').style.display = 'none'; }
@@ -492,6 +555,14 @@ applyQuality(quality);
           <small style="color:#9bc">${profile.points} / ${need} xp to next level</small>
           <div class="stat-row"><small>skill ${profile.skill}/${c.caps.skill}</small>${pips(profile.skill, c.caps.skill)}</div>
           <div class="stat-row"><small>stamina ${profile.stamina}/${c.caps.stamina}</small>${pips(profile.stamina, c.caps.stamina)}</div>
+              <div class="stat-row"><small>inventory</small>
+            <div class="inv">${Object.entries(profile.inventory || {}).filter(([, n]) => n > 0)
+              .map(([id, n]) => `<span class="slot">${(ITEMS[id] || {}).icon || '📦'} ${(ITEMS[id] || {}).name || id} <b>×${n}</b></span>`)
+              .join('') || '<span class="empty">nothing yet — supplies are sold in the store</span>'}</div></div>
+          <div class="stat-row"><small>boats</small>
+            <div class="inv">${profile.boats.filter(b => BOATS[b])
+              .map(b => `<span class="slot ${b === profile.boat ? 'on' : ''}">🛶 ${BOATS[b].name}${b === profile.boat ? ' <b>▸</b>' : ''}</span>`).join('')}</div></div>
+              
           <div style="margin-top:8px">${profile.runs} run${profile.runs === 1 ? '' : 's'} · <b style="color:#ffd35c">${profile.coins || 0}</b> coin${profile.coins === 1 ? '' : 's'}</div>
         </div>
       </div>
@@ -626,9 +697,9 @@ applyQuality(quality);
         this.env = Math.sin(Math.PI * Math.min(this.strokeT, 1));
         const s = this.side, at = v3.add(p, R([s * 0.25, 0, 0.3]));
         if (this.mode === 'sweep') {     // same side again: a turning stroke (see beginStroke)
-          paddleYaw = -s * K.sweepTorque * MOBILE.repeatYaw * power * (0.5 + 0.5 * this.env);
-          addForceAt(at, v3.scale(fwdH, K.paddleFwd * MOBILE.repeatFwd * power * this.env));
-        } else addForceAt(at, v3.scale(fwdH, K.paddleFwd * power * this.env));
+          paddleYaw = -s * tr.sweepTorque * MOBILE.repeatYaw * power * (0.5 + 0.5 * this.env);
+          addForceAt(at, v3.scale(fwdH, tr.paddleFwd * MOBILE.repeatFwd * power * this.env));
+        } else addForceAt(at, v3.scale(fwdH, tr.paddleFwd * power * this.env));
         // stroke finished: the paddle is now poised over the other side (the same flip the desktop
         // loop does — it keeps the drawn paddle angle continuous); next tick decides what follows
         if (this.strokeT >= 1) { this.strokeT = 0; this.strokeActive = false; this.side = -s; }
@@ -640,11 +711,11 @@ applyQuality(quality);
         if (turn !== 0 && this.strokeT < 0.05) this.side = -turn;
         this.env = Math.sin(Math.PI * this.strokeT);
         this.mode = input.back && !input.fwd ? 'back' : turn !== 0 ? 'sweep' : 'fwd';
-        if (input.fwd) addForceAt(v3.add(p, R([this.side * 0.25, 0, 0.3])), v3.scale(fwdH, K.paddleFwd * power * this.env));
-        else if (input.back) addForceAt(v3.add(p, R([this.side * 0.25, 0, -0.3])), v3.scale(fwdH, -K.paddleBack * power * this.env));
+        if (input.fwd) addForceAt(v3.add(p, R([this.side * 0.25, 0, 0.3])), v3.scale(fwdH, tr.paddleFwd * power * this.env));
+        else if (input.back) addForceAt(v3.add(p, R([this.side * 0.25, 0, -0.3])), v3.scale(fwdH, -tr.paddleBack * power * this.env));
         if (turn !== 0) {
-          paddleYaw = turn * K.sweepTorque * power * (0.5 + 0.5 * this.env) * (input.fwd ? 0.7 : 1);
-          if (!input.fwd && !input.back) F = v3.add(F, v3.scale(fwdH, K.sweepFwd * power * this.env * 0.5));
+          paddleYaw = turn * tr.sweepTorque * power * (0.5 + 0.5 * this.env) * (input.fwd ? 0.7 : 1);
+          if (!input.fwd && !input.back) F = v3.add(F, v3.scale(fwdH, tr.sweepFwd * power * this.env * 0.5));
         }
       } else {
         // idle: strokeT deliberately stays put — zeroing it here flipped cos(πt) and snapped the
@@ -703,7 +774,7 @@ applyQuality(quality);
              - K.rollDamp * this.wl[2]
              - this.lean * tr.leanTorque
              - grace * K.graceStab * this.roll;
-      Tl[1] += paddleYaw - K.yawDamp * this.wl[1];
+      Tl[1] += paddleYaw - tr.yawDamp * this.wl[1];
       Tl[0] += -K.pitchDamp * this.wl[0];
       for (let a = 0; a < 3; a++) this.wl[a] += Tl[a] / K.inertia[a] * dt;
       this.v = v3.add(this.v, v3.scale(F, dt / m));
@@ -1309,8 +1380,11 @@ applyQuality(quality);
     const k = kayak, M = mat4Compose(k.p, k.q, [1, 1, 1]);
     const I = mat4Compose([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]);
     const inst = (name, local, tint = [1, 1, 1, 1]) => { const m = mat4Mul(M, local), d = new Float32Array(20); d.set(m, 0); d.set(tint, 16); device.queue.writeBuffer(kayakInst[name], 0, d); return m; };
-    const flash = 1 + 0.6 * k.hitFlash;
-    inst('hull', I, [flash, flash, flash, 1]); inst('cockpit', I);
+
+        // the boat's tint recolours the hull; the hit flash still brightens it on top
+        const bt = boatDef().tint || [1, 1, 1], flash = 1 + 0.6 * k.hitFlash;
+        inst('hull', I, [bt[0] * flash, bt[1] * flash, bt[2] * flash, 1]); inst('cockpit', I);
+    
     const vk = Math.min(1, dtReal * 9);
     k.visSide += (k.side - k.visSide) * vk;
     k.visAmp += ((k.mode === 'sweep' ? 1.0 : 0.6) - k.visAmp) * vk;
@@ -1344,12 +1418,10 @@ applyQuality(quality);
   }
   // ---------- HUD ----------
   const hudEl = $('hud'), glEl = $('gl'), mkEl = $('mk'), dbgEl = $('dbg'), stamFill = $('stamfill'), stamTxt = $('stamtxt');
-  const pcountEl = $('pcount'), ccountEl = $('ccount');
-  // brief "pop" flash on the paddle/coin counter to draw the eye when one is collected.
-  // if a pop is already mid-flight, let it finish rather than restarting it — yanking the
-  // class off and back on while it's mid-shrink makes the scale jump discontinuously.
+  const pcountEl = $('pcount'), ccountEl = $('ccount'), scountEl = $('scount');
+
   function popLoot(kind) {
-    const el = kind === 'paddle' ? pcountEl : ccountEl;
+    const el = kind === 'paddle' ? pcountEl : kind === 'snack' ? scountEl : ccountEl;
     if (el.classList.contains('pop')) return;
     el.classList.add('pop');
     const done = () => { el.classList.remove('pop'); el.removeEventListener('animationend', done); clearTimeout(fallback); };
@@ -1365,9 +1437,14 @@ applyQuality(quality);
       const currencyTotal = river.pickupKinds.filter(k => COLLECTIBLES[k].type === 'currency').reduce((s, k) => s + river.pickups[k].length, 0);
       pcountEl.innerHTML = `🛶 <b>${runLoot.paddles}</b>/${xpTotal}`;
       ccountEl.innerHTML = `🪙 <b>${runLoot.coins}</b>/${currencyTotal}`;
+      const snacks = itemCount(profile, 'snack');
+      scountEl.innerHTML = `🍫 <b>${snacks}</b>`;
+      scountEl.className = 'lc' + (snacks ? '' : ' out') + (scountEl.classList.contains('pop') ? ' pop' : '');
+      const snackLine = simTime < snackMsgUntil ? ` · <b style="color:#ffe08a">${snackMsg}</b>` : '';
     }
     const mapMsg = simTime < mapFoundUntil ? '<br><b style="color:#ffe08a">🗺 Hidden map found!</b>' : '';
-    hudEl.innerHTML = `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${profile.level}<br>speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · time <b>${runTime.toFixed(1)}</b> s${mapMsg}`;
+    hudEl.innerHTML = `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${profile.level} · ${boatDef().name}<br>speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · time <b>${runTime.toFixed(1)}</b> s${snackLine}${mapMsg}`;
+
     stamFill.style.width = (100 * kayak.stamina / STAMINA.max) + '%';
     stamFill.className = kayak.tired ? 'tired' : '';
     stamTxt.textContent = kayak.tired ? 'TIRED — weak strokes' : 'stamina';

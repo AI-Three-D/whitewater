@@ -148,3 +148,35 @@ body.mobile #dbg{top:calc(56px + env(safe-area-inset-top))}   /* clear the mbtn 
   #gl{width:300px;margin-left:-150px;font-size:12px}
   #hud{font-size:13px}
 }
+
+/* ---------- boat picker on the main screen ---------- */
+#boatsel{display:none;flex-wrap:wrap;gap:10px;justify-content:center;align-items:stretch;margin:2px 0 10px}
+#boatsel .hint{width:100%;text-align:center;font-size:12px;color:#9bc;margin-bottom:2px}
+.boat{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:10px;
+padding:9px 14px;width:200px;cursor:pointer;text-align:left;transition:.15s}
+.boat:hover{background:rgba(255,255,255,.16)}
+.boat.on{border-color:#ffe08a;background:rgba(255,224,138,.16)}
+.boat b{color:#ffe08a}
+.boat .kind{color:#9bc;font-size:11px;text-transform:uppercase;letter-spacing:1px}
+.boat small{display:block;color:#cde;font-size:11px;line-height:1.35;margin-top:3px}
+.boat .sel{color:#ffe08a;font-size:11px}
+
+/* ---------- store: one flat item listing ---------- */
+#store .items{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0;max-width:min(780px,92vw)}
+#store .item{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.3);border-radius:12px;
+padding:14px 18px;width:220px;display:flex;flex-direction:column;text-align:left}
+#store .item h3{margin:6px 0 2px;font-size:17px}
+#store .item p{font-size:12px;color:#cde;flex:1;margin:4px 0}
+#store .item .price{color:#ffd35c;font-weight:700;margin:2px 0 8px;font-size:13px}
+#store .item .have{color:#9bc;font-size:11px}
+
+/* ---------- inventory on the character sheet ---------- */
+.inv{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 2px}
+.inv .slot{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:4px 10px;font-size:13px}
+.inv .slot b{color:#ffe08a}
+.inv .slot.on{border-color:#ffe08a}
+.inv .empty{color:#9bc;font-size:12px}
+
+/* in-run snack counter dims to show there are none left */
+#scount.out{opacity:.4}
+#mSnack{right:calc(156px + env(safe-area-inset-right))}
