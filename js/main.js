@@ -281,6 +281,7 @@ applyQuality(quality);
   //  STATE & PROGRESSION
   // ============================================================================
   let river = null, simTime = 0, gameState = 'menu', runTime = 0, camMode = 0, dbgMode = 0, fps = 60, warmingUp = false;
+  let debugUnlockAll = false;   // dev toggle: show every river as unlocked regardless of pack ownership
   // fixed-timestep physics: frame() below advances simTime/kayak.step by however many SIM.dt
   // ticks are owed against real elapsed time, not a hardcoded count per rendered frame — see the
   // accumulator there. frameTicks is how many actually ran *this* frame; kayak.step's obstacle
@@ -405,8 +406,10 @@ applyQuality(quality);
   // a slim proportional bar (reuses the xp-bar look) for stats whose range is too wide for
   // individual pips to read well — health's cap goes up to 20, injury tracks against it
   const statBar = (val, cap, color) => `<div class="xpbar"><div class="xpfill" style="width:${clamp(100 * val / Math.max(cap, 1), 0, 100)}%;background:${color}"></div></div>`;
-  // stand-in for art that isn't in yet — swap the label for a real <img> or background-image later
-  const artSlot = (cls, label) => `<div class="art-slot ${cls}">${label}</div>`;
+  // stand-in for art that isn't in yet; pass a url once real art exists to swap the label for it
+  const artSlot = (cls, label, url) => url
+    ? `<div class="art-slot ${cls}" style="background-image:url('${url}');background-size:cover;background-position:center" role="img" aria-label="${label}"></div>`
+    : `<div class="art-slot ${cls}">${label}</div>`;
   const swatch = c => `<i class="swatch" style="background:rgb(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)})"></i>`;
 
   // ---------- menu ----------
@@ -464,9 +467,11 @@ applyQuality(quality);
         <div class="xpbar"><div class="xpfill" style="width:${pct}%"></div></div>
         <small style="color:#9bc">${profile.points} / ${need} xp to next level · ${profile.runs} run${profile.runs === 1 ? '' : 's'}</small>
       </div>
-      <div class="topbar-btns"><button id="openCharSheet">Character</button><button id="openStoreBtn">Store</button></div>`;
+      <div class="topbar-btns"><button id="openCharSheet">Character</button><button id="openStoreBtn">Store</button>
+        <button id="debugUnlockBtn" style="background:${debugUnlockAll ? '#a33' : ''}">${debugUnlockAll ? 'Debug: all unlocked' : 'Debug: unlock all rivers'}</button></div>`;
     $('openCharSheet').onclick = showCharSheet;
     $('openStoreBtn').onclick = showStore;
+    $('debugUnlockBtn').onclick = () => { debugUnlockAll = !debugUnlockAll; renderMenu(); };
         // boat picker: one toggle per owned craft, the selected one highlighted. Selection persists
     // in the profile and is read by startRun.
     const cb = $('craftbar');
@@ -482,26 +487,26 @@ applyQuality(quality);
     rl.innerHTML = '';
     for (const tier of TIERS) {
       const tierRivers = RIVERS.filter(r => r.tier === tier.id);
-      const lockedCount = tierRivers.filter(r => !riverUnlocked(profile, r)).length;
+      const lockedCount = debugUnlockAll ? 0 : tierRivers.filter(r => !riverUnlocked(profile, r)).length;
       const h = document.createElement('div'); h.className = 'tier';
       h.textContent = `${tier.label} · ${tier.points} pt${lockedCount ? ` · ${lockedCount} more in the store` : ''}`;
       rl.appendChild(h);
       const row = document.createElement('div'); row.className = 'rivers';
       for (const R of tierRivers) {
-        const unlocked = riverUnlocked(profile, R);
+        const unlocked = debugUnlockAll || riverUnlocked(profile, R);
         const d = document.createElement('div'); d.className = unlocked ? 'riv' : 'riv locked';
         if (unlocked) {
           const extra = (R.forks && R.forks.length ? ` · ${R.forks.length} fork${R.forks.length > 1 ? 's' : ''}` : '')
                       + (R.waterfalls && R.waterfalls.length ? ' · waterfall' : '')
                       + (R.obstacles ? ' · ' + Object.keys(R.obstacles).map(k => (OBSTACLES.kinds[k] || {}).label || k).join(' + ') : '');
           const best = profile.best[R.name];
-          d.innerHTML = `${artSlot('riv-thumb', R.name + ' art')}
+          d.innerHTML = `${artSlot('riv-thumb', R.name + ' art', R.art)}
             <h3>${R.name}</h3><small>gradient ${(R.slope * 100).toFixed(1)} % · ${R.rocks} boulders · ${R.ledges.length} ledges${extra}</small>
             ${best ? `<br><span class="best">best ${best.toFixed(1)} s</span>` : ''}`;
           d.onclick = () => startRun(R);
         } else {
           const pk = RIVER_PACKS[R.pack];
-          d.innerHTML = `${artSlot('riv-thumb', R.name + ' art')}
+          d.innerHTML = `${artSlot('riv-thumb', R.name + ' art', R.art)}
             <h3>${R.name}</h3><small>🔒 buy "${pk.label}" in the store to unlock</small>`;
         }
         row.appendChild(d);
@@ -509,7 +514,7 @@ applyQuality(quality);
       // hidden per-tier secret river — greyed out and unclickable until its map item is found
       const hiddenR = RIVERS_HIDDEN.find(r => r.tier === tier.id);
       if (hiddenR) {
-        const unlocked = profile.unlockedHidden[tier.id];
+        const unlocked = debugUnlockAll || profile.unlockedHidden[tier.id];
         const d = document.createElement('div'); d.className = unlocked ? 'riv' : 'riv locked';
         if (unlocked) {
           const best = profile.best[hiddenR.name];

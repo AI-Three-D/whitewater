@@ -186,9 +186,9 @@ KAYAK.formStab = 2 * KAYAK.buoyK * KAYAK.buoySide * KAYAK.buoySide;
 
 export const RIVERS = [
   // ---------- easy ----------
-  { name: 'Meadow Run', cls: 'Class II · easy', tier: 'easy', slope: 0.0018, manning: 0.032, halfW: 12, widthVar: 0.25,
+  { name: 'Meadow Run', cls: 'Class II · easy', tier: 'easy', slope: 0.0018, manning: 0.032, halfW: 12, widthVar: 0.25, art: 'img/Meadow.png',
     meander: [[18, 170], [6, 61]], depth: 1.6, rocks: 10, rockR: [0.8, 2.0], emergent: 0.3, ledges: [],
-    constrictions: 0, valleyH: 12, valleyScale: 70, seed: 11, len: 350,
+    constrictions: 0, valleyH: 12, valleyScale: 70, seed: 11, len: 320,
     waterTint: [0.02, 0.17, 0.06], waterClarity: 1.0,   // emerald
 
 obstacles: { log: { medium: 5, large: 2.5 } },
@@ -196,21 +196,10 @@ obstacles: { log: { medium: 5, large: 2.5 } },
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 31 } },
 
 
-  { name: 'Willow Bend', cls: 'Class II · easy', tier: 'easy', slope: 0.002, manning: 0.031, halfW: 11, widthVar: 0.3,
-    meander: [[24, 190], [5, 48]], depth: 1.5, rocks: 12, rockR: [0.8, 1.9], emergent: 0.3, ledges: [],
-    pond: { z: 70, len: 80 },
-    // a placeable whirlpool: x/z is world position (metres), strength sets both spin speed and
-    // direction (+CCW/-CW, roughly the peak tangential m/s at the core edge — clamped hard by
-    // SIM.umax=12, so don't push strength/radius far enough that peak = strength/(radius*0.3)
-    // blows past that or it just saturates into a flat clipped disc instead of a real gradient),
-    // radius is where its effect fades to zero. x must track the river's actual meandering
-    // centerline at that z (it is NOT constant down the river) — verify with generateRiver()
-    // before moving z, a channel-center x that was right at one z can land on dry land at another.
-    // z=110 sits right at the pond's tail edge (pond1, where it's already narrowing back toward a
-    // normal rapid) rather than its widest/calmest middle (z=70) — fine as "an obstacle near the
-    // exit" but reposition to z:70/x:64 instead if you want it more centrally in the open pond.
-    vortex: { x: 24, z: 110, strength: 25, radius: 24 },
-    constrictions: 1, valleyH: 10, valleyScale: 60, seed: 12, len: 170,
+  { name: 'Willow Bend', cls: 'Class II · easy', tier: 'easy', slope: 0.0017, manning: 0.031, halfW: 11, widthVar: 0.3,art: 'img/Willow.png',
+    meander: [[24, 190], [5, 48]], depth: 1.5, rocks: 10, rockR: [0.8, 1.9], emergent: 0.3, ledges: [],
+    pond: { z: 170, len: 9 },
+    constrictions: 1, valleyH: 10, valleyScale: 60, seed: 12, len: 200,
     waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,   // crystal clear
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 } },
   { name: 'Tame snake', cls: 'Class II · easy', tier: 'easy', slope: 0.002, manning: 0.033, halfW: 6, widthVar: 0.2,
