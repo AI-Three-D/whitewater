@@ -908,8 +908,10 @@ applyQuality(quality);
       this.p[0] = clamp(this.p[0], 1, W * dx - 1); this.p[2] = clamp(this.p[2], 1, L * dx - 1);
       this.q = qNorm(qMul(q, qFromRotVec(v3.scale(this.wl, dt))));
       this.speed = Math.hypot(this.v[0], this.v[2]);
-      if (Math.abs(this.roll) > K.capsize || Math.abs(this.pitch) > 1.35) endRun(false);
-      if (this.p[2] > river.finishZ) endRun(true);
+      // endRun may tear the whole run down (permadeath nulls `river` and `profile`), so nothing in
+      // this tick may touch them after the call — return straight away
+      if (Math.abs(this.roll) > K.capsize || Math.abs(this.pitch) > 1.35) { endRun(false); return; }
+      if (this.p[2] > river.finishZ) { endRun(true); return; }
     },
   };
 
@@ -1677,15 +1679,20 @@ applyQuality(quality);
     // a real stall at whatever the clamp is and hide exactly the slowdown this counter is for.
     if (dtRaw > 0) fps += (1 / dtRaw - fps) * 0.1;
     if (!river || gameState === 'menu' || warmingUp) return;
-    const running = gameState === 'run';
     const dtReal = Math.min(0.05, Math.max(0, dtRaw));
-    // advance sim/kayak time by however much real time actually elapsed (scaled by TIME_SCALE),
-    // not by a fixed tick count per rendered frame — the old code always ran exactly 2 ticks/frame
-    // regardless of how long the frame took, so simTime (and every bit of gameplay riding on it:
-    // paddling, current, obstacles) advanced 2×SIM.dt of sim-time per *frame* rather than per
-    // *second* — correct only at the 60fps it was tuned for, and visibly half-speed at 30fps,
-    // double-speed at 120fps.
+    // … (existing comment block) …
     physAccum = Math.min(physAccum + dtReal * TIME_SCALE, SIM.dt * MAX_PHYS_TICKS);
+    frameTicks = Math.min(Math.floor(physAccum / SIM.dt), MAX_PHYS_TICKS);
+    for (let s = 0; s < frameTicks; s++) {
+      simTime += SIM.dt;
+      // checked live, not hoisted: a tick can end the run (capsize/finish), after which no further
+      // kayak.step may run this frame
+      if (gameState === 'run') { runTime += SIM.dt; kayak.step(SIM.dt); }
+    }
+    physAccum -= frameTicks * SIM.dt;
+    if (!river) return;   // fatal capsize this frame (permadeath): run state is gone, leave the last frame on screen
+    const running = gameState === 'run';
+    
     frameTicks = Math.min(Math.floor(physAccum / SIM.dt), MAX_PHYS_TICKS);
     for (let s = 0; s < frameTicks; s++) {
       simTime += SIM.dt;
