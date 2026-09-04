@@ -1,5 +1,5 @@
 'use strict';
-import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, MAP_ITEM, RUCKSACK, OBSTACLES, CHARACTERS, CRAFTS, ITEMS, STORE_LISTING, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
+import { GRID, SIM, RENDER, BIOME_SKY, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, SPECIAL_ITEMS, MAP_ITEM, RUCKSACK, OBSTACLES, CHARACTERS, CRAFTS, ITEMS, UPGRADES, RIVER_PACKS, STORE_LISTING, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
 
 
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW } from './shaders.js';
@@ -10,7 +10,9 @@ import { generateRiver, nearestChan } from './river.js';
 import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh, buildObstacleMeshes } from './meshes.js';
 import { loadProfile, newProfile, clearProfile, character, canRaise, anyRaisable,
   awardRun, spendPoint, discardPending, pointsForLevel, unlockHidden,
-  craftOf, itemCount, canBuyItem, canBuyCraft, buyItem, buyCraft, selectCraft, useItem } from './progression.js';
+  craftOf, itemCount, canBuyItem, canBuyCraft, buyItem, buyCraft, selectCraft, useItem,
+  ownsUpgrade, canBuyUpgrade, buyUpgrade, canHeal, healInjury, applyInjury,
+  ownsPack, canBuyPack, buyPack, riverUnlocked } from './progression.js';
 
 const showErr = t => { const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = t; };
 addEventListener('error', e => showErr('Script error: ' + e.message + ' (line ' + e.lineno + ')'));
@@ -18,7 +20,7 @@ addEventListener('unhandledrejection', e => showErr('Promise error: ' + ((e.reas
 const $ = id => document.getElementById(id);
 // bumped by hand on every edit — lets a stale/cached page or a not-yet-reloaded tab be spotted
 // on sight instead of chasing "am I even testing the current code" through several rounds
-const BUILD = 'build 27';
+const BUILD = 'build 28';
 { const v = document.getElementById('ver'); if (v) v.textContent = BUILD; }
 // ---------- platform ----------
 // modern-browser signals only: a touch screen (maxTouchPoints) whose primary pointer is coarse
@@ -279,16 +281,26 @@ applyQuality(quality);
   //  STATE & PROGRESSION
   // ============================================================================
   let river = null, simTime = 0, gameState = 'menu', runTime = 0, camMode = 0, dbgMode = 0, fps = 60, warmingUp = false;
-  const KAYAK_TICKS = 2;     // kayak/physics ticks per rendered frame (see frame())
+  // fixed-timestep physics: frame() below advances simTime/kayak.step by however many SIM.dt
+  // ticks are owed against real elapsed time, not a hardcoded count per rendered frame — see the
+  // accumulator there. frameTicks is how many actually ran *this* frame; kayak.step's obstacle
+  // force accumulation (search `kf =`) divides by it, since that force is built up once per tick
+  // but only consumed once per frame, and how many ticks make up "this frame" now varies.
+  let frameTicks = 2;
+  const MAX_PHYS_TICKS = 8;  // hard cap on ticks replayed in one frame — after a big stall (tab
+                              // backgrounded, a long GC pause) sim time falls behind real time
+                              // instead of the frame trying to replay all of it at once and spiralling
   
-  let runLoot = { paddles: 0, coins: 0, coinValue: 0 };
+  let runLoot = { paddles: 0, coins: 0, coinValue: 0, snacks: 0, bandaids: 0, medikits: 0, books: 0, raftFound: false, helmetFound: false };
   let snackMsgUntil = 0;   // simTime until which the "snack eaten" HUD line shows
-  // the boat for the current run: its KAYAK parameters with the craft's mods applied (see
-  // craftKayakParams) and the craft itself for the hull colour. Set in startRun.
+  // the boat for the current run: its KAYAK parameters with the craft's (and, if owned, the
+  // better-paddle upgrade's) mods applied (see craftKayakParams) and the craft itself for the
+  // hull colour / lootMod. Set in startRun.
   let effK = KAYAK, runCraft = CRAFTS.classic;
-  function craftKayakParams(craft) {
+  function craftKayakParams(craft, prof) {
     const K = Object.assign({}, KAYAK);
     for (const [k, m] of Object.entries(craft.mods || {})) if (typeof K[k] === 'number') K[k] *= m;
+    if (prof && ownsUpgrade(prof, 'paddle')) for (const [k, m] of Object.entries(UPGRADES.paddle.mods || {})) if (typeof K[k] === 'number') K[k] *= m;
     return K;
   }
 
@@ -385,6 +397,9 @@ applyQuality(quality);
   });
   const pips = (val, cap, max = 10) => `<div class="bar">${Array.from({ length: max }, (_, i) =>
     `<i class="${i < val ? 'on' : ''}${i >= cap ? ' cap' : ''}"></i>`).join('')}</div>`;
+  // a slim proportional bar (reuses the xp-bar look) for stats whose range is too wide for
+  // individual pips to read well — health's cap goes up to 20, injury tracks against it
+  const statBar = (val, cap, color) => `<div class="xpbar"><div class="xpfill" style="width:${clamp(100 * val / Math.max(cap, 1), 0, 100)}%;background:${color}"></div></div>`;
   // stand-in for art that isn't in yet — swap the label for a real <img> or background-image later
   const artSlot = (cls, label) => `<div class="art-slot ${cls}">${label}</div>`;
   const swatch = c => `<i class="swatch" style="background:rgb(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)})"></i>`;
@@ -428,7 +443,8 @@ applyQuality(quality);
         d.innerHTML = `${artSlot('chr-portrait', c.name + ' art')}
           <h3>${c.name}</h3><small>${c.title}</small><p>${c.desc}</p>
           <small>skill ${c.start.skill}/${c.caps.skill}</small>${pips(c.start.skill, c.caps.skill)}
-          <small>stamina ${c.start.stamina}/${c.caps.stamina}</small>${pips(c.start.stamina, c.caps.stamina)}`;
+          <small>stamina ${c.start.stamina}/${c.caps.stamina}</small>${pips(c.start.stamina, c.caps.stamina)}
+          <small>health ${c.start.health}/${c.caps.health}</small>${statBar(c.start.health, c.caps.health, '#7fd6ff')}`;
         d.onclick = () => { profile = newProfile(id); renderMenu(); };
         cs.appendChild(d);
       }
@@ -450,7 +466,9 @@ applyQuality(quality);
     // in the profile and is read by startRun.
     const cb = $('craftbar');
     cb.style.display = 'flex';
-    const unowned = Object.keys(CRAFTS).filter(id => !profile.crafts.includes(id)).length;
+    // only count crafts actually sold in the store — the raft is found, not bought, so it
+    // shouldn't inflate "X more in the store" before it's even been found
+    const unowned = STORE_LISTING.filter(e => e.type === 'craft' && !profile.crafts.includes(e.id)).length;
     cb.innerHTML = `<span>boat</span>` + profile.crafts.map(id => {
       const c = CRAFTS[id];
       return `<button class="craftbtn ${id === profile.craft ? 'on' : ''}" data-craft="${id}" title="${c.desc}">${swatch(c.color)}${c.name}</button>`;
@@ -458,18 +476,29 @@ applyQuality(quality);
     for (const btn of cb.querySelectorAll('button')) btn.onclick = () => { selectCraft(profile, btn.dataset.craft); renderMenu(); };
     rl.innerHTML = '';
     for (const tier of TIERS) {
-      const h = document.createElement('div'); h.className = 'tier'; h.textContent = `${tier.label} · ${tier.points} pt`; rl.appendChild(h);
+      const tierRivers = RIVERS.filter(r => r.tier === tier.id);
+      const lockedCount = tierRivers.filter(r => !riverUnlocked(profile, r)).length;
+      const h = document.createElement('div'); h.className = 'tier';
+      h.textContent = `${tier.label} · ${tier.points} pt${lockedCount ? ` · ${lockedCount} more in the store` : ''}`;
+      rl.appendChild(h);
       const row = document.createElement('div'); row.className = 'rivers';
-      for (const R of RIVERS.filter(r => r.tier === tier.id)) {
-        const d = document.createElement('div'); d.className = 'riv';
-        const extra = (R.forks && R.forks.length ? ` · ${R.forks.length} fork${R.forks.length > 1 ? 's' : ''}` : '')
-                    + (R.waterfalls && R.waterfalls.length ? ' · waterfall' : '')
-                    + (R.obstacles ? ' · ' + Object.keys(R.obstacles).map(k => (OBSTACLES.kinds[k] || {}).label || k).join(' + ') : '');
-        const best = profile.best[R.name];
-        d.innerHTML = `${artSlot('riv-thumb', R.name + ' art')}
-          <h3>${R.name}</h3><small>gradient ${(R.slope * 100).toFixed(1)} % · ${R.rocks} boulders · ${R.ledges.length} ledges${extra}</small>
-          ${best ? `<br><span class="best">best ${best.toFixed(1)} s</span>` : ''}`;
-        d.onclick = () => startRun(R);
+      for (const R of tierRivers) {
+        const unlocked = riverUnlocked(profile, R);
+        const d = document.createElement('div'); d.className = unlocked ? 'riv' : 'riv locked';
+        if (unlocked) {
+          const extra = (R.forks && R.forks.length ? ` · ${R.forks.length} fork${R.forks.length > 1 ? 's' : ''}` : '')
+                      + (R.waterfalls && R.waterfalls.length ? ' · waterfall' : '')
+                      + (R.obstacles ? ' · ' + Object.keys(R.obstacles).map(k => (OBSTACLES.kinds[k] || {}).label || k).join(' + ') : '');
+          const best = profile.best[R.name];
+          d.innerHTML = `${artSlot('riv-thumb', R.name + ' art')}
+            <h3>${R.name}</h3><small>gradient ${(R.slope * 100).toFixed(1)} % · ${R.rocks} boulders · ${R.ledges.length} ledges${extra}</small>
+            ${best ? `<br><span class="best">best ${best.toFixed(1)} s</span>` : ''}`;
+          d.onclick = () => startRun(R);
+        } else {
+          const pk = RIVER_PACKS[R.pack];
+          d.innerHTML = `${artSlot('riv-thumb', R.name + ' art')}
+            <h3>${R.name}</h3><small>🔒 buy "${pk.label}" in the store to unlock</small>`;
+        }
         row.appendChild(d);
       }
       // hidden per-tier secret river — greyed out and unclickable until its map item is found
@@ -503,9 +532,12 @@ applyQuality(quality);
           <button id="lvSkill" ${canRaise(profile, 'skill') ? '' : 'disabled'}>${canRaise(profile, 'skill') ? 'Raise skill' : 'At cap'}</button></div>
         <div class="opt"><h3>Stamina</h3>${pips(profile.stamina, c.caps.stamina)}<p>Paddling drains stamina more slowly, so you stay strong for longer.</p>
           <button id="lvStam" ${canRaise(profile, 'stamina') ? '' : 'disabled'}>${canRaise(profile, 'stamina') ? 'Raise stamina' : 'At cap'}</button></div>
+        <div class="opt"><h3>Health</h3><small>${profile.health}/${c.caps.health}</small>${statBar(profile.health, c.caps.health, '#7fd6ff')}<p>Raises how much injury you can sustain before it's game over.</p>
+          <button id="lvHealth" ${canRaise(profile, 'health') ? '' : 'disabled'}>${canRaise(profile, 'health') ? 'Raise health' : 'At cap'}</button></div>
       </div>`;
     $('lvSkill').onclick = () => { spendPoint(profile, 'skill'); showLevelUp(); };
     $('lvStam').onclick = () => { spendPoint(profile, 'stamina'); showLevelUp(); };
+    $('lvHealth').onclick = () => { spendPoint(profile, 'health'); showLevelUp(); };
   }
   function showStore() {
     if (!profile) return;
@@ -518,6 +550,22 @@ applyQuality(quality);
           <div class="info"><h3>${it.name}</h3><p>${it.desc}</p></div>
           <div class="buy"><span class="price">${it.price} 🪙</span><span class="have">${have} in pack${have >= it.maxStack ? ' (full)' : ''}</span>
             <button data-item="${entry.id}" ${ok ? '' : 'disabled'}>Buy</button></div></div>`;
+      }
+      if (entry.type === 'pack') {
+        const pk = RIVER_PACKS[entry.id], owned = ownsPack(profile, entry.id), ok = canBuyPack(profile, entry.id);
+        const included = RIVERS.filter(r => r.pack === entry.id);
+        const tierLabel = (TIERS.find(t => t.id === pk.tier) || {}).label || pk.tier;
+        return `<div class="item ${owned ? 'owned' : ''}">${artSlot('', '🗺️')}
+          <div class="info"><h3>${tierLabel} — ${pk.label}</h3><p>Unlocks ${included.map(r => r.name).join(' & ')}.</p></div>
+          <div class="buy"><span class="price">${owned ? 'owned' : pk.price + ' 🪙'}</span>
+            ${owned ? '' : `<button data-pack="${entry.id}" ${ok ? '' : 'disabled'}>Buy</button>`}</div></div>`;
+      }
+      if (entry.type === 'upgrade') {
+        const u = UPGRADES[entry.id], owned = ownsUpgrade(profile, entry.id), ok = canBuyUpgrade(profile, entry.id);
+        return `<div class="item ${owned ? 'owned' : ''}">${artSlot('', u.icon)}
+          <div class="info"><h3>${u.name}</h3><p>${u.desc}</p></div>
+          <div class="buy"><span class="price">${owned ? 'owned' : u.price + ' 🪙'}</span>
+            ${owned ? '' : `<button data-upgrade="${entry.id}" ${ok ? '' : 'disabled'}>Buy</button>`}</div></div>`;
       }
       const c = CRAFTS[entry.id], owned = profile.crafts.includes(entry.id), ok = canBuyCraft(profile, entry.id);
       return `<div class="item ${owned ? 'owned' : ''}">${artSlot('', c.name + ' art')}
@@ -533,6 +581,8 @@ applyQuality(quality);
       <button id="storeClose">Close</button>`;
     for (const b of el.querySelectorAll('button[data-item]')) b.onclick = () => { if (buyItem(profile, b.dataset.item)) { showStore(); renderMenu(); } };
     for (const b of el.querySelectorAll('button[data-craft]')) b.onclick = () => { if (buyCraft(profile, b.dataset.craft)) { showStore(); renderMenu(); } };
+    for (const b of el.querySelectorAll('button[data-upgrade]')) b.onclick = () => { if (buyUpgrade(profile, b.dataset.upgrade)) { showStore(); renderMenu(); } };
+    for (const b of el.querySelectorAll('button[data-pack]')) b.onclick = () => { if (buyPack(profile, b.dataset.pack)) { showStore(); renderMenu(); } };
     $('storeClose').onclick = hideStore;
   }
   function hideStore() { $('store').style.display = 'none'; }
@@ -550,10 +600,16 @@ applyQuality(quality);
           <small style="color:#9bc">${profile.points} / ${need} xp to next level</small>
           <div class="stat-row"><small>skill ${profile.skill}/${c.caps.skill}</small>${pips(profile.skill, c.caps.skill)}</div>
           <div class="stat-row"><small>stamina ${profile.stamina}/${c.caps.stamina}</small>${pips(profile.stamina, c.caps.stamina)}</div>
+          <div class="stat-row"><small>health ${profile.health}/${c.caps.health}</small>${statBar(profile.health, c.caps.health, '#7fd6ff')}</div>
+          <div class="stat-row"><small style="color:${profile.injury > 0 ? '#ff9a80' : '#9bc'}">injury ${profile.injury}/${profile.health}${profile.injury >= profile.health ? ' — GAME OVER!' : ''}</small>${statBar(profile.injury, profile.health, '#ff5040')}</div>
           <div style="margin-top:8px">${profile.runs} run${profile.runs === 1 ? '' : 's'} · <b style="color:#ffd35c">${profile.coins || 0}</b> coin${profile.coins === 1 ? '' : 's'}</div>
           <div class="inv"><h4>Pack</h4>
             ${Object.entries(ITEMS).filter(([id]) => itemCount(profile, id) > 0).map(([id, it]) =>
-              `<div class="row">${it.icon} ${it.name} × <b>${itemCount(profile, id)}</b></div>`).join('') || '<div class="row">empty — visit the store</div>'}
+              `<div class="row">${it.icon} ${it.name} × <b>${itemCount(profile, id)}</b>${it.heal ? ` <button data-heal="${id}" ${canHeal(profile, id) ? '' : 'disabled'}>Use (-${it.heal} injury)</button>` : ''}</div>`).join('') || '<div class="row">empty — visit the store</div>'}
+          </div>
+          <div class="inv"><h4>Upgrades</h4>
+            ${Object.entries(UPGRADES).filter(([id]) => ownsUpgrade(profile, id)).map(([id, u]) =>
+              `<div class="row">${u.icon} ${u.name}</div>`).join('') || '<div class="row">none yet — visit the store, or get lucky in a rucksack</div>'}
           </div>
           <div class="inv"><h4>Boathouse</h4>
             ${profile.crafts.map(id => `<div class="row">${swatch(CRAFTS[id].color)} ${CRAFTS[id].name}${id === profile.craft ? ' <small style="color:#ffe08a">· in use</small>' : ''}</div>`).join('')}
@@ -564,6 +620,7 @@ applyQuality(quality);
         <button id="charNewBtn">New character</button>
         <button id="charCloseBtn">Close</button>
       </div>`;
+    for (const b of el.querySelectorAll('button[data-heal]')) b.onclick = () => { if (healInjury(profile, b.dataset.heal)) showCharSheet(); };
     $('charNewBtn').onclick = () => { if (confirm('Discard this paddler and all progress?')) { clearProfile(); profile = null; river = null; hideCharSheet(); renderMenu(); } };
     $('charCloseBtn').onclick = hideCharSheet;
   }
@@ -754,8 +811,8 @@ applyQuality(quality);
           const f = [nx * fn, ob.lift * fn, nz * fn];
           addForceAt(pw, f);
           // equal and opposite on the obstacle, at the contact point so it yaws too. Divided by
-          // KAYAK_TICKS because this runs once per kayak tick but is consumed once per frame.
-          const kf = 1 / KAYAK_TICKS;
+          // frameTicks because this runs once per kayak tick but is consumed once per frame.
+          const kf = 1 / frameTicks;
           ob.fx -= f[0] * kf; ob.fz -= f[2] * kf;
           ob.tq -= ((cz - ob.z) * f[0] - (cx - ob.x) * f[2]) * kf;
           if (-vn > 0.8 && ob.hitK > 0.5) this.hitFlash = 1;
@@ -822,7 +879,12 @@ applyQuality(quality);
     const lists = Object.fromEntries(Object.keys(vegMeshes).filter(k => k !== 'pole').map(k => [k, []]));
     const caps = Object.fromEntries(Object.entries(VEG.caps).map(([k, v]) => [k, Math.round(v * biome.vegDensity[k])]));
     const push = (role, x, z) => {
-      const meshName = biome.props[role];
+      // a biome's role can name one mesh or (for visual variety within that role — see the
+      // rockSlab/boulderJagged/bushBerry/flowerTuft/treeBirch variants in meshes.js) a pool of
+      // several, one of which is picked per placement so a patch of "rock" isn't the same lump
+      // copy-pasted everywhere
+      const spec = biome.props[role];
+      const meshName = Array.isArray(spec) ? spec[Math.floor(rng() * spec.length)] : spec;
       if (!meshName || lists[meshName].length >= caps[role]) return;
       const [lo, hi] = ROLE_SIZE[role], sc = lo + rng() * (hi - lo);
       const g = 0.8 + 0.4 * rng(), tint = ROLE_TINT[role](g), bt = biome.vegTint[role];
@@ -931,17 +993,25 @@ applyQuality(quality);
     const slot = list.find(it => !it.alive && !it.collected);
     if (!slot) return;
     river.rucksackSpawnT = 0;
-    const behind = RUCKSACK.spawnBehindMin + Math.random() * (RUCKSACK.spawnBehindMax - RUCKSACK.spawnBehindMin);
-    const z = clamp(kayak.p[2] - behind, 20, river.finishZ - 10);
+    // half spawn downstream, in front of the player — far enough out to be beyond render
+    // distance, so it just quietly comes into view rather than popping in. It gets no speed
+    // boost (unlike a behind-spawn): it drifts at the current's own pace, so actually reaching it
+    // before it drifts on down to the take-out takes real paddling, not just holding a line.
+    const ahead = Math.random() < RUCKSACK.aheadFrac;
+    const dist = ahead ? RUCKSACK.spawnAheadMin + Math.random() * (RUCKSACK.spawnAheadMax - RUCKSACK.spawnAheadMin)
+                        : RUCKSACK.spawnBehindMin + Math.random() * (RUCKSACK.spawnBehindMax - RUCKSACK.spawnBehindMin);
+    const z = clamp(kayak.p[2] + (ahead ? dist : -dist), 20, river.finishZ - 10);
     const j = clamp(Math.floor(z / dx), 0, L - 1), chans = river.rows[j];
     const chan = chans[Math.floor(Math.random() * chans.length)];
     const x = clamp(chan.c + (Math.random() * 1.4 - 0.7) * chan.hw, 1, W * dx - 1);
     // launched downstream faster than the current, held there for RUCKSACK.spawnBoostDist metres
     // of actual travel, then eased back down to normal floating speed by the same drag relaxation
     // in updateRucksackDrift — so it visibly overtakes and pulls ahead of a slowed-down player
-    // for a stretch before settling, instead of just gently appearing nearby
+    // for a stretch before settling, instead of just gently appearing nearby. An ahead-spawn skips
+    // the boost entirely — it's already out front, so goosing it further downstream would only
+    // make it harder to catch.
     const w = waterAt(x, z);
-    Object.assign(slot, { x, z, vx: w.u, vz: w.v * RUCKSACK.spawnBoost, boostDist: RUCKSACK.spawnBoostDist,
+    Object.assign(slot, { x, z, vx: w.u, vz: ahead ? w.v : w.v * RUCKSACK.spawnBoost, boostDist: ahead ? 0 : RUCKSACK.spawnBoostDist,
       spinPh: Math.random() * 6.2832, bobPh: Math.random() * 6.2832,
       alive: true, collected: false, seenT: -1, checkT: 0, checkX: x, checkZ: z, nudging: false });
   }
@@ -1201,7 +1271,10 @@ applyQuality(quality);
           // target you're actively chasing down, so it shouldn't have a hidden window where
           // paddling right up to it still whiffs; always reachable while in range instead
           const reachable = isRucksack || !it.floating || Math.sin(bobPhase) <= PICKUPS.reachBob;
-          const collectR = isMap ? MAP_ITEM.collectRadius : isRucksack ? RUCKSACK.collectRadius : PICKUPS.collectRadius;
+          // a raft/tube ring's lootMod shrinks the reach for anything but the key-item map pickup —
+          // "unlikely to catch much loot with it" is modelled as a much smaller collect window
+          const lootMod = isMap ? 1 : (runCraft.lootMod ?? 1);
+          const collectR = (isMap ? MAP_ITEM.collectRadius : isRucksack ? RUCKSACK.collectRadius : PICKUPS.collectRadius) * lootMod;
           if (it.alive && dist < collectR && reachable) {
             it.alive = false; it.collected = true; alpha = 0;
             if (isMap) {
@@ -1209,18 +1282,39 @@ applyQuality(quality);
               mapFoundUntil = simTime + 3.5;
               spawnBurst(it.x, y, it.z, MAP_ITEM.color);
             } else {
-              let C = COLLECTIBLES[kind];
-              if (C.type === 'random') {   // rucksack: roll what's actually inside, then treat it exactly like that kind
+              const C = COLLECTIBLES[kind];
+              if (C.type === 'random') {   // rucksack: roll what's actually inside
                 const totalW = C.roll.reduce((s, r) => s + r.weight, 0);
                 let roll = Math.random() * totalW, picked = null;
                 for (const r of C.roll) { roll -= r.weight; if (roll <= 0) { picked = r.kind; break; } }
-                C = COLLECTIBLES[picked || C.roll[C.roll.length - 1].kind];
+                picked = picked || C.roll[C.roll.length - 1].kind;
+                if (picked === 'special') {
+                  const keys = Object.keys(SPECIAL_ITEMS);
+                  picked = keys[Math.floor(Math.random() * keys.length)];
+                  // raft/helmet are one-off, globally — once a profile already has one, a repeat
+                  // roll just resolves to empty instead of a duplicate
+                  if (picked === 'raft' && profile.crafts.includes('raft')) picked = 'empty';
+                  if (picked === 'helmet' && profile.upgrades.includes('helmet')) picked = 'empty';
+                }
+                let color = COLLECTIBLES.rucksack.color, popAs = null;
+                if (picked === 'coin' || picked === 'diamond') {
+                  const cc = COLLECTIBLES[picked]; runLoot.coins++; runLoot.coinValue += cc.value; color = cc.color; popAs = 'coin';
+                } else if (picked === 'snack') { runLoot.snacks++; color = ITEMS.snack.color; popAs = 'snack'; }
+                else if (picked === 'bandaid') { runLoot.bandaids++; color = ITEMS.bandaid.color; }
+                else if (picked === 'medikit') { runLoot.medikits++; color = ITEMS.medikit.color; }
+                else if (picked === 'book') { runLoot.books++; color = SPECIAL_ITEMS.book.color; }
+                else if (picked === 'raft') { runLoot.raftFound = true; color = SPECIAL_ITEMS.raft.color; }
+                else if (picked === 'helmet') { runLoot.helmetFound = true; color = SPECIAL_ITEMS.helmet.color; }
+                // 'empty' just falls through with the rucksack's own colour and no reward
+                spawnBurst(it.x, y, it.z, color);
+                if (popAs) popLoot(popAs);
+              } else {
+                const popAs = C.type === 'xp' ? 'paddle' : 'coin';
+                if (C.type === 'xp') runLoot.paddles++;
+                else { runLoot.coins++; runLoot.coinValue += C.value; }
+                spawnBurst(it.x, y, it.z, C.color);
+                popLoot(popAs);
               }
-              const popAs = C.type === 'xp' ? 'paddle' : 'coin';
-              if (C.type === 'xp') runLoot.paddles++;
-              else { runLoot.coins++; runLoot.coinValue += C.value; }
-              spawnBurst(it.x, y, it.z, C.color);
-              popLoot(popAs);
             }
           }
           const spin = simTime * (isMap ? MAP_ITEM.spinSpeed : isRucksack ? RUCKSACK.spinSpeed : PICKUPS.spinSpeed) + it.spinPh;
@@ -1248,7 +1342,7 @@ applyQuality(quality);
   async function startRun(R) {
     if (warmingUp) return;
     if (!profile) return showMenu();
-    runCraft = craftOf(profile); effK = craftKayakParams(runCraft);
+    runCraft = craftOf(profile); effK = craftKayakParams(runCraft, profile);
 
     if (isMobile) { gyro.request(); enterFullscreen(); }   // both must run inside the tap that brought us here
     warmingUp = true;
@@ -1270,7 +1364,7 @@ applyQuality(quality);
     placeMapItem();   // re-rolled every attempt, not just on river regeneration
     
 
-    runLoot = { paddles: 0, coins: 0, coinValue: 0 };
+    runLoot = { paddles: 0, coins: 0, coinValue: 0, snacks: 0, bandaids: 0, medikits: 0, books: 0, raftFound: false, helmetFound: false };
     device.queue.writeBuffer(stateBufs[0], 0, river.state); device.queue.writeBuffer(kBufs[0], 0, river.kArr);
     device.queue.writeBuffer(partBuf, 0, new Float32Array(PARTS.count * 8));
     writeSimUniforms(0, 1);
@@ -1294,16 +1388,45 @@ applyQuality(quality);
     const actions = `<div class="mbtns"><button id="btnRetry">↻ Run again</button><button id="btnMenu">River menu</button></div>
         <small class="desktop-only">R — run again · Esc — river menu</small>`;
     if (won) {
-      const { pts, basePts, paddleXp, coins, ups } = awardRun(profile, river.R, runTime, runLoot);
+      const { pts, basePts, paddleXp, coins, ups, bandaids, medikits, snacks, bookBoost, raftFound, helmetFound } = awardRun(profile, river.R, runTime, runLoot);
       const best = profile.best[river.R.name] === runTime ? ' · new best!' : '';
+      const finds = [];
+      if (snacks) finds.push(`${snacks} snack${snacks > 1 ? 's' : ''}`);
+      if (bandaids) finds.push(`${bandaids} bandaid${bandaids > 1 ? 's' : ''}`);
+      if (medikits) finds.push(`${medikits} medikit${medikits > 1 ? 's' : ''}`);
+      if (bookBoost) finds.push(`a book — +${bookBoost} skill boost`);
+      if (raftFound) finds.push('an inflatable raft!');
+      if (helmetFound) finds.push('a better helmet!');
       msg.innerHTML = `🏁 Take-out reached!<br>${river.R.name} in ${runTime.toFixed(1)} s${best}<br>
         <span style="color:#ffe08a">+${basePts} finish${paddleXp ? ` +${paddleXp} paddle` : ''} = +${pts} xp${coins ? ` · +${coins} coin${coins > 1 ? 's' : ''}` : ''}${ups ? ` — LEVEL UP${ups > 1 ? ' ×' + ups : ''}!` : ` · ${profile.points}/${pointsForLevel(profile.level)} to level ${profile.level + 1}`}</span>
+        ${finds.length ? `<br><small style="color:#9be0ff">found ${finds.join(', ')}</small>` : ''}
         ${actions}`;
-      if (ups) setTimeout(showLevelUp, 900);
+      if (ups || bookBoost) setTimeout(showLevelUp, 900);
     } else {
-      const lost = runLoot.paddles || runLoot.coins;
+      const { gain, dead, injury, cap } = applyInjury(profile, river.R.tier);
+      if (dead) {
+        // permadeath: applyInjury has already wiped the save. Drop the in-memory profile/river
+        // too and send the player back to character select — there is no run/menu state left
+        // that still makes sense to offer (no Retry, no River menu).
+        profile = null; river = null;
+        msg.innerHTML = `💀 GAME OVER<br><small style="color:#ff9a80">Your injuries finally caught up with you — this paddler's story ends here.</small>
+          <br><small>+${gain} injury (${injury}/${cap})</small>
+          <div class="mbtns"><button id="btnNewPaddler">New paddler</button></div>`;
+        $('btnNewPaddler').onclick = () => showMenu();
+        return;
+      }
+      const lostParts = [];
+      if (runLoot.paddles) lostParts.push(`${runLoot.paddles} paddle${runLoot.paddles === 1 ? '' : 's'}`);
+      if (runLoot.coins) lostParts.push(`${runLoot.coins} coin${runLoot.coins === 1 ? '' : 's'}`);
+      if (runLoot.snacks) lostParts.push(`${runLoot.snacks} snack${runLoot.snacks === 1 ? '' : 's'}`);
+      if (runLoot.bandaids) lostParts.push(`${runLoot.bandaids} bandaid${runLoot.bandaids === 1 ? '' : 's'}`);
+      if (runLoot.medikits) lostParts.push(`${runLoot.medikits} medikit${runLoot.medikits === 1 ? '' : 's'}`);
+      if (runLoot.books) lostParts.push('a skill boost');
+      if (runLoot.raftFound) lostParts.push('the raft');
+      if (runLoot.helmetFound) lostParts.push('the helmet');
       msg.innerHTML = `🌊 Capsized! You're swimming.<br>${(kayak.p[2] - 15).toFixed(0)} m of ${(river.finishZ - 15).toFixed(0)} m
-        ${lost ? `<br><small style="color:#ff9a80">lost ${runLoot.paddles} paddle${runLoot.paddles === 1 ? '' : 's'} &amp; ${runLoot.coins} coin${runLoot.coins === 1 ? '' : 's'} — loot only banks on a finish</small>` : ''}
+        <br><small style="color:#ff9a80">+${gain} injury (${injury}/${cap})</small>
+        ${lostParts.length ? `<br><small style="color:#ff9a80">lost ${lostParts.join(', ')} — loot only banks on a finish</small>` : ''}
         ${actions}`;
     }
     $('btnRetry').onclick = retryRun;
@@ -1332,17 +1455,23 @@ applyQuality(quality);
       this.look = v3.add(this.look, v3.scale(v3.sub(wantLook, this.look), kp));
     },
   };
-  const sunDir = v3.norm(RENDER.sunDir);
+  // per-biome atmosphere (see BIOME_SKY in config.js) — recomputed per frame rather than once at
+  // load, since which river/biome is current changes at runtime; falls back to the plain RENDER
+  // defaults with no river loaded yet (menu) or for a biome with no override.
+  function currentSky() {
+    return (river && BIOME_SKY[river.R.biome]) || { sunDir: RENDER.sunDir, fogColor: RENDER.fogColor, fogMul: 1 };
+  }
   function writeCam() {
     const proj = mat4Perspective(60 * Math.PI / 180, canvas.width / canvas.height, 0.3, 900);
     const view = mat4LookAt(cam.pos, cam.look, [0, 1, 0]);
     const vp = mat4Mul(proj, view), ivp = mat4Invert(vp);
     cam.right = [view[0], view[4], view[8]]; cam.up = [view[1], view[5], view[9]];
+    const sky = currentSky(), sunDir = v3.norm(sky.sunDir);
     const f = new Float32Array(68);
     f.set(vp, 0); f.set(ivp, 16);
     f.set([cam.pos[0], cam.pos[1], cam.pos[2], 1], 32); f.set([sunDir[0], sunDir[1], sunDir[2], 0], 36);
     f.set([simTime, W, L, dx], 40);
-    f.set([RENDER.fogColor[0], RENDER.fogColor[1], RENDER.fogColor[2], RENDER.fogDensity], 44);
+    f.set([sky.fogColor[0], sky.fogColor[1], sky.fogColor[2], RENDER.fogDensity * (sky.fogMul ?? 1)], 44);
     f.set([dbgMode, SIM.hmin, QUALITY[quality].simpleShading ? 1 : 0, 0], 48);
     f.set([cam.right[0], cam.right[1], cam.right[2], 0], 52);
     f.set([cam.up[0], cam.up[1], cam.up[2], 0], 56);
@@ -1439,7 +1568,8 @@ applyQuality(quality);
     }
     const mapMsg = simTime < mapFoundUntil ? '<br><b style="color:#ffe08a">🗺 Hidden map found!</b>' : '';
     const snackMsg = simTime < snackMsgUntil ? `<br><b style="color:#9f7">🥜 Snack! +${ITEMS.snack.stamina} stamina</b>` : '';
-    hudEl.innerHTML = `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${profile.level} · ${runCraft.name}<br>speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · time <b>${runTime.toFixed(1)}</b> s${mapMsg}${snackMsg}`;
+    const injuryMsg = profile.injury > 0 ? ` · <span style="color:#ff9a80">injury ${profile.injury}/${profile.health}</span>` : '';
+    hudEl.innerHTML = `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${profile.level} · ${runCraft.name}${injuryMsg}<br>speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · time <b>${runTime.toFixed(1)}</b> s${mapMsg}${snackMsg}`;
     
     stamFill.style.width = (100 * kayak.stamina / STAMINA.max) + '%';
     stamFill.className = kayak.tired ? 'tired' : '';
@@ -1466,16 +1596,29 @@ applyQuality(quality);
   }
   // ---------- frame ----------
   let lastT = performance.now();
+  let physAccum = 0;   // real seconds of physics owed, carried frame to frame (see frameTicks above)
   function frame(now) {
     requestAnimationFrame(frame);
-    const dtReal = Math.min(0.05, (now - lastT) / 1000); lastT = now;
-    fps += (1 / Math.max(dtReal, 1e-3) - fps) * 0.05;
+    const dtRaw = (now - lastT) / 1000; lastT = now;
+    // the fps readout is deliberately based on the raw, unclamped delta — clamping it here (as the
+    // physics step below must, to keep one huge step from blowing up the sim) would silently floor
+    // a real stall at whatever the clamp is and hide exactly the slowdown this counter is for.
+    if (dtRaw > 0) fps += (1 / dtRaw - fps) * 0.1;
     if (!river || gameState === 'menu' || warmingUp) return;
     const running = gameState === 'run';
-    for (let s = 0; s < KAYAK_TICKS; s++) {
+    const dtReal = Math.min(0.05, Math.max(0, dtRaw));
+    // advance sim/kayak time by however much real time actually elapsed, not by a fixed tick count
+    // per rendered frame — the old code always ran exactly 2 ticks/frame regardless of how long the
+    // frame took, so simTime (and every bit of gameplay riding on it: paddling, current, obstacles)
+    // advanced 2×SIM.dt of sim-time per *frame* rather than per *second* — correct only at the 60fps
+    // it was tuned for, and visibly half-speed at 30fps, double-speed at 120fps.
+    physAccum = Math.min(physAccum + dtReal, SIM.dt * MAX_PHYS_TICKS);
+    frameTicks = Math.min(Math.floor(physAccum / SIM.dt), MAX_PHYS_TICKS);
+    for (let s = 0; s < frameTicks; s++) {
       simTime += SIM.dt;
       if (running) { runTime += SIM.dt; kayak.step(SIM.dt); }
     }
+    physAccum -= frameTicks * SIM.dt;
     const t = simTime;
     const inQ = 1 + 0.06 * Math.sin(0.21 * t) + 0.04 * Math.sin(0.53 * t + 1) + 0.025 * Math.sin(1.3 * t + 2);
 
@@ -1529,7 +1672,7 @@ applyQuality(quality);
     const terrainSlices = lodSlices(true), waterSlices = lodSlices(false);
 
     const pass = enc.beginRenderPass({
-      colorAttachments: [{ view: ctx.getCurrentTexture().createView(), clearValue: { r: RENDER.fogColor[0], g: RENDER.fogColor[1], b: RENDER.fogColor[2], a: 1 }, loadOp: 'clear', storeOp: 'store' }],
+      colorAttachments: [{ view: ctx.getCurrentTexture().createView(), clearValue: { r: currentSky().fogColor[0], g: currentSky().fogColor[1], b: currentSky().fogColor[2], a: 1 }, loadOp: 'clear', storeOp: 'store' }],
       depthStencilAttachment: { view: depthView, depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' },
     });
     pass.setBindGroup(0, renBG);

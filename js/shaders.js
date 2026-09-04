@@ -378,7 +378,7 @@ struct TVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(
 // per-biome base palette for grass/dirt/rock/gravel — everything else (noise breakup, slope
 // blending, altitude scree, lighting) stays identical, only these anchor colours shift.
 // ids match BIOME_IDS in config.js: 0 alpine (default), 1 canyon, 2 desert, 3 deciduous, 4 icy,
-// 5 barren, 6 rainforest, 7 savannah, 8 glacier.
+// 5 barren, 6 rainforest, 7 savannah, 8 glacier, 9 volcanic, 10 autumn.
 fn biomeColors(biome: i32) -> array<vec3f, 4> {
   if (biome == 1) {          // dry canyon: redder rock, sandier dirt, olive scrub instead of lush grass
     return array<vec3f, 4>(vec3f(0.42, 0.38, 0.15), vec3f(0.55, 0.38, 0.22), vec3f(0.53, 0.35, 0.28), vec3f(0.58, 0.42, 0.27));
@@ -403,6 +403,12 @@ fn biomeColors(biome: i32) -> array<vec3f, 4> {
   }
   if (biome == 8) {          // glacier: nothing but snow and ice — every channel pushed pale white-blue
     return array<vec3f, 4>(vec3f(0.80, 0.86, 0.93), vec3f(0.70, 0.77, 0.86), vec3f(0.86, 0.91, 0.98), vec3f(0.72, 0.78, 0.87));
+  }
+  if (biome == 9) {          // volcanic: black basalt and dark ash, a warm rust-red dirt band
+    return array<vec3f, 4>(vec3f(0.10, 0.09, 0.09), vec3f(0.30, 0.13, 0.08), vec3f(0.13, 0.12, 0.12), vec3f(0.20, 0.17, 0.16));
+  }
+  if (biome == 10) {         // autumn: fall-foliage gold instead of green, warm leaf-litter dirt
+    return array<vec3f, 4>(vec3f(0.55, 0.38, 0.10), vec3f(0.40, 0.24, 0.12), vec3f(0.44, 0.40, 0.36), vec3f(0.50, 0.38, 0.22));
   }
   return array<vec3f, 4>(vec3f(0.24, 0.40, 0.13), vec3f(0.40, 0.32, 0.20), vec3f(0.45, 0.44, 0.42), vec3f(0.48, 0.40, 0.30));
 }

@@ -200,6 +200,80 @@ export function buildVegetationMeshes() {
   addCylinder(iceFormation, [-0.05, 0, -0.28], [-0.08, 0.45, -0.34], 0.14, 0.01, 5, [0.78, 0.89, 0.97]);
   M.iceFormation = iceFormation;
 
+  // ---------- variant props: same "role" as an existing mesh (see BIOMES[x].props in config.js,
+  // where a role can list several mesh names and one is picked at random per placement) but a
+  // different silhouette or a colour a plain tint multiply can't reach, so a biome's ground cover
+  // doesn't read as one shape copy-pasted everywhere ----------
+
+  // flat angular slab — a rock variant: squashed low and irregular-edged rather than a rounded
+  // lump, so a "rock" patch mixes rounded boulders with flatter shelf-like stones
+  const rockSlab = new MeshBuilder();
+  addSphere(rockSlab, [0, 0.22, 0], [1.15, 0.28, 0.85], 5, 8, [0.48, 0.46, 0.43],
+    d => 0.75 + 0.4 * vnoise3(d[0] * 2.2 + 6, d[1] * 2.2, d[2] * 2.2 + 3, 13));
+  M.rockSlab = rockSlab;
+
+  // taller, sharper-edged boulder — heavier high-frequency noise weight than the base boulder
+  // reads as angular scree/talus rather than a big smooth stone
+  const boulderJagged = new MeshBuilder();
+  addSphere(boulderJagged, [0, 0.65, 0], [1.35, 1.7, 1.3], 6, 10, [0.40, 0.38, 0.37],
+    d => 0.6 + 0.3 * vnoise3(d[0] * 1.1 + 8, d[1] * 1.1, d[2] * 1.1 + 5, 19) + 0.35 * vnoise3(d[0] * 5 + 1, d[1] * 5, d[2] * 5 + 9, 23));
+  M.boulderJagged = boulderJagged;
+
+  // bush with a scatter of bright berries — a colour pop the base bush's plain-green tint can't
+  // reach (multiplying green by a biome tint can only shift it toward another green, never red)
+  const bushBerry = new MeshBuilder();
+  addSphere(bushBerry, [0, 0.32, 0], [0.68, 0.46, 0.68], 6, 9, [0.16, 0.38, 0.13], d => 0.85 + 0.35 * vnoise3(d[0] * 2 + 5, d[1] * 2, d[2] * 2, 3));
+  const berryCol = [0.75, 0.1, 0.18];
+  for (const [bx, by, bz] of [[0.35, 0.5, 0.1], [-0.3, 0.4, 0.25], [0.1, 0.6, -0.32], [-0.2, 0.55, -0.15], [0.3, 0.3, -0.3]]) addSphere(bushBerry, [bx, by, bz], [0.07, 0.07, 0.07], 3, 5, berryCol);
+  M.bushBerry = bushBerry;
+
+  // grass tuft topped with a small flower head — same crossed-blade base as `grass`, same
+  // colour-pop reasoning as the berry bush above
+  const flowerTuft = new MeshBuilder();
+  for (let k = 0; k < 3; k++) {
+    const a = Math.PI * k / 3, dxx = Math.cos(a) * 0.3, dzz = Math.sin(a) * 0.3;
+    flowerTuft.quad([-dxx, 0, -dzz], [dxx, 0, dzz], [dxx * 0.3, 0.5, dzz * 0.3], [-dxx * 0.3, 0.5, -dzz * 0.3], [0.35, 0.55, 0.15]);
+  }
+  addSphere(flowerTuft, [0, 0.5, 0], [0.13, 0.1, 0.13], 4, 6, [0.95, 0.85, 0.25]);
+  M.flowerTuft = flowerTuft;
+
+  // birch/aspen — pale trunk, sparse light canopy. A "living" tree alternative to treeWithered
+  // for cold biomes so they're not entirely bare and grey
+  const treeBirch = new MeshBuilder();
+  addCylinder(treeBirch, [0, 0, 0], [0, 2.4, 0], 0.11, 0.06, 7, [0.82, 0.80, 0.76]);
+  addSphere(treeBirch, [0, 2.9, 0], [0.85, 0.9, 0.85], 6, 9, [0.62, 0.72, 0.42], d => 0.8 + 0.4 * vnoise3(d[0] * 2.3 + 7, d[1] * 2.3, d[2] * 2.3, 11));
+  M.treeBirch = treeBirch;
+
+  // autumn maple/deciduous — same silhouette as treeDeciduous but a warm red/orange/gold canopy
+  // gradient (top redder, bottom golder) instead of green — needs a new mesh, not just a tint,
+  // since multiplying a green canopy by any single colour can't turn it red
+  const treeAutumn = new MeshBuilder();
+  addCylinder(treeAutumn, [0, 0, 0], [0, 1.3, 0], 0.13, 0.09, 7, [0.32, 0.22, 0.12]);
+  addSphere(treeAutumn, [0, 2.1, 0], [1.15, 1.05, 1.15], 7, 10,
+    t => t < 0.35 ? [0.82, 0.22, 0.10] : t < 0.65 ? [0.88, 0.52, 0.08] : [0.85, 0.72, 0.15],
+    d => 0.85 + 0.35 * vnoise3(d[0] * 2, d[1] * 2 + 3, d[2] * 2, 4));
+  M.treeAutumn = treeAutumn;
+
+  // charred dead tree (volcanic) — like treeWithered but blackened, with a couple of ember-glow
+  // spots at the base standing in for the lighting engine this game doesn't have
+  const treeCharred = new MeshBuilder(); const charCol = [0.08, 0.07, 0.07];
+  addCylinder(treeCharred, [0, 0, 0], [0, 2.0, 0], 0.11, 0.04, 6, charCol);
+  addCylinder(treeCharred, [0, 1.2, 0], [0.45, 1.8, 0], 0.04, 0.015, 5, charCol);
+  addCylinder(treeCharred, [0, 1.5, 0], [-0.35, 2.1, 0], 0.035, 0.01, 5, charCol);
+  addSphere(treeCharred, [0.06, 0.15, 0.05], [0.05, 0.05, 0.05], 3, 5, [0.95, 0.45, 0.1]);
+  addSphere(treeCharred, [-0.08, 0.08, -0.04], [0.04, 0.04, 0.04], 3, 5, [0.9, 0.35, 0.05]);
+  M.treeCharred = treeCharred;
+
+  // lava rock (volcanic) — dark basalt with bright glowing cracks standing in for the lighting
+  // engine this game doesn't have, same trick as treeCharred's embers
+  const lavaRock = new MeshBuilder();
+  addSphere(lavaRock, [0, 0.45, 0], [1.1, 0.9, 1.05], 6, 9, [0.10, 0.09, 0.09],
+    d => 0.7 + 0.4 * vnoise3(d[0] * 1.6 + 14, d[1] * 1.6, d[2] * 1.6 + 6, 27));
+  const emberCol = [0.95, 0.4, 0.05];
+  addCylinder(lavaRock, [-0.5, 0.35, 0.1], [0.35, 0.55, -0.2], 0.05, 0.03, 5, emberCol);
+  addSphere(lavaRock, [0.4, 0.65, 0.15], [0.09, 0.06, 0.09], 3, 5, emberCol);
+  M.lavaRock = lavaRock;
+
   return M;
 }
 // ---------- floating obstacles ----------
