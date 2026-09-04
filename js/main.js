@@ -279,8 +279,11 @@ applyQuality(quality);
   //  STATE & PROGRESSION
   // ============================================================================
   let river = null, simTime = 0, gameState = 'menu', runTime = 0, camMode = 0, dbgMode = 0, fps = 60, warmingUp = false;
-  const KAYAK_TICKS = 2;     // kayak/physics ticks per rendered frame (see frame())
-  
+  const KAYAK_TICKS = 2;     // kayak ticks per frame AT THE REFERENCE FRAME RATE
+  const REF_FPS = 120;       // the pace the game was tuned at: 120 fps × 2 ticks × SIM.dt of game time per wall second
+  const MAX_TICKS = 12;      // per frame — stops a hitch/tab switch from spiralling
+  let tickAcc = 0, ticksThisFrame = KAYAK_TICKS;
+
   let runLoot = { paddles: 0, coins: 0, coinValue: 0 };
   let snackMsgUntil = 0;   // simTime until which the "snack eaten" HUD line shows
   // the boat for the current run: its KAYAK parameters with the craft's mods applied (see
@@ -753,9 +756,7 @@ applyQuality(quality);
           const fn = Math.max(0, ob.hitK * (K.collK * pen - K.collDamp * Math.min(vn, 0)));
           const f = [nx * fn, ob.lift * fn, nz * fn];
           addForceAt(pw, f);
-          // equal and opposite on the obstacle, at the contact point so it yaws too. Divided by
-          // KAYAK_TICKS because this runs once per kayak tick but is consumed once per frame.
-          const kf = 1 / KAYAK_TICKS;
+          const kf = 1 / Math.max(1, ticksThisFrame);
           ob.fx -= f[0] * kf; ob.fz -= f[2] * kf;
           ob.tq -= ((cz - ob.z) * f[0] - (cx - ob.x) * f[2]) * kf;
           if (-vn > 0.8 && ob.hitK > 0.5) this.hitFlash = 1;
@@ -1282,6 +1283,7 @@ applyQuality(quality);
     if (isMobile) gyro.calibrate();          // however the phone is held right now counts as level
     document.body.classList.add('inrun');
     simTime = 0; runTime = 0;
+    tickAcc = 0;
 
     $('msg').style.display = 'none';
     warmingUp = false; gameState = 'run';
@@ -1472,10 +1474,17 @@ applyQuality(quality);
     fps += (1 / Math.max(dtReal, 1e-3) - fps) * 0.05;
     if (!river || gameState === 'menu' || warmingUp) return;
     const running = gameState === 'run';
-    for (let s = 0; s < KAYAK_TICKS; s++) {
+      
+    tickAcc += dtReal * REF_FPS * KAYAK_TICKS;
+    let ticks = Math.floor(tickAcc);
+    if (ticks > MAX_TICKS) { ticks = MAX_TICKS; tickAcc = ticks; }
+    tickAcc -= ticks;
+    ticksThisFrame = ticks;
+    for (let s = 0; s < ticks; s++) {
       simTime += SIM.dt;
       if (running) { runTime += SIM.dt; kayak.step(SIM.dt); }
     }
+
     const t = simTime;
     const inQ = 1 + 0.06 * Math.sin(0.21 * t) + 0.04 * Math.sin(0.53 * t + 1) + 0.025 * Math.sin(1.3 * t + 2);
 
