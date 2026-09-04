@@ -286,6 +286,11 @@ applyQuality(quality);
   // accumulator there. frameTicks is how many actually ran *this* frame; kayak.step's obstacle
   // force accumulation (search `kf =`) divides by it, since that force is built up once per tick
   // but only consumed once per frame, and how many ticks make up "this frame" now varies.
+  // TIME_SCALE runs that real-time accumulation at a fixed multiple of wall-clock speed — 2x
+  // keeps the faster, more action-packed pace a 120Hz display used to produce by accident
+  // (twice the rAF calls -> twice the ticks -> 2x speed) now that speed no longer depends on
+  // monitor Hz at all.
+  const TIME_SCALE = 2;
   let frameTicks = 2;
   const MAX_PHYS_TICKS = 8;  // hard cap on ticks replayed in one frame — after a big stall (tab
                               // backgrounded, a long GC pause) sim time falls behind real time
@@ -1607,12 +1612,13 @@ applyQuality(quality);
     if (!river || gameState === 'menu' || warmingUp) return;
     const running = gameState === 'run';
     const dtReal = Math.min(0.05, Math.max(0, dtRaw));
-    // advance sim/kayak time by however much real time actually elapsed, not by a fixed tick count
-    // per rendered frame — the old code always ran exactly 2 ticks/frame regardless of how long the
-    // frame took, so simTime (and every bit of gameplay riding on it: paddling, current, obstacles)
-    // advanced 2×SIM.dt of sim-time per *frame* rather than per *second* — correct only at the 60fps
-    // it was tuned for, and visibly half-speed at 30fps, double-speed at 120fps.
-    physAccum = Math.min(physAccum + dtReal, SIM.dt * MAX_PHYS_TICKS);
+    // advance sim/kayak time by however much real time actually elapsed (scaled by TIME_SCALE),
+    // not by a fixed tick count per rendered frame — the old code always ran exactly 2 ticks/frame
+    // regardless of how long the frame took, so simTime (and every bit of gameplay riding on it:
+    // paddling, current, obstacles) advanced 2×SIM.dt of sim-time per *frame* rather than per
+    // *second* — correct only at the 60fps it was tuned for, and visibly half-speed at 30fps,
+    // double-speed at 120fps.
+    physAccum = Math.min(physAccum + dtReal * TIME_SCALE, SIM.dt * MAX_PHYS_TICKS);
     frameTicks = Math.min(Math.floor(physAccum / SIM.dt), MAX_PHYS_TICKS);
     for (let s = 0; s < frameTicks; s++) {
       simTime += SIM.dt;
