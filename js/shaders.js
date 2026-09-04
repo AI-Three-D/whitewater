@@ -324,7 +324,14 @@ struct Cam { vp: mat4x4f, ivp: mat4x4f, camPos: vec4f, sunDir: vec4f, prm: vec4f
              camRight: vec4f, camUp: vec4f,
              water: vec4f,   // per-river water look: tint.rgb multiplies the water colour, .a is clarity
                               // (>1 = see deeper/clearer, <1 = murkier — scales the absorption falloff)
-             env: vec4f };    // .x = biome id, selecting a terrain/prop palette (see fsTerrain)
+             env: vec4f,      // .x = biome id, selecting a terrain/prop palette (see fsTerrain).
+                              // .y = exposure: scales every lit surface (terrain/water/props — see
+                              // applyExposure below) so time-of-day (config.js TIME_OF_DAY) can make
+                              // night genuinely dark instead of just differently tinted at day brightness
+             skyHorizon: vec4f, skyZenith: vec4f };  // sky gradient colours (.rgb; .a unused) — driven
+                              // by time-of-day in writeCam() (main.js), 'day' reproduces the values
+                              // that used to be hardcoded here
+fn applyExposure(col: vec3f) -> vec3f { return col * C.env.y; }
 @group(0) @binding(0) var<uniform> C: Cam;
 @group(0) @binding(1) var<storage, read> B: array<f32>;
 @group(0) @binding(2) var<storage, read> S: array<vec4f>;
@@ -335,10 +342,20 @@ fn ci(i: i32, j: i32) -> u32 {
   return u32(clamp(j, 0, L - 1)) * u32(W) + u32(clamp(i, 0, W - 1));
 }
 fn skyColor(d: vec3f) -> vec3f {
-  let horizon = vec3f(0.70, 0.80, 0.92); let zenith = vec3f(0.20, 0.42, 0.80);
-  var c = mix(horizon, zenith, pow(max(d.y, 0.0), 0.6));
+  var c = mix(C.skyHorizon.rgb, C.skyZenith.rgb, pow(max(d.y, 0.0), 0.6));
   let sd = max(dot(d, C.sunDir.xyz), 0.0);
-  c += vec3f(1.0, 0.92, 0.75) * (pow(sd, 900.0) * 6.0 + pow(sd, 12.0) * 0.25);
+  // the sun disc/glow scales with exposure too — a below-horizon "night" sunDir would otherwise
+  // still paint a bright glowing patch low in an otherwise dark sky, reading as dusk, not night
+  c += vec3f(1.0, 0.92, 0.75) * (pow(sd, 900.0) * 6.0 + pow(sd, 12.0) * 0.25) * C.env.y;
+  // stars fade in as exposure drops (night) — no separate on/off knob needed. Sparse per-direction
+  // points via a coarse hash grid, twinkle-free (cheap: one hash lookup, no noise octaves) since a
+  // static point field already reads fine at this scale, and this runs once per sky pixel.
+  let starAmt = pow(clamp(1.0 - C.env.y, 0.0, 1.0), 2.0);
+  if (starAmt > 0.01 && d.y > 0.05) {
+    let g = floor(d * 220.0);
+    let h = hash31(g);
+    if (h > 0.9975) { c += vec3f(0.9, 0.92, 1.0) * starAmt * (0.5 + 0.5 * hash31(g + 7.0)); }
+  }
   if (d.y < 0.0) { c = mix(c, C.fog.rgb, clamp(-d.y * 8.0, 0.0, 1.0)); }
   return c;
 }
@@ -425,7 +442,7 @@ fn biomeColors(biome: i32) -> array<vec3f, 4> {
     let rock  = pal[2] * (0.7 + 0.5 * n2);
     var col = mix(grass, rock, smoothstep(0.3, 0.6, slope));
     col = mix(col, rock, in.mask * 0.6);
-    let lit = col * (0.4 + sun * 0.85);
+    let lit = applyExposure(col * (0.4 + sun * 0.85));
     return vec4f(applyFog(lit, length(in.wp - C.camPos.xyz)), 1.0);
   }
   let n1 = noise2(in.wp.xz * 0.35); let n2 = noise2(in.wp.xz * 2.3); let n3 = noise2(in.wp.xz * 0.08);
@@ -440,7 +457,7 @@ fn biomeColors(biome: i32) -> array<vec3f, 4> {
   col = mix(col, mix(gravel, rock, smoothstep(0.25, 0.5, slope)), in.mask);
   col = mix(col, col * 0.55, smoothstep(0.0, 0.05, in.h));
   let amb = 0.35 + 0.15 * n.y;
-  var lit = col * (amb + sun * 0.9);
+  var lit = applyExposure(col * (amb + sun * 0.9));
   lit = applyFog(lit, length(in.wp - C.camPos.xyz));
   return vec4f(lit, 1.0);
 }
@@ -509,7 +526,7 @@ fn etaN(i: i32, j: i32, eta0: f32, hmin: f32) -> f32 {
     col = mix(body, sky, F) + spec * vec3f(1.0, 0.95, 0.85);
     let foamCol = vec3f(0.92, 0.95, 0.97) * (0.8 + 0.4 * max(dot(n, C.sunDir.xyz), 0.0));
     col = mix(col, foamCol, smoothstep(0.1, 0.55, fa));
-    col = applyFog(col, length(in.wp - C.camPos.xyz));
+    col = applyFog(applyExposure(col), length(in.wp - C.camPos.xyz));
     // real transparency now, not just the internal bed-colour mixing above: shallow water lets
     // more of the actual terrain underneath show through, deep water goes opaque — and clarity
     // (the same knob "murky vs crystal clear" uses for colour) controls how fast that happens,
@@ -545,7 +562,7 @@ fn etaN(i: i32, j: i32, eta0: f32, hmin: f32) -> f32 {
     let mask = smoothstep(0.62 - 0.55 * fa, 0.72 - 0.55 * fa, pat) * smoothstep(0.0, 0.15, fa);
     let foamCol = vec3f(0.92, 0.95, 0.97) * (0.8 + 0.4 * max(dot(n, C.sunDir.xyz), 0.0));
     col = mix(col, foamCol, mask);
-    col = applyFog(col, length(in.wp - C.camPos.xyz));
+    col = applyFog(applyExposure(col), length(in.wp - C.camPos.xyz));
     // real transparency now, not just the internal bed-colour mixing above: shallow water lets
     // more of the actual terrain underneath show through, deep water goes opaque — and clarity
     // (the same knob "murky vs crystal clear" uses for colour) controls how fast that happens,
@@ -591,7 +608,7 @@ fn litMesh(in: MVOut) -> vec3f {
   let V = normalize(C.camPos.xyz - in.wp);
   if (dot(n, V) < 0.0) { n = -n; }
   let sun = max(dot(n, C.sunDir.xyz), 0.0);
-  var lit = in.col * (0.32 + 0.18 * n.y + sun * 0.95);
+  var lit = applyExposure(in.col * (0.32 + 0.18 * n.y + sun * 0.95));
   return applyFog(lit, length(in.wp - C.camPos.xyz));
 }
 @fragment fn fsMesh(in: MVOut) -> @location(0) vec4f {
@@ -640,7 +657,7 @@ struct POut { @builtin(position) pos: vec4f, @location(0) uv: vec2f, @location(1
   let soft = exp(-d * d * 3.5);          // soft round puff — no hard disc edge, reads as mist not a ball
   let a = in.a * soft * 0.32;
   var col = vec3f(0.95, 0.97, 1.0) * (0.88 + 0.12 * max(dot(normalize(C.camPos.xyz - in.wp), C.sunDir.xyz), 0.0));
-  col = applyFog(col, length(in.wp - C.camPos.xyz));
+  col = applyFog(applyExposure(col), length(in.wp - C.camPos.xyz));
   return vec4f(col, a);
 }
 `;

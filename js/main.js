@@ -1,5 +1,5 @@
 'use strict';
-import { GRID, SIM, RENDER, BIOME_SKY, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, SPECIAL_ITEMS, MAP_ITEM, RUCKSACK, OBSTACLES, CHARACTERS, CRAFTS, ITEMS, UPGRADES, RIVER_PACKS, STORE_LISTING, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
+import { GRID, SIM, RENDER, BIOME_SKY, TIME_OF_DAY, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, SPECIAL_ITEMS, MAP_ITEM, RUCKSACK, OBSTACLES, CHARACTERS, CRAFTS, ITEMS, UPGRADES, RIVER_PACKS, STORE_LISTING, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
 
 
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW } from './shaders.js';
@@ -111,7 +111,7 @@ applyQuality(quality);
   const stateBufs = [0, 1, 2].map(() => mkBuf(N * 16, STOR));
   const kBufs = [0, 1, 2].map(() => mkBuf(N * 4, STOR));
   const simUBuf = mkBuf(112, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
-  const camUBuf = mkBuf(272, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+  const camUBuf = mkBuf(304, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);  // +32B: skyHorizon/skyZenith (see Cam struct, shaders.js)
   const partUBuf = mkBuf(112, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
   const partBuf = mkBuf(PARTS.count * 32, STOR);
   const BAND_ROWS = 32, BAND_BYTES = BAND_ROWS * W * 16;
@@ -1529,11 +1529,22 @@ applyQuality(quality);
       this.look = v3.add(this.look, v3.scale(v3.sub(wantLook, this.look), kp));
     },
   };
-  // per-biome atmosphere (see BIOME_SKY in config.js) — recomputed per frame rather than once at
-  // load, since which river/biome is current changes at runtime; falls back to the plain RENDER
-  // defaults with no river loaded yet (menu) or for a biome with no override.
+  // per-biome atmosphere (see BIOME_SKY in config.js), with the current river's time-of-day (see
+  // TIME_OF_DAY in config.js) layered on top — recomputed per frame rather than once at load, since
+  // which river/biome/time-of-day is current changes at runtime; falls back to the plain RENDER
+  // defaults with no river loaded yet (menu) or for a biome with no override. A river with no
+  // `timeOfDay` (or 'day') gets TIME_OF_DAY.day, which is defined to reproduce the old hardcoded
+  // sky colours and leave sunDir/fogColor/fogMul untouched — so this is a no-op for every river
+  // that doesn't opt in, Meadow Run and Willow Bend included.
   function currentSky() {
-    return (river && BIOME_SKY[river.R.biome]) || { sunDir: RENDER.sunDir, fogColor: RENDER.fogColor, fogMul: 1 };
+    const biome = (river && BIOME_SKY[river.R.biome]) || { sunDir: RENDER.sunDir, fogColor: RENDER.fogColor, fogMul: 1 };
+    const tod = TIME_OF_DAY[(river && river.R.timeOfDay) || 'day'] || TIME_OF_DAY.day;
+    return {
+      sunDir: tod.sunDir || biome.sunDir,
+      fogColor: [biome.fogColor[0] * tod.fogTint[0], biome.fogColor[1] * tod.fogTint[1], biome.fogColor[2] * tod.fogTint[2]],
+      fogMul: (biome.fogMul ?? 1) * tod.fogMul,
+      skyHorizon: tod.skyHorizon, skyZenith: tod.skyZenith, exposure: tod.exposure,
+    };
   }
   function writeCam() {
     const proj = mat4Perspective(60 * Math.PI / 180, canvas.width / canvas.height, 0.3, 900);
@@ -1541,7 +1552,7 @@ applyQuality(quality);
     const vp = mat4Mul(proj, view), ivp = mat4Invert(vp);
     cam.right = [view[0], view[4], view[8]]; cam.up = [view[1], view[5], view[9]];
     const sky = currentSky(), sunDir = v3.norm(sky.sunDir);
-    const f = new Float32Array(68);
+    const f = new Float32Array(76);
     f.set(vp, 0); f.set(ivp, 16);
     f.set([cam.pos[0], cam.pos[1], cam.pos[2], 1], 32); f.set([sunDir[0], sunDir[1], sunDir[2], 0], 36);
     f.set([simTime, W, L, dx], 40);
@@ -1551,8 +1562,10 @@ applyQuality(quality);
     f.set([cam.up[0], cam.up[1], cam.up[2], 0], 56);
     const wt = (river && river.R.waterTint) || [0.02, 0.10, 0.09];   // the original deep-water colour
     f.set([wt[0], wt[1], wt[2], (river && river.R.waterClarity) || 1], 60);
-    f.set([BIOME_IDS[(river && river.R.biome) || 'alpine'] ?? 0, 0, 0, 0], 64);
+    f.set([BIOME_IDS[(river && river.R.biome) || 'alpine'] ?? 0, sky.exposure ?? 1, 0, 0], 64);
     f.set([dbgMode, SIM.hmin, QUALITY[quality].simpleShading ? 1 : 0, RENDER.lod.near], 48);
+    f.set([sky.skyHorizon[0], sky.skyHorizon[1], sky.skyHorizon[2], 0], 68);
+    f.set([sky.skyZenith[0], sky.skyZenith[1], sky.skyZenith[2], 0], 72);
     device.queue.writeBuffer(camUBuf, 0, f);
   }
 

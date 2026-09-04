@@ -38,6 +38,28 @@ export const VEG = { caps: { tree: 900, bush: 700, rock: 500, grass: 3500, bould
 
 export const BIOME_IDS = { alpine: 0, canyon: 1, desert: 2, deciduous: 3, icy: 4, barren: 5, rainforest: 6, savannah: 7, glacier: 8, volcanic: 9, autumn: 10 };
 
+// time-of-day: layered on TOP of a river's biome atmosphere (BIOME_SKY above), not a replacement
+// for it — a river opts in with `timeOfDay: 'dawn'|'dusk'|'night'` (see RIVERS below); omitting it
+// defaults to 'day', which is defined to exactly reproduce the original look (identity sunDir
+// override, [1,1,1] fog tint, ×1 fog/exposure, the same sky colours that used to be hardcoded in
+// the sky shader) — so no river changes appearance just because this system exists.
+// - sunDir: fully replaces the biome's sun angle (time of day governs the sun's position, not
+//   biome), null for 'day' meaning "keep the biome's own sunDir" unchanged.
+// - skyHorizon/skyZenith: the sky gradient's colours — previously hardcoded in shaders.js, now
+//   driven from here so night can actually go dark instead of every biome sharing one fixed blue.
+// - fogTint multiplies the biome's own fogColor (so a smoky volcanic haze still reads as smoky at
+//   dusk, just warmed, rather than losing its identity to a flat preset colour) and fogMul further
+//   scales the biome's own fogMul.
+// - exposure dims the whole lit scene (terrain/water/props — see C.env.y in the shaders) so night
+//   actually reads as dark rather than just differently tinted at daytime brightness; skyColor()
+//   sprinkles in stars as exposure drops, so lower exposure = more visible stars, no separate knob.
+export const TIME_OF_DAY = {
+  day:   { sunDir: null, skyHorizon: [0.70, 0.80, 0.92], skyZenith: [0.20, 0.42, 0.80], fogTint: [1.00, 1.00, 1.00], fogMul: 1.00, exposure: 1.00 },
+  dawn:  { sunDir: [0.85, 0.16, 0.30], skyHorizon: [0.96, 0.64, 0.48], skyZenith: [0.24, 0.32, 0.58], fogTint: [1.18, 0.96, 0.85], fogMul: 1.10, exposure: 0.82 },
+  dusk:  { sunDir: [-0.82, 0.14, 0.42], skyHorizon: [0.85, 0.38, 0.28], skyZenith: [0.16, 0.13, 0.34], fogTint: [1.20, 0.72, 0.62], fogMul: 1.20, exposure: 0.62 },
+  night: { sunDir: [0.30, -0.30, 0.60], skyHorizon: [0.05, 0.07, 0.15], skyZenith: [0.01, 0.015, 0.05], fogTint: [0.55, 0.60, 0.85], fogMul: 1.35, exposure: 0.24 },
+};
+
 // each biome maps the 5 abstract placement "roles" (tree/bush/rock/grass/boulder) to a concrete
 // prop mesh (see buildVegetationMeshes in meshes.js), and gives each of the 3 terrain contexts
 // (steep ground, right at the water's edge, open ground) a weighted mix of roles to place —
@@ -217,6 +239,7 @@ export const RIVERS = [
     meander: [[15, 155], [6, 55]], depth: 1.4, rocks: 16, rockR: [0.8, 2.1], emergent: 0.3, ledges: [],
     constrictions: 1, valleyH: 14, valleyScale: 55, seed: 15, len: 290,
     biome: 'icy', waterTint: [0.06, 0.15, 0.24], waterClarity: 2.2,   // pale blue meltwater
+    timeOfDay: 'dawn',
     pack: 'easyPack2',
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 41 } },
   { name: 'Pine Hollow', cls: 'Class II · easy', tier: 'easy', slope: 0.0027, manning: 0.031, halfW: 10, widthVar: 0.26,
@@ -278,6 +301,7 @@ export const RIVERS = [
     meander: [[20, 130], [7, 40]], depth: 1.4, rocks: 100, rockR: [0.9, 2.6], emergent: 0.5,
     ledges: [[100, 0.9], [160, 0.9], [220, 1.0], [280, 1.0], [340, 1.1], [400, 0.9]], constrictions: 3, valleyH: 36, valleyScale: 55, seed: 38, len: 485,
     biome: 'rainforest', waterTint: [0.03, 0.16, 0.10], waterClarity: 0.9,   // deep jungle green, steep ravine
+    timeOfDay: 'dusk',
     waterfalls: [{ z: 460, drop: 3.0, len: 4 }],
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 38 } },
   { name: 'Thunder Gap', cls: 'Class IV · hard', tier: 'hard', slope: 0.035, manning: 0.041, halfW: 5, widthVar: 0.45,
@@ -307,6 +331,7 @@ export const RIVERS = [
     meander: [[27, 102], [9, 40]], depth: 1.5, rocks: 125, rockR: [1.0, 2.9], emergent: 0.6,
     ledges: [[130, 1.0], [250, 1.1], [380, 1.0]], constrictions: 5, valleyH: 44, valleyScale: 56, seed: 42, len: 470,
     biome: 'volcanic', waterTint: [0.10, 0.05, 0.03], waterClarity: 0.4,   // dark, ash-choked water through a smoky hellscape
+    timeOfDay: 'night',
     waterfalls: [{ z: 300, drop: 4.5, len: 5 }],
     pack: 'hardPack2',
     lanes: { count: 3, amp: 0.22, wander: 4, seedOffset: 48 } },
@@ -328,6 +353,7 @@ export const RIVERS_HIDDEN = [
   { name: 'Obsidian Falls', cls: 'Class IV · secret', tier: 'hard', slope: 0.032, manning: 0.04, halfW: 5.5, widthVar: 0.4,
     meander: [[24, 105], [8, 44]], depth: 1.5, rocks: 110, rockR: [0.9, 2.8], emergent: 0.55,
     ledges: [[130, 0.9], [250, 1.1], [380, 1.0]], biome: 'barren', waterTint: [0.08, 0.08, 0.08], waterClarity: 0.6,
+    timeOfDay: 'night',
     constrictions: 4, valleyH: 44, valleyScale: 58, seed: 93, len: 460, hidden: true,
     waterfalls: [{ z: 300, drop: 4.5, len: 5 }],
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 93 } },
