@@ -191,7 +191,6 @@ export const RIVERS = [
     constrictions: 0, valleyH: 12, valleyScale: 70, seed: 11, len: 320,
     waterTint: [0.02, 0.17, 0.06], waterClarity: 1.0,   // emerald
 
-obstacles: { log: { medium: 5, large: 2.5 } },
     forks: [{ startZ: 70, mergeZ: 83, splitLen: 22, mergeLen: 22, separation: 20, widthScale: 0.75, shares: [0.55, 0.45] }],
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 31 } },
 
@@ -202,7 +201,7 @@ obstacles: { log: { medium: 5, large: 2.5 } },
     constrictions: 1, valleyH: 10, valleyScale: 60, seed: 12, len: 230,
     waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,   // crystal clear
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 } },
-  { name: 'Tame snake', cls: 'Class II · easy', tier: 'easy', slope: 0.002, manning: 0.033, halfW: 6, widthVar: 0.2,
+  { name: 'Tame Snake', cls: 'Class II · easy', tier: 'easy', slope: 0.002, manning: 0.033, halfW: 6, widthVar: 0.2,
     meander: [[14, 150], [8, 70]], depth: 1.4, rocks: 20, rockR: [1.0, 2.4], emergent: 0.4, ledges: [],
     constrictions: 1, valleyH: 8, valleyScale: 90, seed: 13, len: 260,
     biome: 'canyon', waterTint: [0.16, 0.10, 0.04], waterClarity: 0.35,   // muddy
@@ -220,10 +219,12 @@ obstacles: { log: { medium: 5, large: 2.5 } },
     biome: 'icy', waterTint: [0.06, 0.15, 0.24], waterClarity: 2.2,   // pale blue meltwater
     pack: 'easyPack2',
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 41 } },
-  { name: 'Pine Hollow', cls: 'Class II · easy', tier: 'easy', slope: 0.0017, manning: 0.031, halfW: 10, widthVar: 0.26,
-    meander: [[19, 175], [6, 58]], depth: 1.6, rocks: 11, rockR: [0.8, 1.9], emergent: 0.3, ledges: [],
+  { name: 'Pine Hollow', cls: 'Class II · easy', tier: 'easy', slope: 0.0027, manning: 0.031, halfW: 10, widthVar: 0.26,
+    meander: [[19, 175], [6, 58]], depth: 1.6, rocks: 11, rockR: [0.8, 1.9], emergent: 0.3, 
     constrictions: 0, valleyH: 11, valleyScale: 68, seed: 16, len: 320,
     waterTint: [0.03, 0.16, 0.09], waterClarity: 1.3,
+    ledges: [[150, 0.2]],
+  obstacles: { log: { medium: 8, large: 2} },
     pack: 'easyPack2',
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 42 } },
   // ---------- medium ----------

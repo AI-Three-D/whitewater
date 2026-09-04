@@ -302,7 +302,7 @@ function addStubs(mb, rng, len, rad, count, col) {
 function buildLog(seed, len, r0, r1, sides, o = {}) {
   const mb = new MeshBuilder(), rng = mulberry32(seed), h = len / 2;
   let zb = -h, rb = r0;
-  if (o.flare) { rb = r0 * 1.35; addCylinder(mb, [0, 0, -h], [0, 0, -h + o.flare], rb, r0, sides, OBST_DARK); zb = -h + o.flare; }
+
   const ze = o.snap ? h - o.snap : h;
   addCylinder(mb, [0, 0, zb], [0, 0, ze], r0, r1, sides, OBST_BARK);
   if (o.snap) addCylinder(mb, [0, 0, ze], [0, 0, h], r1, r1 * 0.35, sides, OBST_CUT);

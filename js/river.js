@@ -59,26 +59,18 @@ export function generateRiver(R) {
   const seed = R.seed;
   const mdev = z => { let s = 0; for (const [A, lam, ph] of meander) s += A * Math.sin(6.2832 * z / lam + ph); return s; };
   const dev0 = mdev(0);
-  // conservative upper bound on the base channel's half-width, mirroring the hw formula in
-  // channelsAt below at its maxima (full widthVar swing, the put-in pool's widening, and — if this
-  // river has one — the pond's, usually the largest factor by far). Narrowing effects (constrictions,
-  // waterfall pinches) are left out since they only ever shrink hw, so this stays a true upper bound.
-  // Sizing the side margin off it means a wide river gets pulled toward the centerline sooner than
-  // a narrow one, instead of every river sharing one flat, one-size-fits-none margin.
-  const hwMaxBase = Math.max(R.halfW * (1 + R.widthVar), 2.5) * (1 + 1.0 + (R.pond ? (R.pond.widthMult ?? 4.0) : 0));
-  const sideLo = hwMaxBase + RIVER_SIDE_MARGIN, sideHi = Wd - hwMaxBase - RIVER_SIDE_MARGIN;
-  // the raw meander, eased toward the centerline as it nears a world edge (softClamp — see math.js)
-  // instead of being flattened against one by a hard clamp; only x is bounded, so the put-in/take-out
-  // ends are untouched.
-  const centerAt = z => softClamp(Wd / 2 + smoothstep(PUTIN, PUTIN + 80, z) * (mdev(z) - dev0), sideLo, sideHi);
   // an optional calm, wide, current-free "pond" partway down the river — same treatment as the
   // put-in pool (see `calm` below), just centred elsewhere. R.pond = { z, len } in world metres.
   const pond0 = R.pond ? R.pond.z - R.pond.len / 2 : 0, pond1 = R.pond ? R.pond.z + R.pond.len / 2 : 0;
-  const channelsAt = z => {
-    const calmPutin = 1 - smoothstep(PUTIN * 0.35, PUTIN, z);      // 1 in the pool → 0 in the rapid
+  // the channel's half-width at a given z — pulled out so centerAt (below) can size its side margin
+  // off the *actual* local width instead of a single worst-case number for the whole river. A static
+  // per-river estimate that assumed the put-in pool's widening and the pond's could both be maxed
+  // out at once was wildly pessimistic for a river whose pond sits well past the put-in (they never
+  // actually overlap), enough that the "safe" center band could collapse to nothing and flatten the
+  // whole river's meander — not just the one wide spot that actually needed reining in.
+  const hwAt = z => {
+    const calmPutin = 1 - smoothstep(PUTIN * 0.35, PUTIN, z);
     const calmPond = R.pond ? smoothstep(pond0 - 15, pond0, z) * (1 - smoothstep(pond1, pond1 + 15, z)) : 0;
-    const calm = Math.max(calmPutin, calmPond);
-    const c = centerAt(z);
     let hw = R.halfW * (1 + R.widthVar * (vnoise2(z * 0.012, 3.7, seed) * 2 - 1));
     for (const k of constr) hw *= 1 - k.s * Math.exp(-(((z - k.z) / 18) ** 2));
     for (const wf of waterfalls) if (wf.branch == null) hw *= 1 - (wf.pinch ?? clamp(wf.drop / 14, 0, 0.3)) * Math.exp(-(((z - wf.z) / ((wf.len ?? 5) * 1.4)) ** 2));
@@ -86,7 +78,22 @@ export function generateRiver(R) {
     // should be unmistakably a pond, not a wide spot in the river — so it gets its own, much
     // bigger width multiplier on top of the put-in pool's, independently configurable per river
     // (R.pond.widthMult, default 4x) rather than sharing the pool's 2x.
-    hw = Math.max(hw, 2.5) * (1 + 1.0 * calmPutin + ((R.pond && R.pond.widthMult) ?? 4.0) * calmPond);
+    return Math.max(hw, 2.5) * (1 + 1.0 * calmPutin + ((R.pond && R.pond.widthMult) ?? 4.0) * calmPond);
+  };
+  // the raw meander, eased toward the centerline as it nears a world edge (softClamp — see math.js)
+  // instead of being flattened against one by a hard clamp; only x is bounded, so the put-in/take-out
+  // ends are untouched. The margin is sized off this z's own width, so a narrow stretch keeps its
+  // full natural meander while only a genuinely wide one (a pond, say) gets pulled in.
+  const centerAt = z => {
+    const hw = hwAt(z), lo = hw + RIVER_SIDE_MARGIN, hi = Wd - hw - RIVER_SIDE_MARGIN;
+    return softClamp(Wd / 2 + smoothstep(PUTIN, PUTIN + 80, z) * (mdev(z) - dev0), lo, hi);
+  };
+  const channelsAt = z => {
+    const calmPutin = 1 - smoothstep(PUTIN * 0.35, PUTIN, z);      // 1 in the pool → 0 in the rapid
+    const calmPond = R.pond ? smoothstep(pond0 - 15, pond0, z) * (1 - smoothstep(pond1, pond1 + 15, z)) : 0;
+    const calm = Math.max(calmPutin, calmPond);
+    const c = centerAt(z);
+    const hw = hwAt(z);
     // the pond flattens the bed's downhill slope through its span, then resumes it afterward from
     // the same elevation as if the pond's length had simply been skipped — no slope discontinuity
     const zEff = R.pond ? z - clamp(z - pond0, 0, pond1 - pond0) : z;
