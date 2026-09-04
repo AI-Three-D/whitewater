@@ -20,7 +20,7 @@ addEventListener('unhandledrejection', e => showErr('Promise error: ' + ((e.reas
 const $ = id => document.getElementById(id);
 // bumped by hand on every edit — lets a stale/cached page or a not-yet-reloaded tab be spotted
 // on sight instead of chasing "am I even testing the current code" through several rounds
-const BUILD = 'build 28';
+const BUILD = 'build 29';
 { const v = document.getElementById('ver'); if (v) v.textContent = BUILD; }
 // ---------- platform ----------
 // modern-browser signals only: a touch screen (maxTouchPoints) whose primary pointer is coarse
@@ -444,7 +444,42 @@ applyQuality(quality);
         location.reload();   // grid/particle/prop buffers are sized once at load — simplest safe way to apply a new tier
       };
     }
+  }  // ---------- river carousel ----------
+  // wraps one tier's row of cards in [‹][viewport][›]. The viewport is an overflow:auto strip with
+  // its scrollbar hidden; layoutCarousels() sizes it to a whole number of cards for the current
+  // window width, so nothing gets cut off and the page itself never scrolls sideways.
+  const CAR_BTN = 34 + 8;   // .carbtn width + .carousel gap, as laid out in css
+  function makeCarousel(row) {
+    const car = document.createElement('div'); car.className = 'carousel';
+    const vp = document.createElement('div'); vp.className = 'vp';
+    const mkBtn = (txt, label) => { const b = document.createElement('button'); b.className = 'carbtn'; b.textContent = txt; b.setAttribute('aria-label', label); return b; };
+    const bl = mkBtn('‹', 'previous rivers'), br = mkBtn('›', 'more rivers');
+    vp.appendChild(row); car.append(bl, vp, br);
+    const gap = () => { const g = parseFloat(getComputedStyle(row).gap); return isNaN(g) ? 14 : g; };
+    const pitch = () => { const c = row.firstElementChild; return c ? c.offsetWidth + gap() : 1; };
+    bl.onclick = () => vp.scrollBy({ left: -pitch(), behavior: 'smooth' });
+    br.onclick = () => vp.scrollBy({ left: pitch(), behavior: 'smooth' });
+    const sync = () => {
+      const max = vp.scrollWidth - vp.clientWidth;
+      bl.disabled = vp.scrollLeft < 2; br.disabled = vp.scrollLeft > max - 2;
+    };
+    vp.addEventListener('scroll', sync);
+    car._layout = () => {
+      const n = row.children.length; if (!n || !car.clientWidth) return;
+      const p = pitch(), g = gap(), total = n * p - g;
+      if (total <= car.clientWidth) { car.classList.add('fits'); vp.style.maxWidth = total + 'px'; }
+      else {
+        car.classList.remove('fits');
+        const fit = Math.max(1, Math.floor((car.clientWidth - 2 * CAR_BTN) / p));
+        vp.style.maxWidth = (fit * p - g) + 'px';
+      }
+      sync();
+    };
+    return car;
   }
+  
+  function layoutCarousels() { for (const c of document.querySelectorAll('#riverlist .carousel')) c._layout(); }
+  addEventListener('resize', layoutCarousels);
   function renderMenu() {
     renderQuality();
     const cs = $('charsel'), tb = $('topbar'), rl = $('riverlist');
@@ -537,8 +572,9 @@ applyQuality(quality);
         }
         row.appendChild(d);
       }
-      rl.appendChild(row);
+      rl.appendChild(makeCarousel(row));
     }
+    layoutCarousels();
   }
   function showLevelUp() {
     const el = $('lvl');
@@ -559,6 +595,15 @@ applyQuality(quality);
     $('lvStam').onclick = () => { spendPoint(profile, 'stamina'); showLevelUp(); };
     $('lvHealth').onclick = () => { spendPoint(profile, 'health'); showLevelUp(); };
   }
+
+    // store categories — which ones are expanded survives the re-render after every purchase
+    const STORE_GROUPS = [
+      { id: 'supplies', label: 'Supplies', icon: '🎒', types: ['item'] },
+      { id: 'gear', label: 'Gear', icon: '🦺', types: ['upgrade'] },
+      { id: 'boats', label: 'Boathouse', icon: '🛶', types: ['craft'] },
+      { id: 'packs', label: 'River packs', icon: '🗺️', types: ['pack'] },
+    ];
+    const storeOpen = new Set(['supplies']);
   function showStore() {
     if (!profile) return;
     const el = $('store');
@@ -597,9 +642,18 @@ applyQuality(quality);
     el.innerHTML = `<h2>Store</h2>
       ${artSlot('store-banner', 'store banner art')}
       <div><b style="color:#ffd35c">${profile.coins || 0}</b> coin${profile.coins === 1 ? '' : 's'} collected on the water</div>
-      <div class="shelf">${STORE_LISTING.map(row).join('')}</div>
+            <div class="cats">${STORE_GROUPS.map(g => {
+        const entries = STORE_LISTING.filter(e => g.types.includes(e.type));
+        if (!entries.length) return '';
+        const owned = entries.filter(e => e.type === 'upgrade' ? ownsUpgrade(profile, e.id) : e.type === 'craft' ? profile.crafts.includes(e.id) : e.type === 'pack' ? ownsPack(profile, e.id) : false).length;
+        const note = g.types[0] === 'item' ? `${entries.length} kinds` : `${owned} / ${entries.length} owned`;
+        return `<details class="cat" data-cat="${g.id}" ${storeOpen.has(g.id) ? 'open' : ''}>
+          <summary>${g.icon} ${g.label}<small>${note}</small></summary>
+          <div class="shelf">${entries.map(row).join('')}</div></details>`;
+      }).join('')}</div>
       <button id="storeClose">Close</button>`;
     for (const b of el.querySelectorAll('button[data-item]')) b.onclick = () => { if (buyItem(profile, b.dataset.item)) { showStore(); renderMenu(); } };
+    for (const d of el.querySelectorAll('details.cat')) d.addEventListener('toggle', () => { if (d.open) storeOpen.add(d.dataset.cat); else storeOpen.delete(d.dataset.cat); });
     for (const b of el.querySelectorAll('button[data-craft]')) b.onclick = () => { if (buyCraft(profile, b.dataset.craft)) { showStore(); renderMenu(); } };
     for (const b of el.querySelectorAll('button[data-upgrade]')) b.onclick = () => { if (buyUpgrade(profile, b.dataset.upgrade)) { showStore(); renderMenu(); } };
     for (const b of el.querySelectorAll('button[data-pack]')) b.onclick = () => { if (buyPack(profile, b.dataset.pack)) { showStore(); renderMenu(); } };
