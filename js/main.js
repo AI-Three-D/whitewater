@@ -279,8 +279,19 @@ applyQuality(quality);
   //  STATE & PROGRESSION
   // ============================================================================
   let river = null, simTime = 0, gameState = 'menu', runTime = 0, camMode = 0, dbgMode = 0, fps = 60, warmingUp = false;
-  const KAYAK_TICKS = 2;     // kayak/physics ticks per rendered frame (see frame())
-  
+
+  // ---- game clock ----------------------------------------------------------
+  // The sim/kayak integrator runs at a FIXED step (SIM.dt) for stability, but the number of
+  // steps taken per frame must follow wall-clock time, not frame count — otherwise game speed
+  // scales with fps (a 120 Hz machine ran the river at >2x the pace of a 55 Hz one).
+  // The intended pace is the one the 120 fps build had: 2 ticks per 1/120 s frame, i.e.
+  //   TICK_HZ = 2 * 120 = 240 ticks of SIM.dt per real second
+  // so one real second advances the game by TICK_HZ * SIM.dt seconds of game time. That keeps
+  // the fast, challenging feel identical and makes it frame-rate independent.
+  const TICK_HZ = 240;                    // kayak/physics ticks per real second
+  const MAX_TICKS_PER_FRAME = 12;         // hitch/alt-tab guard: let the clock slip, never spiral
+  let tickAcc = 0;                        // leftover real time, carried between frames
+
   let runLoot = { paddles: 0, coins: 0, coinValue: 0 };
   let snackMsgUntil = 0;   // simTime until which the "snack eaten" HUD line shows
   // the boat for the current run: its KAYAK parameters with the craft's mods applied (see
@@ -736,6 +747,7 @@ applyQuality(quality);
           if (-vn > 0.8) this.hitFlash = 1;
         }
       }
+      
             // ---- floating obstacles ----
       if (river.obstNear) for (const ob of river.obstNear) {
         const dirx = Math.sin(ob.yaw), dirz = Math.cos(ob.yaw), half = ob.len / 2;
@@ -755,7 +767,8 @@ applyQuality(quality);
           addForceAt(pw, f);
           // equal and opposite on the obstacle, at the contact point so it yaws too. Divided by
           // KAYAK_TICKS because this runs once per kayak tick but is consumed once per frame.
-          const kf = 1 / KAYAK_TICKS;
+          const kf = this.obstForceScale ?? 0.5;   // forces accumulate per tick, consumed once per frame
+          
           ob.fx -= f[0] * kf; ob.fz -= f[2] * kf;
           ob.tq -= ((cz - ob.z) * f[0] - (cx - ob.x) * f[2]) * kf;
           if (-vn > 0.8 && ob.hitK > 0.5) this.hitFlash = 1;
@@ -1472,10 +1485,19 @@ applyQuality(quality);
     fps += (1 / Math.max(dtReal, 1e-3) - fps) * 0.05;
     if (!river || gameState === 'menu' || warmingUp) return;
     const running = gameState === 'run';
-    for (let s = 0; s < KAYAK_TICKS; s++) {
+
+    // fixed-step integration, variable step count: ticks = wall-clock time * TICK_HZ
+    tickAcc += dtReal;
+    let ticks = Math.floor(tickAcc * TICK_HZ);
+    if (ticks > MAX_TICKS_PER_FRAME) { ticks = MAX_TICKS_PER_FRAME; tickAcc = 0; }   // drop the backlog
+    else tickAcc -= ticks / TICK_HZ;
+
+    for (let s = 0; s < ticks; s++) {
       simTime += SIM.dt;
       if (running) { runTime += SIM.dt; kayak.step(SIM.dt); }
     }
+    kayak.obstForceScale = ticks > 0 ? 1 / ticks : 0;
+
     const t = simTime;
     const inQ = 1 + 0.06 * Math.sin(0.21 * t) + 0.04 * Math.sin(0.53 * t + 1) + 0.025 * Math.sin(1.3 * t + 2);
 
