@@ -208,7 +208,7 @@ obstacles: { log: { medium: 5, large: 2.5 } },
     biome: 'canyon', waterTint: [0.16, 0.10, 0.04], waterClarity: 0.35,   // muddy
     pack: 'easyPack1',
     lanes: { count: 3, amp: 0.1, wander: 3, seedOffset: 35 } },
-  { name: 'Sandy Riffle', cls: 'Class II · easy', tier: 'easy', slope: 0.0019, manning: 0.032, halfW: 9, widthVar: 0.28,
+  { name: 'Sandy Riffle', cls: 'Class II · easy', tier: 'easy', slope: 0.0019, manning: 0.032, halfW: 12, widthVar: 0.38,
     meander: [[16, 165], [7, 64]], depth: 1.5, rocks: 14, rockR: [0.8, 2.0], emergent: 0.35, ledges: [],
     constrictions: 1, valleyH: 9, valleyScale: 65, seed: 14, len: 300,
     biome: 'desert', waterTint: [0.15, 0.12, 0.06], waterClarity: 0.6,
