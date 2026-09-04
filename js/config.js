@@ -129,6 +129,7 @@ export const KAYAK = {
   leanRate: 1,
   rollInstab: 6,
   capsize: 1.45,
+  obstForceScale: 0.5,
   startGrace: 2.5, graceStab: 90,
   paddleFwd: 120, paddleBack: 80, sweepTorque: 85, sweepFwd: 45, strokePeriod: 0.8,
   collK: 8000, collDamp: 300, collFric: 60,
