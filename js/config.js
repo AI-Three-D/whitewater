@@ -198,8 +198,8 @@ obstacles: { log: { medium: 5, large: 2.5 } },
 
   { name: 'Willow Bend', cls: 'Class II · easy', tier: 'easy', slope: 0.0017, manning: 0.031, halfW: 11, widthVar: 0.3,art: 'img/Willow.png',
     meander: [[24, 190], [5, 48]], depth: 1.5, rocks: 10, rockR: [0.8, 1.9], emergent: 0.3, ledges: [],
-    pond: { z: 170, len: 9 },
-    constrictions: 1, valleyH: 10, valleyScale: 60, seed: 12, len: 200,
+    pond: { z: 150, len: 15 },
+    constrictions: 1, valleyH: 10, valleyScale: 60, seed: 12, len: 230,
     waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,   // crystal clear
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 } },
   { name: 'Tame snake', cls: 'Class II · easy', tier: 'easy', slope: 0.002, manning: 0.033, halfW: 6, widthVar: 0.2,
@@ -591,6 +591,12 @@ export const SKILL = {
 };
 
 export const PUTIN = 30;   // length of the calm put-in pool [m]
+// how close a channel's bank is allowed to ease in toward the world's left/right edge (GRID.W*dx),
+// not the put-in/take-out ends — generateRiver() sizes this against each river's own widest point
+// (base half-width, its meander, and any pond widening) so a wide river gets pushed toward the
+// centerline sooner than a narrow one, and softClamp (math.js) eases it in smoothly instead of
+// snapping the centerline flat against a hard bound.
+export const RIVER_SIDE_MARGIN = 4;   // [m]
 
 // ---------- mobile build ----------
 export const MOBILE = {

@@ -1,5 +1,5 @@
-import { GRID, SIM, PUTIN } from './config.js';
-import { mulberry32, vnoise2, fbm2, clamp, smoothstep } from './math.js';
+import { GRID, SIM, PUTIN, RIVER_SIDE_MARGIN } from './config.js';
+import { mulberry32, vnoise2, fbm2, clamp, smoothstep, softClamp } from './math.js';
 
 function thermalErode(b, mask, W, L, iters, talus, rate) {
   // classic thermal erosion: material above the talus angle slides to lower neighbours.
@@ -59,7 +59,18 @@ export function generateRiver(R) {
   const seed = R.seed;
   const mdev = z => { let s = 0; for (const [A, lam, ph] of meander) s += A * Math.sin(6.2832 * z / lam + ph); return s; };
   const dev0 = mdev(0);
-  const centerAt = z => Wd / 2 + smoothstep(PUTIN, PUTIN + 80, z) * (mdev(z) - dev0);
+  // conservative upper bound on the base channel's half-width, mirroring the hw formula in
+  // channelsAt below at its maxima (full widthVar swing, the put-in pool's widening, and — if this
+  // river has one — the pond's, usually the largest factor by far). Narrowing effects (constrictions,
+  // waterfall pinches) are left out since they only ever shrink hw, so this stays a true upper bound.
+  // Sizing the side margin off it means a wide river gets pulled toward the centerline sooner than
+  // a narrow one, instead of every river sharing one flat, one-size-fits-none margin.
+  const hwMaxBase = Math.max(R.halfW * (1 + R.widthVar), 2.5) * (1 + 1.0 + (R.pond ? (R.pond.widthMult ?? 4.0) : 0));
+  const sideLo = hwMaxBase + RIVER_SIDE_MARGIN, sideHi = Wd - hwMaxBase - RIVER_SIDE_MARGIN;
+  // the raw meander, eased toward the centerline as it nears a world edge (softClamp — see math.js)
+  // instead of being flattened against one by a hard clamp; only x is bounded, so the put-in/take-out
+  // ends are untouched.
+  const centerAt = z => softClamp(Wd / 2 + smoothstep(PUTIN, PUTIN + 80, z) * (mdev(z) - dev0), sideLo, sideHi);
   // an optional calm, wide, current-free "pond" partway down the river — same treatment as the
   // put-in pool (see `calm` below), just centred elsewhere. R.pond = { z, len } in world metres.
   const pond0 = R.pond ? R.pond.z - R.pond.len / 2 : 0, pond1 = R.pond ? R.pond.z + R.pond.len / 2 : 0;
@@ -109,7 +120,9 @@ export function generateRiver(R) {
         }
         bhw = Math.max(bhw, 2);
         const bD = Math.max(base.D + t * base.D * (sh[kk] - 0.5) * 0.6, 0.4);
-        const bc = clamp(base.c + off, bhw + 2, Wd - bhw - 2);
+        // softClamp, not clamp: eases the branch back toward its sibling as it nears the world
+        // edge instead of snapping flat against it (see centerAt above for the same treatment).
+        const bc = softClamp(base.c + off, bhw + RIVER_SIDE_MARGIN, Wd - bhw - RIVER_SIDE_MARGIN);
         return { c: bc, hw: bhw, T: bT, D: bD, d0: base.d0, eta: bT + SIM.waterFrac * bD, side, islandH, islandScale, t };
       });
       // each branch needs the sibling's centre so "island" shaping is bounded to the actual

@@ -83,3 +83,9 @@ export const v3 = {
   export function fbm2(x, y, oct, seed = 0) { let a = 0, w = 0.5, s = 0; for (let o = 0; o < oct; o++) { a += w * vnoise2(x, y, seed + o); s += w; x *= 2.03; y *= 1.97; w *= 0.5; } return a / s; }
   export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
   export const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  // C¹-smooth stand-in for clamp(v, a, b): eases toward the bounds via tanh instead of flattening
+  // hard against them, so something riding this value (a meandering river's centerline, say) keeps
+  // curving all the way in instead of suddenly running dead straight along an invisible wall. Near
+  // the middle of [a, b] it's close to identity (tanh(u) ≈ u for small u); only as v approaches or
+  // passes a bound does it visibly bend away and asymptote.
+  export const softClamp = (v, a, b) => { const mid = (a + b) / 2, half = (b - a) / 2; return half <= 0 ? mid : mid + half * Math.tanh((v - mid) / half); };

@@ -260,13 +260,23 @@ applyQuality(quality);
   const kayakInst = {}; for (const k of ['hull', 'cockpit', 'torso', 'head', 'paddle', 'arms']) kayakInst[k] = mkBuf(80, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
   const instBufs = {};
   const writeInstances = (name, list) => {
-    const d = new Float32Array(list.length * 20);
-    list.forEach((inst, n) => { d.set(inst.m, n * 20); d.set(inst.tint, n * 20 + 16); });
+    list.sort((a, b) => a.z - b.z);   // by downstream position, so a Z window is one contiguous run
+    const d = new Float32Array(list.length * 20), zs = new Float32Array(list.length);
+    list.forEach((inst, n) => { d.set(inst.m, n * 20); d.set(inst.tint, n * 20 + 16); zs[n] = inst.z; });
     if (instBufs[name]) instBufs[name].buf.destroy();
     const buf = mkBuf(Math.max(80, d.byteLength), GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
     if (d.length) device.queue.writeBuffer(buf, 0, d);
-    instBufs[name] = { buf, count: list.length };
+    instBufs[name] = { buf, count: list.length, zs };
   };
+  // first index whose z >= value (zs is sorted)
+  const lowerBound = (zs, v) => { let lo = 0, hi = zs.length; while (lo < hi) { const m = (lo + hi) >> 1; if (zs[m] < v) lo = m + 1; else hi = m; } return lo; };
+  // the instance run standing on terrain that's actually drawn this frame (same window as lodSlices)
+  function instRange(ib) {
+    const zk = kayak.p[2];
+    const first = lowerBound(ib.zs, zk - RENDER.viewBehind);
+    const end = lowerBound(ib.zs, zk + RENDER.viewAhead - 0.5);   // small inset so nothing sits on the last seam
+    return [first, end - first];
+  }
   let depthTex = null, depthView = null;
   function resize() {
     const dpr = Math.min(devicePixelRatio || 1, QUALITY[quality].dprCap);
@@ -889,17 +899,14 @@ applyQuality(quality);
     const lists = Object.fromEntries(Object.keys(vegMeshes).filter(k => k !== 'pole').map(k => [k, []]));
     const caps = Object.fromEntries(Object.entries(VEG.caps).map(([k, v]) => [k, Math.round(v * biome.vegDensity[k])]));
     const push = (role, x, z) => {
-      // a biome's role can name one mesh or (for visual variety within that role — see the
-      // rockSlab/boulderJagged/bushBerry/flowerTuft/treeBirch variants in meshes.js) a pool of
-      // several, one of which is picked per placement so a patch of "rock" isn't the same lump
-      // copy-pasted everywhere
+      
       const spec = biome.props[role];
       const meshName = Array.isArray(spec) ? spec[Math.floor(rng() * spec.length)] : spec;
       if (!meshName || lists[meshName].length >= caps[role]) return;
       const [lo, hi] = ROLE_SIZE[role], sc = lo + rng() * (hi - lo);
       const g = 0.8 + 0.4 * rng(), tint = ROLE_TINT[role](g), bt = biome.vegTint[role];
       const y = terrainH(x, z) - 0.05;
-      lists[meshName].push({ m: mat4TRS([x, y, z], rng() * 6.2832, [sc, sc * (0.85 + 0.3 * rng()), sc]), tint: [tint[0] * bt[0], tint[1] * bt[1], tint[2] * bt[2], 1] });
+      lists[meshName].push({ z, m: mat4TRS([x, y, z], rng() * 6.2832, [sc, sc * (0.85 + 0.3 * rng()), sc]), tint: [tint[0] * bt[0], tint[1] * bt[1], tint[2] * bt[2], 1] });
     };
     for (let n = 0; n < VEG.attempts; n++) {
       const x = rng() * W * dx, z = rng() * L * dx, j = clamp(Math.floor(z / dx), 0, L - 1), row = nearestChan(river.rows[j], x);
@@ -913,7 +920,8 @@ applyQuality(quality);
     }
     for (const [k, v] of Object.entries(lists)) writeInstances(k, v);
     const jf = clamp(Math.floor(river.finishZ / dx), 0, L - 1), rowf = river.rows[jf][0], poles = [];
-    for (const s of [-1, 1]) { const x = rowf.c + s * (rowf.hw + 1.5), z = river.finishZ; poles.push({ m: mat4TRS([x, terrainH(x, z), z], s > 0 ? Math.PI : 0, [1, 1, 1]), tint: [1, 1, 1, 1] }); }
+    for (const s of [-1, 1]) { const x = rowf.c + s * (rowf.hw + 1.5), z = river.finishZ;
+       poles.push({ z, m: mat4TRS([x, terrainH(x, z), z], s > 0 ? Math.PI : 0, [1, 1, 1]), tint: [1, 1, 1, 1] }); }
     writeInstances('pole', poles);
   }
   // spinning paddle (xp) and coin pickups, scattered along the navigable channel
@@ -1695,13 +1703,14 @@ applyQuality(quality);
  
 
    
-    pass.setPipeline(meshPipe);
-    for (const name of Object.keys(vegMeshes)) {
-      const ib = instBufs[name]; if (!ib || !ib.count) continue;
-      pass.setVertexBuffer(0, vegMeshes[name].vbuf);
-      pass.setVertexBuffer(1, ib.buf);
-      pass.draw(vegMeshes[name].count, ib.count);
-    }
+      pass.setPipeline(meshPipe);
+      for (const name of Object.keys(vegMeshes)) {
+        const ib = instBufs[name]; if (!ib || !ib.count) continue;
+        const [first, n] = instRange(ib); if (!n) continue;
+        pass.setVertexBuffer(0, vegMeshes[name].vbuf);
+        pass.setVertexBuffer(1, ib.buf);
+        pass.draw(vegMeshes[name].count, n, 0, first);   // firstInstance offsets into the instance buffer
+      }
 
 
     for (const name of ['hull', 'cockpit', 'torso', 'head', 'paddle']) {
