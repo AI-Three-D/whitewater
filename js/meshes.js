@@ -495,3 +495,94 @@ export function buildLandBridgeMesh(br) {
   }
   return mb;
 }
+
+// ---------- built (road) bridges ----------
+// A rectangular prism between two cross-sections (cx, cz, hx, hz) at y0 and y1, rotated by yaw —
+// the one primitive every part of a built bridge is made of (deck slab, girders, parapets, posts,
+// abutments, pylon shafts/footings/caps). Winding doesn't matter: fsMesh flips normals toward the
+// viewer, so a box is lit correctly from either side.
+function addPrism(mb, y0, y1, s0, s1, yaw, colSide, colTop, colBot) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const pt = (s, y, sx, sz) => { const lx = sx * s.hx, lz = sz * s.hz; return [s.cx + lx * cy - lz * sy, y, s.cz + lx * sy + lz * cy]; };
+  const cr = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  for (let k = 0; k < 4; k++) {
+    const a = cr[k], b = cr[(k + 1) % 4];
+    mb.quad(pt(s0, y0, a[0], a[1]), pt(s0, y0, b[0], b[1]), pt(s1, y1, b[0], b[1]), pt(s1, y1, a[0], a[1]), colSide);
+  }
+  if (colTop) mb.quad(pt(s1, y1, -1, -1), pt(s1, y1, 1, -1), pt(s1, y1, 1, 1), pt(s1, y1, -1, 1), colTop);
+  if (colBot) mb.quad(pt(s0, y0, -1, 1), pt(s0, y0, 1, 1), pt(s0, y0, 1, -1), pt(s0, y0, -1, -1), colBot);
+}
+const addBox = (mb, cx, cz, hx, hz, y0, y1, colSide, colTop, colBot, yaw = 0) =>
+  addPrism(mb, y0, y1, { cx, cz, hx, hz }, { cx, cz, hx, hz }, yaw, colSide, colTop, colBot);
+// Geometry for one built-bridge descriptor from generateRiver(). Colours come from the material
+// table (BRIDGE_MATERIALS); the per-level `color` is applied as the instance tint, so the same mesh
+// can be painted without rebuilding it. Drawn with the ordinary prop shader — a road bridge is a
+// man-made object, not terrain, so it deliberately doesn't take the biome's rock/grass shading.
+export function buildBuiltBridgeMesh(br) {
+  const mb = new MeshBuilder(), C = br.cfg, M = br.mat;
+  const hw = br.halfW, zb = br.z, yD = br.yDeck, sB = br.slabBottom, yU = br.yUnder;
+  const cw = Math.max(hw - C.railThick, hw * 0.5);          // carriageway half-width, inside the parapets
+  const shade = (c, f) => [c[0] * f, c[1] * f, c[2] * f];
+  const hash = n => { const s = Math.sin(n * 12.9898) * 43758.5453; return s - Math.floor(s); };
+  // ---- road surface: the whole corridor at deck level (the terrain under the approaches is
+  // graded to just below it), planks across for timber, faint patch variation for asphalt ----
+  const step = M.planks ? 0.45 : 2.0;
+  let n = 0;
+  for (let x = br.roadX0; x < br.roadX1 - 1e-6; x += step, n++) {
+    const x1 = Math.min(x + step, br.roadX1);
+    const f = M.planks ? (n % 2 ? 0.9 : 1.08) * (0.96 + 0.08 * hash(n)) : 1 + (hash(n) - 0.5) * 0.06;
+    mb.quad([x, yD, zb - cw], [x1, yD, zb - cw], [x1, yD, zb + cw], [x, yD, zb + cw], shade(M.road, f));
+  }
+  for (const s of [-1, 1])   // skirts: hide the seam where the road meets the graded shoulder
+    mb.quad([br.roadX0, yD, zb + s * hw], [br.roadX1, yD, zb + s * hw],
+            [br.roadX1, yD - 0.35, zb + s * hw], [br.roadX0, yD - 0.35, zb + s * hw], shade(M.side, 0.95));
+  if (C.roadLine && M.line[0] + M.line[1] + M.line[2] > 0.05)
+    for (let x = br.roadX0; x < br.roadX1; x += 5) {
+      const x1 = Math.min(x + 2, br.roadX1);
+      mb.quad([x, yD + 0.02, zb - 0.08], [x1, yD + 0.02, zb - 0.08], [x1, yD + 0.02, zb + 0.08], [x, yD + 0.02, zb + 0.08], M.line);
+    }
+  // ---- the span itself ----
+  const cxm = (br.xa + br.xb) / 2, hxm = br.span / 2;
+  addBox(mb, cxm, zb, hxm, hw, sB, yD - 0.015, M.side, null, M.soffit);         // deck slab + fascia
+  if (br.yUnder < sB - 1e-3 && M.girders > 0) {                                  // girders in the remaining depth
+    const G = M.girders;
+    for (let g = 0; g < G; g++) {
+      const cz = zb + (G > 1 ? (g / (G - 1) * 2 - 1) : 0) * (hw - 0.5);
+      addBox(mb, cxm, cz, hxm, 0.12, yU, sB, shade(M.soffit, 1.08), null, shade(M.soffit, 0.92));
+    }
+    if (M.planks) for (let x = br.xa + 1.2; x < br.xb; x += 2.5)                 // timber cross beams
+      addBox(mb, x, zb, 0.09, hw - 0.4, yU + 0.02, yU + 0.2, shade(M.soffit, 1.04), null, shade(M.soffit, 0.9));
+  }
+  // abutments
+  for (const ab of br.abuts) {
+    if (ab.x1 - ab.x0 < 0.2) continue;
+    addBox(mb, (ab.x0 + ab.x1) / 2, zb, (ab.x1 - ab.x0) / 2, hw, ab.yBase, sB, M.pylon, null, null);
+  }
+  // parapets / railings, carried a short way onto the approaches
+  const rx0 = Math.max(br.roadX0, br.xa - 4), rx1 = Math.min(br.roadX1, br.xb + 4), rt = C.railThick / 2;
+  if (C.rail > 0.01) for (const s of [-1, 1]) {
+    const cz = zb + s * (hw - rt);
+    if (M.railStyle === 'parapet') {
+      for (let x = rx0; x < rx1 - 1e-6; x += 1.5) {                               // segmented, so stone reads as blocks
+        const x1 = Math.min(x + 1.5, rx1), v = 1 + (hash(x * 3.7 + s) - 0.5) * 2 * M.blockVar;
+        addBox(mb, (x + x1) / 2, cz, (x1 - x) / 2, rt, yD, yD + C.rail, shade(M.rail, v), shade(M.rail, v * 1.1), null);
+      }
+    } else {
+      for (let x = rx0; x < rx1; x += 2.2) addBox(mb, x, cz, 0.09, 0.09, yD, yD + C.rail, M.rail, shade(M.rail, 1.1), null);
+      for (const hy of [C.rail - 0.07, C.rail * 0.55])
+        addBox(mb, (rx0 + rx1) / 2, cz, (rx1 - rx0) / 2, 0.06, yD + hy - 0.06, yD + hy, M.rail, shade(M.rail, 1.1), null);
+    }
+  }
+  // pylons: straight rectangular piers — widened footing at the bed, a slight batter up the shaft,
+  // a pier cap under the deck
+  for (const pl of br.pillars) {
+    addBox(mb, pl.cx, pl.cz, pl.hxFoot, pl.hzFoot, pl.yBase, pl.footTop, shade(M.pylon, 0.92), null, null, pl.yaw);
+    const capBot = Math.max(pl.footTop, pl.yTop - pl.cap);
+    addPrism(mb, pl.footTop, capBot,
+      { cx: pl.cx, cz: pl.cz, hx: pl.hx, hz: pl.hz },
+      { cx: pl.cx, cz: pl.cz, hx: pl.hx * (1 - pl.taper), hz: pl.hz * (1 - pl.taper) },
+      pl.yaw, M.pylon, null, null);
+    if (pl.cap > 0.01) addBox(mb, pl.cx, pl.cz, pl.hx + 0.25, pl.hz + 0.25, capBot, pl.yTop, shade(M.pylon, 1.06), null, shade(M.pylon, 0.9), pl.yaw);
+  }
+  return mb;
+}

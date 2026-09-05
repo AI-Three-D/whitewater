@@ -2,7 +2,7 @@
 import { GRID, SIM, RENDER, BIOME_SKY, TIME_OF_DAY, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, SPECIAL_ITEMS, MAP_ITEM, RUCKSACK, OBSTACLES, LANDSLIDE, CHARACTERS, CRAFTS, ITEMS, UPGRADES, TRAINING, RIVER_PACKS, STORE_LISTING, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW, WGSL_BRIDGE } from './shaders.js';
 import { generateRiver, nearestChan, validateRiverConfig } from './river.js';
-import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh, buildObstacleMeshes, buildLandBridgeMesh } from './meshes.js';
+import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh, buildObstacleMeshes, buildLandBridgeMesh, buildBuiltBridgeMesh } from './meshes.js';
 
 
 import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec,
@@ -21,7 +21,7 @@ addEventListener('unhandledrejection', e => showErr('Promise error: ' + ((e.reas
 const $ = id => document.getElementById(id);
 // bumped by hand on every edit — lets a stale/cached page or a not-yet-reloaded tab be spotted
 // on sight instead of chasing "am I even testing the current code" through several rounds
-const BUILD = 'build 32';
+const BUILD = 'build 33';
 { const v = document.getElementById('ver'); if (v) v.textContent = BUILD; }
 // ---------- platform ----------
 // modern-browser signals only: a touch screen (maxTouchPoints) whose primary pointer is coarse
@@ -228,6 +228,7 @@ applyQuality(quality);
   for (const [k, v] of Object.entries(buildObstacleMeshes())) obstMeshes[k] = { ...gpuMesh(v.mb), len: v.len, rad: v.rad, draft: v.draft, vrad: v.vrad, vol: v.vol };
   const obstInstBufs = {};   // per mesh name, sized to the active quota in placeObstacles()
   let bridgeGpu = [];   // one {vbuf, count, zMin, zMax} per land bridge of the current river (see startRun)
+  let builtGpu = [];
 
   // small spark burst shown when a paddle/coin is collected
   const sparkMesh = gpuMesh(buildSparkMesh());
@@ -586,7 +587,9 @@ applyQuality(quality);
           const extra = (R.forks && R.forks.length ? ` · ${R.forks.length} fork${R.forks.length > 1 ? 's' : ''}` : '')
                       + (R.waterfalls && R.waterfalls.length ? ' · waterfall' : '')
                       + (R.obstacles ? ' · ' + Object.keys(R.obstacles).map(k => (OBSTACLES.kinds[k] || {}).label || k).join(' + ') : '')
-                      + (R.landBridges && R.landBridges.length ? ` · ${R.landBridges.length > 1 ? R.landBridges.length + ' land bridges' : 'land bridge'}` : '');
+                      + (R.landBridges && R.landBridges.length ? ` · ${R.landBridges.length > 1 ? R.landBridges.length + ' land bridges' : 'land bridge'}` : '')
+                      + (R.builtBridges && R.builtBridges.length ? ` · ${R.builtBridges.length > 1 ? R.builtBridges.length + ' road bridges' : 'road bridge'}` : '');
+
           const best = profile.best[R.name];
           d.innerHTML = `${artSlot('riv-thumb', R.name + ' art', R.art)}
             <h3>${R.name}</h3><small>gradient ${(R.slope * 100).toFixed(1)} % · ${R.rocks} boulders · ${R.ledges.length} ledges${extra}</small>
@@ -1050,6 +1053,7 @@ applyQuality(quality);
     // sampled with the biome's open-ground mix at about the same density as the rest of the world
     // (0.6 tries/m²), kept a little inside the rim so nothing overhangs the edge
     for (const br of river.bridges) {
+      if (br.noProps) continue;
       const C = br.cfg, open = biome.mix.open;
       const mixTable = biome.mix.bridge || {
         ...open,
@@ -1068,9 +1072,9 @@ applyQuality(quality);
       const ad = Math.abs((x - row.c) / row.hw);
       if (ad < 1.25) continue;
       const y = terrainH(x, z); if (y < row.eta + 0.35) continue;
-      // nothing under a bridge deck (a tree poking up through the arch) — the deck itself was
-      // populated above
-      if (river.bridges.some(br => Math.abs(z - br.z) <= br.reach && br.at(x, z))) continue;
+      // nothing under a bridge deck, and nothing on a road bridge's graded road corridor
+      if (river.bridges.some(br => (br.roadBlock && br.roadBlock(x, z)) || (Math.abs(z - br.z) <= br.reach && br.at(x, z)))) continue;
+
       const nrm = terrainN(x, z), m = (ad - 1) * row.hw, r = rng();
       const mixTable = nrm[1] < 0.72 ? biome.mix.steep : m < 3 ? biome.mix.bank : biome.mix.open;
       const role = pickRole(mixTable, r);
@@ -1814,8 +1818,21 @@ applyQuality(quality);
       device.queue.writeBuffer(terrainBuf, 0, river.b); device.queue.writeBuffer(maskBuf, 0, river.mask);
       placeVegetation();
       placePickups();
+
       for (const bm of bridgeGpu) bm.vbuf.destroy();
-      bridgeGpu = river.bridges.map(br => ({ ...gpuMesh(buildLandBridgeMesh(br)), zMin: br.zMin, zMax: br.zMax }));
+      for (const bm of builtGpu) { bm.vbuf.destroy(); bm.inst.destroy(); }
+      bridgeGpu = river.bridges.filter(br => !br.built)
+        .map(br => ({ ...gpuMesh(buildLandBridgeMesh(br)), zMin: br.zMin, zMax: br.zMax }));
+      builtGpu = river.bridges.filter(br => br.built).map(br => {
+        const g = gpuMesh(buildBuiltBridgeMesh(br));
+        const inst = mkBuf(80, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
+        const d = new Float32Array(20);
+        d.set(mat4TRS([0, 0, 0], 0, [1, 1, 1]), 0);
+        d.set([br.tint[0], br.tint[1], br.tint[2], 1], 16);
+        device.queue.writeBuffer(inst, 0, d);
+        return { ...g, inst, zMin: br.zMin, zMax: br.zMax };
+      });
+
     }
     for (const kind of river.pickupKinds) if (kind !== 'rucksack') for (const it of river.pickups[kind]) { it.alive = true; it.collected = false; it.seenT = -1; }
     // rucksacks aren't pre-placed, so a restart deactivates every slot instead of reviving it in
@@ -2184,13 +2201,16 @@ applyQuality(quality);
     }
  
 
-      // natural land bridges — same z window as the terrain slices, so one never hangs over undrawn ground
-      if (bridgeGpu.length) {
+    const zkB = kayak.p[2], bVis = bm => !(bm.zMax < zkB - RENDER.viewBehind || bm.zMin > zkB + RENDER.viewAhead);
+    if (bridgeGpu.length) {
       pass.setPipeline(bridgePipe);
-      const zk = kayak.p[2];
-      for (const bm of bridgeGpu) {
-        if (bm.zMax < zk - RENDER.viewBehind || bm.zMin > zk + RENDER.viewAhead) continue;
-        pass.setVertexBuffer(0, bm.vbuf); pass.draw(bm.count);
+      for (const bm of bridgeGpu) { if (!bVis(bm)) continue; pass.setVertexBuffer(0, bm.vbuf); pass.draw(bm.count); }
+    }
+    if (builtGpu.length) {
+      pass.setPipeline(meshPipe);
+      for (const bm of builtGpu) {
+        if (!bVis(bm)) continue;
+        pass.setVertexBuffer(0, bm.vbuf); pass.setVertexBuffer(1, bm.inst); pass.draw(bm.count, 1);
       }
     }
     

@@ -239,6 +239,8 @@ export const RIVERS = [
   { name: 'Willow Bend', cls: 'Class II · easy', tier: 'easy', slope: 0.0017, manning: 0.031, halfW: 11, widthVar: 0.3,art: 'img/Willow.png',
     meander: [[24, 190], [5, 48]], depth: 1.5, rocks: 10, rockR: [0.8, 1.9], emergent: 0.3, ledges: [],
     pond: { z: 150, len: 15 },
+    builtBridges: [{ z: 95, material: 'wood', width: 5, height: 3.2, thickness: 0.8, pylons: 2, color: [1.0, 0.95, 0.88] }],
+
     constrictions: 1, valleyH: 10, valleyScale: 60, seed: 12, len: 230,
     waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,   // crystal clear
     pack: 'easyPack1',
@@ -308,6 +310,10 @@ export const RIVERS = [
     ledges: [[90, 0.5], [200, 0.6], [330, 0.7]], constrictions: 2, valleyH: 16, valleyScale: 60, seed: 27, len: 380,
     biome: 'autumn', waterTint: [0.06, 0.13, 0.08], waterClarity: 1.4,   // fall foliage, golden-hour water
     timeOfDay: 'dusk',
+    builtBridges: [{ z: 250, material: 'concrete', width: 9, height: 5, thickness: 1.2, color: [0.95, 0.95, 0.92], pylons: [
+      { along: 0.28, across: -0.2, sizeAlong: 1.4, sizeAcross: 3.0 },
+      { along: 0.72, across: 0.2, sizeAlong: 1.4, sizeAcross: 3.0 },
+    ] }],
     pack: 'mediumPack2',
     lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 44 } },
   { name: 'Frozen Chute', cls: 'Class III · medium', tier: 'medium', slope: 0.0145, manning: 0.036, halfW: 7, widthVar: 0.4,
@@ -622,6 +628,29 @@ export const LAND_BRIDGE = {
   pillar: { along: 0.5, across: 0, radius: null, sizeAlong: 1, sizeAcross: 1.15, yaw: 0, irregular: 1,
     baseFlare: 0.55, waist: 0.12, flare: 0.35, flareFrom: 0.6, flareCurve: 1.5 },
 };
+
+export const BRIDGE_MATERIALS = {
+  concrete: { deck: [0.62, 0.62, 0.60], side: [0.54, 0.54, 0.52], soffit: [0.46, 0.46, 0.45], pylon: [0.58, 0.58, 0.56],
+              rail: [0.72, 0.72, 0.70], road: [0.20, 0.20, 0.21], line: [0.92, 0.90, 0.70],
+              railStyle: 'parapet', girders: 3, planks: 0, blockVar: 0.03 },
+  stone:    { deck: [0.60, 0.56, 0.50], side: [0.55, 0.51, 0.45], soffit: [0.42, 0.39, 0.35], pylon: [0.56, 0.52, 0.46],
+              rail: [0.62, 0.58, 0.52], road: [0.38, 0.34, 0.29], line: [0, 0, 0],
+              railStyle: 'parapet', girders: 0, planks: 0, blockVar: 0.10 },
+  wood:     { deck: [0.45, 0.32, 0.19], side: [0.38, 0.27, 0.16], soffit: [0.33, 0.23, 0.14], pylon: [0.36, 0.25, 0.15],
+              rail: [0.42, 0.30, 0.18], road: [0.45, 0.32, 0.19], line: [0, 0, 0],
+              railStyle: 'posts', girders: 4, planks: 1, blockVar: 0.06 },
+  steel:    { deck: [0.55, 0.56, 0.58], side: [0.30, 0.33, 0.36], soffit: [0.26, 0.29, 0.32], pylon: [0.34, 0.37, 0.40],
+              rail: [0.40, 0.44, 0.48], road: [0.20, 0.20, 0.21], line: [0.92, 0.90, 0.70],
+              railStyle: 'posts', girders: 5, planks: 0, blockVar: 0.04 },
+};
+export const BUILT_BRIDGE = {
+  material: 'concrete', color: [1, 1, 1],
+  width: 7, height: 4, thickness: 1.0, slab: 0.35, rail: 0.9, railThick: 0.25,
+  pylons: 2, abutExt: 5, shoulder: 7, roadLine: 1,
+  minHeight: 1.5, maxPylons: 8,
+  pylon: { along: 0.5, across: 0, sizeAlong: 1.2, sizeAcross: 2.6, yaw: 0, taper: 0.08, footing: 0.35, cap: 0.3 },
+};
+
 export const CHARACTERS = {
   ronja: { name: 'Ronja', title: 'the Technician',
     desc: 'Grew up slalom racing. Reads water like a book and has hips of steel — but she tires quickly.',
