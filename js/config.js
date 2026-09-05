@@ -53,11 +53,22 @@ export const BIOME_IDS = { alpine: 0, canyon: 1, desert: 2, deciduous: 3, icy: 4
 // - exposure dims the whole lit scene (terrain/water/props — see C.env.y in the shaders) so night
 //   actually reads as dark rather than just differently tinted at daytime brightness; skyColor()
 //   sprinkles in stars as exposure drops, so lower exposure = more visible stars, no separate knob.
+// fogTint isn't just a hue nudge: this game's fog is thick enough at typical view distances that
+// it dominates a large share of the visible frame (see applyFog in shaders.js), so if fogTint
+// stays close to [1,1,1] the fog blend alone keeps mid-to-far terrain reading near daytime
+// brightness no matter how dark `exposure` makes nearby lit surfaces — night in particular needs
+// fogTint pulled down aggressively, roughly matching exposure's own darkening, or the two fight
+// each other and the far half of the frame gives the mood away as still-basically-day.
 export const TIME_OF_DAY = {
   day:   { sunDir: null, skyHorizon: [0.70, 0.80, 0.92], skyZenith: [0.20, 0.42, 0.80], fogTint: [1.00, 1.00, 1.00], fogMul: 1.00, exposure: 1.00 },
-  dawn:  { sunDir: [0.85, 0.16, 0.30], skyHorizon: [0.96, 0.64, 0.48], skyZenith: [0.24, 0.32, 0.58], fogTint: [1.18, 0.96, 0.85], fogMul: 1.10, exposure: 0.82 },
+  dawn:  { sunDir: [0.85, 0.16, 0.30], skyHorizon: [0.96, 0.64, 0.48], skyZenith: [0.24, 0.32, 0.58], fogTint: [1.15, 0.78, 0.58], fogMul: 1.15, exposure: 0.75 },
   dusk:  { sunDir: [-0.82, 0.14, 0.42], skyHorizon: [0.85, 0.38, 0.28], skyZenith: [0.16, 0.13, 0.34], fogTint: [1.20, 0.72, 0.62], fogMul: 1.20, exposure: 0.62 },
-  night: { sunDir: [0.30, -0.30, 0.60], skyHorizon: [0.05, 0.07, 0.15], skyZenith: [0.01, 0.015, 0.05], fogTint: [0.55, 0.60, 0.85], fogMul: 1.35, exposure: 0.24 },
+  night: { sunDir: [0.30, -0.30, 0.60], skyHorizon: [0.05, 0.07, 0.15], skyZenith: [0.01, 0.015, 0.05], fogTint: [0.14, 0.16, 0.30], fogMul: 1.35, exposure: 0.16 },
+  // overcast: still full daylight brightness (unlike dawn/dusk/night, which all also darken the
+  // scene), but desaturated all the way to the zenith instead of day's saturated blue, and by far
+  // the thickest fog of any preset — this is the one that's actually about *fog amount*, not mood:
+  // a valley-fog, low-visibility mountain vista rather than a lit-differently one
+  misty: { sunDir: [0.40, 0.45, 0.72], skyHorizon: [0.80, 0.82, 0.84], skyZenith: [0.55, 0.58, 0.63], fogTint: [0.95, 0.97, 1.00], fogMul: 2.0, exposure: 0.85 },
 };
 
 // each biome maps the 5 abstract placement "roles" (tree/bush/rock/grass/boulder) to a concrete
@@ -97,10 +108,11 @@ export const BIOMES = {
     vegTint: { tree: [0.85, 1.08, 0.65], bush: [0.9, 1.1, 0.6], rock: [0.95, 1.0, 0.85], grass: [0.85, 1.15, 0.55], boulder: [0.95, 1.0, 0.9] },
     vegDensity: { tree: 1.8, bush: 1.6, rock: 0.7, grass: 1.3, boulder: 0.3 },
   },
-  // icy alpine: mostly bare rock, snow and boulders, a few gaunt withered trees near the treeline
-  // — plus the odd birch that's held on, and a stray ice formation mixed in with the plain rock
+  // icy alpine: mostly bare rock, snow and boulders, a few snow-dusted conifers near the treeline
+  // — plus the odd gaunt withered one that didn't make it, and a stray ice formation mixed in with
+  // the plain rock
   icy: {
-    props: { ...DEFAULT_PROPS, tree: ['treeWithered', 'treeWithered', 'treeBirch'], rock: ['rock', 'rock', 'iceFormation'] },
+    props: { ...DEFAULT_PROPS, tree: ['treeSnowy', 'treeSnowy', 'treeWithered'], rock: ['rock', 'rock', 'iceFormation'] },
     mix: { steep: { rock: 0.25, boulder: 0.35 }, bank: { grass: 0.15, rock: 0.35, boulder: 0.15 }, open: { tree: 0.05, rock: 0.30, boulder: 0.22, grass: 0.08, bush: 0.03 } },
     vegTint: { tree: [0.8, 0.85, 0.9], bush: [0.8, 0.9, 1.05], rock: [0.9, 0.95, 1.08], grass: [0.85, 0.95, 1.05], boulder: [0.92, 0.95, 1.05] },
     vegDensity: { tree: 0.18, bush: 0.1, rock: 1.6, grass: 0.2, boulder: 1.6 },
@@ -216,34 +228,36 @@ export const RIVERS = [
     forks: [{ startZ: 70, mergeZ: 83, splitLen: 22, mergeLen: 22, separation: 20, widthScale: 0.75, shares: [0.55, 0.45] }],
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 31 } },
 
-
+    { name: 'Frost Creek', cls: 'Class II · easy', tier: 'easy', slope: 0.0021, manning: 0.033, halfW: 8, widthVar: 0.22, art: 'img/Frost.png',
+      meander: [[15, 155], [6, 55]], depth: 1.4, rocks: 16, rockR: [0.8, 2.1], emergent: 0.3, ledges: [],
+      constrictions: 1, valleyH: 14, valleyScale: 55, seed: 15, len: 290,
+      biome: 'icy', waterTint: [0.06, 0.15, 0.24], waterClarity: 2.2,   // pale blue meltwater
+      timeOfDay: 'dawn',
+      lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 41 } },
+      
   { name: 'Willow Bend', cls: 'Class II · easy', tier: 'easy', slope: 0.0017, manning: 0.031, halfW: 11, widthVar: 0.3,art: 'img/Willow.png',
     meander: [[24, 190], [5, 48]], depth: 1.5, rocks: 10, rockR: [0.8, 1.9], emergent: 0.3, ledges: [],
     pond: { z: 150, len: 15 },
     constrictions: 1, valleyH: 10, valleyScale: 60, seed: 12, len: 230,
     waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,   // crystal clear
-    lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 } },
-  { name: 'Tame Snake', cls: 'Class II · easy', tier: 'easy', slope: 0.002, manning: 0.033, halfW: 6, widthVar: 0.2,
-    meander: [[14, 150], [8, 70]], depth: 1.4, rocks: 20, rockR: [1.0, 2.4], emergent: 0.4, ledges: [],
-    constrictions: 1, valleyH: 8, valleyScale: 90, seed: 13, len: 260,
-    biome: 'canyon', waterTint: [0.16, 0.10, 0.04], waterClarity: 0.35,   // muddy
     pack: 'easyPack1',
-    lanes: { count: 3, amp: 0.1, wander: 3, seedOffset: 35 } },
+    lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 } },
+
   { name: 'Sandy Riffle', cls: 'Class II · easy', tier: 'easy', slope: 0.0019, manning: 0.032, halfW: 12, widthVar: 0.38,
     meander: [[16, 165], [7, 64]], depth: 1.5, rocks: 14, rockR: [0.8, 2.0], emergent: 0.35, ledges: [],
     constrictions: 1, valleyH: 9, valleyScale: 65, seed: 14, len: 300,
     biome: 'desert', waterTint: [0.15, 0.12, 0.06], waterClarity: 0.6,
     pack: 'easyPack1',
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 40 } },
-  { name: 'Frost Creek', cls: 'Class II · easy', tier: 'easy', slope: 0.0021, manning: 0.033, halfW: 8, widthVar: 0.22,
-    meander: [[15, 155], [6, 55]], depth: 1.4, rocks: 16, rockR: [0.8, 2.1], emergent: 0.3, ledges: [],
-    constrictions: 1, valleyH: 14, valleyScale: 55, seed: 15, len: 290,
-    biome: 'icy', waterTint: [0.06, 0.15, 0.24], waterClarity: 2.2,   // pale blue meltwater
-    timeOfDay: 'dawn',
-    pack: 'easyPack2',
-    lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 41 } },
-  { name: 'Pine Hollow', cls: 'Class II · easy', tier: 'easy', slope: 0.0027, manning: 0.031, halfW: 10, widthVar: 0.26,
-    meander: [[19, 175], [6, 58]], depth: 1.6, rocks: 11, rockR: [0.8, 1.9], emergent: 0.3, 
+
+    { name: 'Snake Creek', cls: 'Class II · easy', tier: 'easy', slope: 0.002, manning: 0.033, halfW: 6, widthVar: 0.2,art: 'img/Snake.png',
+      meander: [[14, 150], [8, 70]], depth: 1.4, rocks: 20, rockR: [1.0, 2.4], emergent: 0.4, ledges: [],
+      constrictions: 1, valleyH: 8, valleyScale: 90, seed: 13, len: 260,
+      biome: 'canyon', waterTint: [0.16, 0.10, 0.04], waterClarity: 0.35,   // muddy
+      pack: 'easyPack1',
+      lanes: { count: 3, amp: 0.1, wander: 3, seedOffset: 35 } },    
+  { name: 'Pine Hollow', cls: 'Class II · easy', tier: 'easy', slope: 0.0027, manning: 0.031, halfW: 10, widthVar: 0.26, art:'img/Pine.png',
+    meander: [[19, 175], [6, 58]], depth: 1.6, rocks: 11, rockR: [0.8, 1.9], emergent: 0.3,  
     constrictions: 0, valleyH: 11, valleyScale: 68, seed: 16, len: 320,
     waterTint: [0.03, 0.16, 0.09], waterClarity: 1.3,
     ledges: [[150, 0.2]],
@@ -251,21 +265,24 @@ export const RIVERS = [
     pack: 'easyPack2',
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 42 } },
   // ---------- medium ----------
-  { name: 'Boulder Garden', cls: 'Class III · medium', tier: 'medium', slope: 0.015, manning: 0.035, halfW: 8, widthVar: 0.35,
-    meander: [[22, 140], [7, 55]], depth: 1.5, rocks: 70, rockR: [0.9, 2.6], emergent: 0.5,
-    ledges: [[150, 0.5], [300, 0.7], [420, 0.5]], constrictions: 3, valleyH: 9, valleyScale: 95, seed: 23, len: 470,
+  { name: 'Kopje Run', cls: 'Class III · medium', tier: 'medium', slope: 0.009, manning: 0.035, halfW: 8, widthVar: 0.35,
+    meander: [[22, 140], [7, 55]], depth: 1.1, rocks: 26, rockR: [0.9, 2.6], emergent: 0.5,
+    ledges: [[300, 0.6]], constrictions: 2, valleyH: 9, valleyScale: 95, seed: 23, len: 300,
     biome: 'savannah', waterTint: [0.08, 0.13, 0.06], waterClarity: 1.3,   // open grassland, flat and broad
+    timeOfDay: 'dawn',
     boulderIslands: [{ z: 200, len: 8, widthFrac: 0.55 }],
     lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 32 } },
-  { name: 'Cedar Chute', cls: 'Class III · medium', tier: 'medium', slope: 0.012, manning: 0.034, halfW: 7, widthVar: 0.4,
-    meander: [[20, 120], [6, 50]], depth: 1.5, rocks: 55, rockR: [0.9, 2.4], emergent: 0.45,
-    ledges: [[70, 0.6], [130, 0.6], [190, 0.8]], constrictions: 4, valleyH: 24, valleyScale: 48, seed: 24, len: 240,
+  { name: 'Boulder garden', cls: 'Class III · medium', tier: 'medium', slope: 0.004, manning: 0.034, halfW: 7, widthVar: 0.4,
+    meander: [[20, 120], [6, 50]], depth: 1.0, rocks: 165, rockR: [0.9, 2.4], emergent: 0.45,
+    ledges: [], constrictions: 0, valleyH: 24, valleyScale: 48, seed: 24, len: 240,
     biome: 'deciduous', waterTint: [0.03, 0.14, 0.05], waterClarity: 1.1,   // leafy green, dappled, enclosed hills
+    timeOfDay: 'misty',
     lanes: { count: 2, amp: 0.18, wander: 3, seedOffset: 36 } },
   { name: 'Split Rock', cls: 'Class III · medium', tier: 'medium', slope: 0.014, manning: 0.036, halfW: 9, widthVar: 0.3,
     meander: [[18, 160], [9, 62]], depth: 1.6, rocks: 60, rockR: [1.0, 2.8], emergent: 0.55,
     ledges: [[200, 0.6], [360, 0.7]], constrictions: 2, valleyH: 8, valleyScale: 95, seed: 25, len: 410,
     biome: 'desert', waterTint: [0.14, 0.11, 0.05], waterClarity: 0.5, extraKind: 'diamond',   // murky sandy, flat desert basin
+    timeOfDay: 'dusk',
     forks: [{ startZ: 150, mergeZ: 200, splitLen: 25, mergeLen: 25, separation: 22, widthScale: 0.7, shares: [0.6, 0.4] }],
     boulderIslands: [{ z: 300, len: 9, widthFrac: 0.6, bias: 0.2 }],
     pack: 'mediumPack1',
@@ -274,25 +291,41 @@ export const RIVERS = [
     meander: [[19, 135], [7, 52]], depth: 1.5, rocks: 60, rockR: [0.9, 2.5], emergent: 0.5,
     ledges: [[110, 0.6], [240, 0.7], [360, 0.6]], constrictions: 3, valleyH: 20, valleyScale: 55, seed: 26, len: 400,
     biome: 'canyon', waterTint: [0.14, 0.10, 0.05], waterClarity: 0.6,
+    timeOfDay: 'misty',
     pack: 'mediumPack1',
     lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 43 } },
   { name: 'Silver Rapids', cls: 'Class III · medium', tier: 'medium', slope: 0.0135, manning: 0.034, halfW: 8, widthVar: 0.3,
     meander: [[21, 125], [7, 48]], depth: 1.5, rocks: 58, rockR: [0.9, 2.4], emergent: 0.45,
     ledges: [[90, 0.5], [200, 0.6], [330, 0.7]], constrictions: 2, valleyH: 16, valleyScale: 60, seed: 27, len: 380,
     biome: 'autumn', waterTint: [0.06, 0.13, 0.08], waterClarity: 1.4,   // fall foliage, golden-hour water
+    timeOfDay: 'dusk',
     pack: 'mediumPack2',
     lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 44 } },
   { name: 'Frozen Chute', cls: 'Class III · medium', tier: 'medium', slope: 0.0145, manning: 0.036, halfW: 7, widthVar: 0.4,
     meander: [[17, 115], [8, 45]], depth: 1.6, rocks: 65, rockR: [1.0, 2.6], emergent: 0.55,
     ledges: [[130, 0.7], [260, 0.8], [350, 0.6]], constrictions: 3, valleyH: 26, valleyScale: 45, seed: 28, len: 420,
     biome: 'icy', waterTint: [0.07, 0.16, 0.23], waterClarity: 2.0,
+    timeOfDay: 'misty',
     pack: 'mediumPack2',
     lanes: { count: 3, amp: 0.18, wander: 3, seedOffset: 45 } },
+  // wide, dead-straight (meander amplitude 0) and deep on purpose — a dedicated showcase for
+  // landslide boulders (see LANDSLIDE in config.js): wide enough that a bank-triggered boulder has
+  // a real distance to roll, deep enough mid-channel that it reliably clears LANDSLIDE.deepWater
+  // and settles as a permanent underwater rock instead of rattling around in water too shallow for
+  // that. No `pack` — left free so it's immediately available rather than gated behind currency
+  // for what's primarily a feature showcase.
+  { name: 'Scree Bends', cls: 'Class III · medium', tier: 'medium', slope: 0.002, manning: 0.033, halfW: 17, widthVar: 0.15,
+    meander: [[20, 150], [6, 55]], depth: 2.3, rocks: 3, rockR: [0.9, 2.2], emergent: 0.4, ledges: [],
+    constrictions: 0, valleyH: 34, valleyScale: 50, seed: 99, len: 380,
+    biome: 'barren', waterTint: [0.08, 0.09, 0.08], waterClarity: 0.8,
+    landslideZone: { from: 60, to: 350, count: 36, activeChance: 0.32 },
+    lanes: { count: 3, amp: 0.1, wander: 2, seedOffset: 99 } },
   // ---------- hard ----------
   { name: 'The Gorge', cls: 'Class IV · hard', tier: 'hard', slope: 0.03, manning: 0.04, halfW: 5.5, widthVar: 0.4,
     meander: [[26, 110], [8, 45]], depth: 1.4, rocks: 120, rockR: [0.9, 2.8], emergent: 0.55,
     ledges: [[120, 0.8], [210, 1.0], [330, 1.2], [440, 0.9]], constrictions: 4, valleyH: 42, valleyScale: 60, seed: 37, len: 475,
     biome: 'glacier', waterTint: [0.10, 0.20, 0.28], waterClarity: 3.0,   // pale, near-white glacial melt, steep peaks
+    timeOfDay: 'misty',
 
     boulderIslands: [{ z: 250, len: 10, widthFrac: 0.65, bias: -0.15 }],
     waterfalls: [{ z: 320, drop: 4.0, len: 5 }],
@@ -308,6 +341,7 @@ export const RIVERS = [
     meander: [[28, 100], [9, 42]], depth: 1.5, rocks: 130, rockR: [1.0, 3.0], emergent: 0.6,
     ledges: [[140, 1.0], [260, 1.2], [400, 1.0]], constrictions: 5, valleyH: 46, valleyScale: 58, seed: 39, len: 440,
     biome: 'barren', waterTint: [0.09, 0.09, 0.08], waterClarity: 0.7,   // scoured grey-brown, jagged peaks
+    timeOfDay: 'dusk',
     forks: [{ startZ: 190, mergeZ: 230, splitLen: 20, mergeLen: 20, separation: 18, widthScale: 0.7, shares: [0.45, 0.55] }],
     boulderIslands: [{ z: 330, len: 12, widthFrac: 0.7, bias: 0.1 }],
     waterfalls: [{ z: 370, drop: 5.0, len: 6 }],
@@ -317,6 +351,7 @@ export const RIVERS = [
     meander: [[23, 115], [8, 42]], depth: 1.4, rocks: 105, rockR: [0.9, 2.7], emergent: 0.55,
     ledges: [[110, 0.9], [190, 0.9], [270, 1.0], [350, 1.0], [420, 0.9]], constrictions: 4, valleyH: 38, valleyScale: 58, seed: 40, len: 460,
     biome: 'canyon', waterTint: [0.13, 0.09, 0.05], waterClarity: 0.55,
+    timeOfDay: 'night',
     waterfalls: [{ z: 400, drop: 3.5, len: 5 }],
     pack: 'hardPack1',
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 46 } },
@@ -324,6 +359,7 @@ export const RIVERS = [
     meander: [[25, 108], [8, 44]], depth: 1.4, rocks: 112, rockR: [0.9, 2.8], emergent: 0.55,
     ledges: [[120, 0.9], [220, 1.0], [320, 1.1], [410, 0.9]], constrictions: 4, valleyH: 40, valleyScale: 56, seed: 41, len: 465,
     biome: 'icy', waterTint: [0.08, 0.18, 0.26], waterClarity: 2.4,
+    timeOfDay: 'dawn',
     waterfalls: [{ z: 350, drop: 4.0, len: 5 }],
     pack: 'hardPack2',
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 47 } },
@@ -348,6 +384,7 @@ export const RIVERS_HIDDEN = [
   { name: 'Emerald Hollow', cls: 'Class III · secret', tier: 'medium', slope: 0.013, manning: 0.034, halfW: 8, widthVar: 0.35,
     meander: [[20, 130], [7, 52]], depth: 1.5, rocks: 60, rockR: [0.9, 2.5], emergent: 0.5,
     ledges: [[160, 0.6], [320, 0.7]], biome: 'deciduous', waterTint: [0.03, 0.15, 0.06], waterClarity: 1.2,
+    timeOfDay: 'dawn',
     constrictions: 3, valleyH: 22, valleyScale: 48, seed: 92, len: 400, hidden: true,
     lanes: { count: 3, amp: 0.16, wander: 3, seedOffset: 92 } },
   { name: 'Obsidian Falls', cls: 'Class IV · secret', tier: 'hard', slope: 0.032, manning: 0.04, halfW: 5.5, widthVar: 0.4,
@@ -520,6 +557,74 @@ export const OBSTACLES = {
       large:  { meshes: ['iceberg', 'icebergB'],     len: [4.0, 8.0] } },
   },
 };
+// landslide boulders: separate from the density-spawned drifting debris above — these hang
+// dormant at specific, river-authored points (R.landslides, e.g. `{ z: 150, side: 1 }`; side is
+// ±1 for which bank) instead of being continuously spawned. A dormant one starts rolling the
+// dice once the kayak gets within `triggerZ` (see triggerLandslides in main.js); once triggered
+// it's a normal stepObstacle body — groundPush (the same slope-pushes-a-grounded-object-toward-
+// water term every obstacle already has) is what actually carries it downhill, so there's no
+// separate rolling simulation to write or maintain, only the trigger and the one-shot wave
+// impulse where it first reaches the water. Medium/large only, per the brief — nothing smaller
+// reads as a real hazard. hitK is well above the debris system's own `large` (1.0): a dense rock
+// should reliably threaten a capsize on a solid hit, not just nudge the boat; lift is kept low so
+// it doesn't let the kayak gently ride up and over the way a log can.
+export const LANDSLIDE = {
+  // candidate spots are generated procedurally (see placeLandslides in main.js) from a river's
+  // R.landslideZone = { from, to, count, activeChance }: `count` candidates spread across [from,
+  // to] (in metres downstream), each independently kept as a real, rollable hazard this attempt
+  // with probability `activeChance` — the rest are simply never placed, not just hidden or
+  // disarmed, so there is nothing sitting there to spot in advance. That selection is reseeded
+  // from actual per-attempt randomness (Math.random(), not river.seed) every time the river loads,
+  // unlike everything else here — the point is that which handful of the 30-40 candidates are live
+  // changes on every attempt, so the player can't learn fixed positions from a previous run the
+  // way they can learn the (deliberately reproducible) terrain and rock layout. Only the *fall*
+  // each active one takes, once triggered, is still seeded/reproducible per candidate — see
+  // bakeBoulderTrajectory — since a run-to-run-identical roll for a spot that IS live isn't the
+  // part that needs hiding.
+  bankOffset: [2, 16],     // [m] beyond the channel's edge a candidate starts — a wide spread so
+                           // some are right at the water (short, quick rolls) and some sit well up
+                           // the slope (longer runs that build up real speed before they reach it)
+  // trigger distance is derived per boulder from its own baked fall duration (see
+  // bakeBoulderTrajectory/placeLandslides in main.js), not a flat number: assumedSpeed is a rough
+  // paddling pace used to convert "the fall takes N seconds" into "start it N seconds of travel
+  // out, plus leadTime to spare so the player sees it break loose instead of arriving as it's
+  // already landing" — clamped to [minTriggerZ, maxTriggerZ]. nearChance is the fraction of active
+  // candidates that instead skip that calculation and always trigger at nearTriggerZ — a close-
+  // range surprise that might genuinely land on the player, rather than something timed to be
+  // watched falling from a distance. Mixing both on one river is the point, not either alone.
+  assumedSpeed: 3.2, leadTime: 1.5, minTriggerZ: 15, maxTriggerZ: 90, nearTriggerZ: 14, nearChance: 0.4,
+  // wave impulse injected into the water sim on water entry, scaled by how fast the boulder is
+  // actually moving when it gets there (see injectSplash) — splashHeight/splashRadius are the
+  // reference size at splashRefSpeed, scaled by clamp(speed/splashRefSpeed, splashMinScale,
+  // splashMaxScale) so a boulder that barely trickled in doesn't throw the same wave as one that
+  // built up real speed on a long run down. A short trickle-in and a long fast run should not look
+  // the same, which a single fixed splash size could never capture.
+  splashRefSpeed: 6, splashRadius: 1.5, splashHeight: 0.34, splashMinScale: 0.35, splashMaxScale: 1.6,
+  // particle bursts (see spawnBurst in main.js — the same one pickups use, same count/life, just a
+  // different colour and trigger) — one splash burst on water entry, and a throttled dust puff
+  // roughly every dustInterval seconds while still visibly rolling on dry ground beforehand
+  splashCol: [0.85, 0.92, 0.98], dustCol: [0.5, 0.4, 0.27], dustInterval: 0.22,
+  deepWater: 0.9,          // [m] water depth beyond which a boulder stops rolling and settles —
+                           // permanently, as a new underwater rock (see updateObstacles in main.js)
+                           // — not despawned; landslides should only be placed on a river with a
+                           // channel deep enough that this is actually reachable
+  // the fall itself is precomputed once per boulder at load time (bakeBoulderTrajectory in
+  // main.js) and replayed at trigger time rather than simulated live — see triggerLandslides.
+  // rollAccel is a genuine g·sinθ gravity-along-slope term (θ from the local terrain normal), so
+  // it's left near real gravity; rollFric is velocity relaxation (1/s, a bit higher on shallow
+  // ground so it can actually settle instead of creeping forever); rollWobble is a small sideways
+  // perturbation each step so the path isn't a perfectly straight line down the steepest gradient.
+  // downstreamBias (0 up to this, rolled once per candidate) adds a little extra +z pull on top of
+  // the terrain's own gradient, so some — not all — candidates visibly drift downstream as they
+  // fall rather than always cutting straight across to the near bank; capped low enough that it
+  // still happens in plain sight of wherever it was triggered from, not somewhere the player never sees.
+  rollAccel: 9.0, rollFric: 0.8, rollWobble: 1.3, rollVmax: 9, downstreamBias: 1.4,
+  bakeDt: 1 / 60, bakeMaxSteps: 900, settleSpeed: 0.05, settleTime: 1.2,
+  // len ranges overlap a bit at the medium/large boundary on purpose — a continuous-feeling size
+  // spread rather than two visibly-clustered clumps, while hitK/mass still step up with the class
+  medium: { meshes: ['boulderMedium'], len: [1.3, 2.6], density: 2600, hitK: 1.6, lift: 0.03, samples: 3 },
+  large:  { meshes: ['boulderLarge'],  len: [2.6, 4.8], density: 2700, hitK: 2.6, lift: 0.02, samples: 4 },
+};
 export const CHARACTERS = {
   ronja: { name: 'Ronja', title: 'the Technician',
     desc: 'Grew up slalom racing. Reads water like a book and has hips of steel — but she tires quickly.',
@@ -560,13 +665,21 @@ export const CRAFTS = {
 };
 // ---------- consumables ----------
 export const ITEMS = {
-  snack: { name: 'Trail snack', icon: '🥜', price: 3, stamina: 45, maxStack: 9, color: [0.85, 0.65, 0.25],
+  snack: { name: 'Trail snack', icon: '🥜', price: 2, stamina: 45, maxStack: 9, color: [0.85, 0.65, 0.25],
     desc: 'Eat it mid-run to get 45 stamina back. Up to 9 fit in your pack.' },
   bandaid: { name: 'Bandaid', icon: '🩹', price: 4, heal: 1, maxStack: 9, color: [0.95, 0.95, 0.9],
     desc: 'Patches up one point of injury. Use it from the character sheet whenever — no rush.' },
-  medikit: { name: 'Medikit', icon: '💉', price: 14, heal: 3, maxStack: 5, color: [0.9, 0.2, 0.25],
+  medikit: { name: 'Medikit', icon: '💉', price: 10, heal: 3, maxStack: 5, color: [0.9, 0.2, 0.25],
     desc: 'A proper kit: reverses three points of injury. Use it from the character sheet whenever — no rush.' },
+  // temporary mid-run buff rather than a permanent stock effect: for buffDuration seconds after
+  // drinking, traits() treats skill as buffSkill points higher, sharpening both passive stability
+  // (instabK) and lean power/response (leanTorque, leanRate) — see drinkEnergy in main.js.
+  energyDrink: { name: 'Energy booster', icon: '⚡', price: 5, buffSkill: 3, buffDuration: 4, maxStack: 5, color: [0.95, 0.85, 0.15],
+    desc: 'Mostly used for increasing focus during workouts, but it helps with kayaking too: 4 seconds of +3 skill for keeping the boat up, keys and all. Up to 5 fit in your pack.' },
 };
+// every paddler already has a small equipment deal that pays out 1 coin per finished run;
+// buying UPGRADES.sponsor is a step up from that starter deal, paying an extra coin on top.
+export const BASE_SPONSOR_INCOME = 1;
 // ---------- permanent upgrades (bought once, or found once, then always in effect) ----------
 export const UPGRADES = {
   lifevest: { name: 'Life vest', icon: '🦺', price: 20, injuryReduction: 1,
@@ -578,12 +691,29 @@ export const UPGRADES = {
   // awardRun's helmetFound handling. Only one can ever be found.
   helmet: { name: 'Better helmet', icon: '⛑️', medHardReduction: 1,
     desc: 'A sturdier helmet. Takes one extra point off every fall on medium and hard water.' },
+  // a bigger gear maker offers a step up from the starter deal every paddler already has
+  // (BASE_SPONSOR_INCOME) in exchange for more exposure — content, ads, the usual — paying
+  // one extra coin on top of the base payout on every finish. See awardRun's sponsorCoins.
+  sponsor: { name: 'Promotion program', icon: '📣', price: 10, runIncome: 1,
+    desc: 'A bigger equipment sponsor backs you — more content, more ads. Pays 1 extra coin on top of your starter deal for every run you finish.' },
 };
+// ---------- training (repeatable coin-for-xp purchase) ----------
+// unlike upgrades/crafts these aren't owned — buy as many sessions as coins allow, any time,
+// straight into the same xp pool a run's finish/paddle points feed. See buyTraining.
+export const TRAINING = [
+  { id: 'basic', name: 'Basic training', icon: '📘', price: 5, xp: 2,
+    desc: 'A short coaching session with a local guide — a quick nudge toward your next level.' },
+  { id: 'intensive', name: 'Intensive training', icon: '📗', price: 10, xp: 5,
+    desc: 'A full day on the water with a pro. Costs more, but banks noticeably more xp.' },
+];
 // the store shelf, top to bottom. Crafts/upgrades you already own show as owned rather than disappearing.
 export const STORE_LISTING = [
   { type: 'item', id: 'snack' },
   { type: 'item', id: 'bandaid' },
   { type: 'item', id: 'medikit' },
+  { type: 'training', id: 'basic' },
+  { type: 'training', id: 'intensive' },
+  { type: 'upgrade', id: 'sponsor' },
   { type: 'upgrade', id: 'lifevest' },
   { type: 'upgrade', id: 'paddle' },
   { type: 'craft', id: 'slalom' },
@@ -601,20 +731,23 @@ export const STORE_LISTING = [
 // adds that many points, minus any owned reduction (life vest always, better helmet on medium/hard
 // only — see applyInjury in progression.js). Reaching profile.health (the trainable trait above)
 // is fatal — see the `dead` flag applyInjury returns.
-export const INJURY = { perTier: { easy: 2, medium: 4, hard: 8 } };
+export const INJURY = { perTier: { easy: 1, medium: 2, hard: 4 } };
 
 export const STAMINA = {
   max: 100,
   regenTime: 10,        // seconds from empty to full
   drain: 22,            // units/s while paddling (before stamina-trait reduction)
-  drainPerPt: 0.07,     // each stamina point removes 7 % of the drain
+  drainPerPt: 0.083,    // each stamina point removes 8.3 % of the drain (~18% more per point than before)
   tiredFrac: 1 / 3,     // below this fraction the paddler is "tired"
   tiredPower: 0.5,      // stroke force multiplier when tired
   tiredStroke: 1.7,     // stroke period multiplier when tired (visually slower)
+  passivePerLevel: 0.25, // small automatic gain on every level-up, on top of spent points
 };
 export const SKILL = {
-  instabPerPt: 0.8,     // N·m/rad removed from roll instability per skill point
-  leanPerPt: 1.5,       // N·m added to hip/lean torque per skill point
+  instabPerPt: 0.95,    // N·m/rad removed from roll instability per skill point (~19% more per point than before)
+  leanPerPt: 1.8,       // N·m added to hip/lean torque per skill point (20% more per point than before)
+  leanRatePerPt: 0.015, // small speedup to how fast A/D leaning reaches its target, per skill point
+  passivePerLevel: 0.25, // small automatic gain on every level-up, on top of spent points
 };
 
 export const PUTIN = 30;   // length of the calm put-in pool [m]

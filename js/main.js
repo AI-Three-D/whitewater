@@ -1,5 +1,5 @@
 'use strict';
-import { GRID, SIM, RENDER, BIOME_SKY, TIME_OF_DAY, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, SPECIAL_ITEMS, MAP_ITEM, RUCKSACK, OBSTACLES, CHARACTERS, CRAFTS, ITEMS, UPGRADES, RIVER_PACKS, STORE_LISTING, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
+import { GRID, SIM, RENDER, BIOME_SKY, TIME_OF_DAY, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, SPECIAL_ITEMS, MAP_ITEM, RUCKSACK, OBSTACLES, LANDSLIDE, CHARACTERS, CRAFTS, ITEMS, UPGRADES, TRAINING, RIVER_PACKS, STORE_LISTING, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
 
 
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW } from './shaders.js';
@@ -8,11 +8,11 @@ import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec,
   mulberry32, clamp, smoothstep } from './math.js';
 import { generateRiver, nearestChan } from './river.js';
 import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh, buildObstacleMeshes } from './meshes.js';
-import { loadProfile, newProfile, clearProfile, character, canRaise, anyRaisable,
+import { loadProfile, newProfile, clearProfile, saveProfile, character, canRaise, anyRaisable,
   awardRun, spendPoint, discardPending, pointsForLevel, unlockHidden,
   craftOf, itemCount, canBuyItem, canBuyCraft, buyItem, buyCraft, selectCraft, useItem,
   ownsUpgrade, canBuyUpgrade, buyUpgrade, canHeal, healInjury, applyInjury,
-  ownsPack, canBuyPack, buyPack, riverUnlocked } from './progression.js';
+  ownsPack, canBuyPack, buyPack, riverUnlocked, canBuyTraining, buyTraining } from './progression.js';
 
 const showErr = t => { const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = t; };
 addEventListener('error', e => showErr('Script error: ' + e.message + ' (line ' + e.lineno + ')'));
@@ -219,7 +219,7 @@ applyQuality(quality);
   // floating obstacles: each GPU mesh keeps its builder's nominal metres (len/rad/draft/vol) so an
   // instance can be scaled uniformly to a chosen length and get its physics numbers from that
   const obstMeshes = {};
-  for (const [k, v] of Object.entries(buildObstacleMeshes())) obstMeshes[k] = { ...gpuMesh(v.mb), len: v.len, rad: v.rad, draft: v.draft, vol: v.vol };
+  for (const [k, v] of Object.entries(buildObstacleMeshes())) obstMeshes[k] = { ...gpuMesh(v.mb), len: v.len, rad: v.rad, draft: v.draft, vrad: v.vrad, vol: v.vol };
   const obstInstBufs = {};   // per mesh name, sized to the active quota in placeObstacles()
 
   // small spark burst shown when a paddle/coin is collected
@@ -292,6 +292,7 @@ applyQuality(quality);
   // ============================================================================
   let river = null, simTime = 0, gameState = 'menu', runTime = 0, camMode = 0, dbgMode = 0, fps = 60, warmingUp = false;
   let debugUnlockAll = false;   // dev toggle: show every river as unlocked regardless of pack ownership
+  let debugNoCapsize = false;   // dev toggle: kayak.step ignores roll/pitch capsize — toggled in-run (KeyG / mGod)
   // fixed-timestep physics: frame() below advances simTime/kayak.step by however many SIM.dt
   // ticks are owed against real elapsed time, not a hardcoded count per rendered frame — see the
   // accumulator there. frameTicks is how many actually ran *this* frame; kayak.step's obstacle
@@ -309,6 +310,8 @@ applyQuality(quality);
   
   let runLoot = { paddles: 0, coins: 0, coinValue: 0, snacks: 0, bandaids: 0, medikits: 0, books: 0, raftFound: false, helmetFound: false };
   let snackMsgUntil = 0;   // simTime until which the "snack eaten" HUD line shows
+  let drinkBuffUntil = 0;  // simTime until which the energy booster's skill buff is active (see traits())
+  let drinkMsgUntil = 0;   // simTime until which the "booster drunk" HUD line shows
   // the boat for the current run: its KAYAK parameters with the craft's (and, if owned, the
   // better-paddle upgrade's) mods applied (see craftKayakParams) and the craft itself for the
   // hull colour / lootMod. Set in startRun.
@@ -331,7 +334,9 @@ applyQuality(quality);
     if (keymap[e.code] !== undefined) { input[keymap[e.code]] = true; e.preventDefault(); }
     if (e.code === 'KeyC') camMode = (camMode + 1) % 3;
     if (e.code === 'KeyE') eatSnack();
+    if (e.code === 'KeyQ') drinkEnergy();
     if (e.code === 'F1') { toggleDbg(); e.preventDefault(); }
+    if (e.code === 'KeyG') toggleNoCapsize();
     if (e.code === 'KeyR') retryRun();
     
     if (e.code === 'KeyF' && gameState === 'run') endRun(true);
@@ -378,6 +383,9 @@ applyQuality(quality);
   function toggleDbg() { dbgMode = (dbgMode + 1) % 5; $('dbg').style.display = dbgMode ? 'block' : 'none'; }
   $('mDbg').onclick = toggleDbg;
   $('mEat').onclick = eatSnack;
+  $('mDrink').onclick = drinkEnergy;
+  function toggleNoCapsize() { debugNoCapsize = !debugNoCapsize; $('mGod').classList.toggle('on', debugNoCapsize); }
+  $('mGod').onclick = toggleNoCapsize;
   // best effort: fullscreen hides the browser chrome and (Android) allows a landscape lock.
   // iPhone Safari has no requestFullscreen and lock() rejects — both are simply skipped.
   function enterFullscreen() {
@@ -397,22 +405,40 @@ applyQuality(quality);
     snackMsgUntil = simTime + 2.5;
     popLoot('snack');
   }
+  // drink one energy booster: only mid-run, only if there's one — unlike the snack there's no
+  // "already full" guard since the buff always refreshes to a fresh buffDuration window
+  function drinkEnergy() {
+    if (gameState !== 'run' || !profile) return;
+    if (itemCount(profile, 'energyDrink') <= 0) return;
+    useItem(profile, 'energyDrink');
+    drinkBuffUntil = simTime + ITEMS.energyDrink.buffDuration;
+    drinkMsgUntil = simTime + 2.5;
+    popLoot('energyDrink');
+  }
 
   // R key and the Retry button share the same guard
   function retryRun() { if (river && gameState !== 'menu' && !warmingUp && $('lvl').style.display !== 'flex') startRun(river.R); }
 
 
 
-  // effective kayak parameters derived from the character's traits
-  const traits = () => ({
-    skill: profile ? profile.skill : 0,
-    stamina: profile ? profile.stamina : 0,
-    instabK: KAYAK.formStab + Math.max(0, KAYAK.rollInstab - SKILL.instabPerPt * (profile ? profile.skill : 0)),
-    leanTorque: KAYAK.leanTorque + SKILL.leanPerPt * (profile ? profile.skill : 0),
-    drain: STAMINA.drain * (1 - STAMINA.drainPerPt * (profile ? profile.stamina : 0)),
-  });
+  // effective kayak parameters derived from the character's traits. An active energy booster
+  // (see drinkEnergy) temporarily adds to skill here only — not to profile.skill itself — so it
+  // sharpens instabK/leanTorque/leanRate for its buffDuration without touching the saved trait.
+  const traits = () => {
+    const buffSkill = simTime < drinkBuffUntil ? ITEMS.energyDrink.buffSkill : 0;
+    const skill = (profile ? profile.skill : 0) + buffSkill;
+    return {
+      skill,
+      stamina: profile ? profile.stamina : 0,
+      instabK: KAYAK.formStab + Math.max(0, KAYAK.rollInstab - SKILL.instabPerPt * skill),
+      leanTorque: KAYAK.leanTorque + SKILL.leanPerPt * skill,
+      drain: STAMINA.drain * (1 - STAMINA.drainPerPt * (profile ? profile.stamina : 0)),
+    };
+  };
+  // floor val: passive per-level trait growth is fractional, but a pip should only light up
+  // once a full point's worth has accrued, not for a sliver of progress toward the next one
   const pips = (val, cap, max = 10) => `<div class="bar">${Array.from({ length: max }, (_, i) =>
-    `<i class="${i < val ? 'on' : ''}${i >= cap ? ' cap' : ''}"></i>`).join('')}</div>`;
+    `<i class="${i < Math.floor(val) ? 'on' : ''}${i >= cap ? ' cap' : ''}"></i>`).join('')}</div>`;
   // a slim proportional bar (reuses the xp-bar look) for stats whose range is too wide for
   // individual pips to read well — health's cap goes up to 20, injury tracks against it
   const statBar = (val, cap, color) => `<div class="xpbar"><div class="xpfill" style="width:${clamp(100 * val / Math.max(cap, 1), 0, 100)}%;background:${color}"></div></div>`;
@@ -513,10 +539,19 @@ applyQuality(quality);
         <small style="color:#9bc">${profile.points} / ${need} xp to next level · ${profile.runs} run${profile.runs === 1 ? '' : 's'}</small>
       </div>
       <div class="topbar-btns"><button id="openCharSheet">Character</button><button id="openStoreBtn">Store</button>
-        <button id="debugUnlockBtn" style="background:${debugUnlockAll ? '#a33' : ''}">${debugUnlockAll ? 'Debug: all unlocked' : 'Debug: unlock all rivers'}</button></div>`;
+        <button id="debugUnlockBtn" style="background:${debugUnlockAll ? '#a33' : ''}">${debugUnlockAll ? 'Debug: all unlocked' : 'Debug: unlock all rivers'}</button>
+        <button id="debugMoneyBtn">Debug: +1000 coins</button>
+        <button id="debugInvBtn">Debug: full inventory</button></div>`;
     $('openCharSheet').onclick = showCharSheet;
     $('openStoreBtn').onclick = showStore;
     $('debugUnlockBtn').onclick = () => { debugUnlockAll = !debugUnlockAll; renderMenu(); };
+    $('debugMoneyBtn').onclick = () => { profile.coins = (profile.coins || 0) + 1000; saveProfile(profile); renderMenu(); };
+    // dev toggle: top up every consumable (snacks, bandaids, medikits, energy boosters) to its
+    // max stack in one click, so testing doesn't need to grind coins first
+    $('debugInvBtn').onclick = () => {
+      for (const id of Object.keys(ITEMS)) profile.inventory[id] = ITEMS[id].maxStack;
+      saveProfile(profile); renderMenu();
+    };
         // boat picker: one toggle per owned craft, the selected one highlighted. Selection persists
     // in the profile and is read by startRun.
     const cb = $('craftbar');
@@ -599,6 +634,7 @@ applyQuality(quality);
     // store categories — which ones are expanded survives the re-render after every purchase
     const STORE_GROUPS = [
       { id: 'supplies', label: 'Supplies', icon: '🎒', types: ['item'] },
+      { id: 'training', label: 'Training', icon: '📘', types: ['training'] },
       { id: 'gear', label: 'Gear', icon: '🦺', types: ['upgrade'] },
       { id: 'boats', label: 'Boathouse', icon: '🛶', types: ['craft'] },
       { id: 'packs', label: 'River packs', icon: '🗺️', types: ['pack'] },
@@ -615,6 +651,13 @@ applyQuality(quality);
           <div class="info"><h3>${it.name}</h3><p>${it.desc}</p></div>
           <div class="buy"><span class="price">${it.price} 🪙</span><span class="have">${have} in pack${have >= it.maxStack ? ' (full)' : ''}</span>
             <button data-item="${entry.id}" ${ok ? '' : 'disabled'}>Buy</button></div></div>`;
+      }
+      if (entry.type === 'training') {
+        const t = TRAINING.find(x => x.id === entry.id), ok = canBuyTraining(profile, entry.id);
+        return `<div class="item">${artSlot('', t.icon)}
+          <div class="info"><h3>${t.name}</h3><p>${t.desc}</p></div>
+          <div class="buy"><span class="price">${t.price} 🪙</span><span class="have">+${t.xp} xp</span>
+            <button data-training="${entry.id}" ${ok ? '' : 'disabled'}>Buy</button></div></div>`;
       }
       if (entry.type === 'pack') {
         const pk = RIVER_PACKS[entry.id], owned = ownsPack(profile, entry.id), ok = canBuyPack(profile, entry.id);
@@ -646,7 +689,7 @@ applyQuality(quality);
         const entries = STORE_LISTING.filter(e => g.types.includes(e.type));
         if (!entries.length) return '';
         const owned = entries.filter(e => e.type === 'upgrade' ? ownsUpgrade(profile, e.id) : e.type === 'craft' ? profile.crafts.includes(e.id) : e.type === 'pack' ? ownsPack(profile, e.id) : false).length;
-        const note = g.types[0] === 'item' ? `${entries.length} kinds` : `${owned} / ${entries.length} owned`;
+        const note = (g.types[0] === 'item' || g.types[0] === 'training') ? `${entries.length} kinds` : `${owned} / ${entries.length} owned`;
         return `<details class="cat" data-cat="${g.id}" ${storeOpen.has(g.id) ? 'open' : ''}>
           <summary>${g.icon} ${g.label}<small>${note}</small></summary>
           <div class="shelf">${entries.map(row).join('')}</div></details>`;
@@ -657,6 +700,12 @@ applyQuality(quality);
     for (const b of el.querySelectorAll('button[data-craft]')) b.onclick = () => { if (buyCraft(profile, b.dataset.craft)) { showStore(); renderMenu(); } };
     for (const b of el.querySelectorAll('button[data-upgrade]')) b.onclick = () => { if (buyUpgrade(profile, b.dataset.upgrade)) { showStore(); renderMenu(); } };
     for (const b of el.querySelectorAll('button[data-pack]')) b.onclick = () => { if (buyPack(profile, b.dataset.pack)) { showStore(); renderMenu(); } };
+    for (const b of el.querySelectorAll('button[data-training]')) b.onclick = () => {
+      const res = buyTraining(profile, b.dataset.training);
+      if (!res) return;
+      showStore(); renderMenu();
+      if (res.ups) setTimeout(showLevelUp, 300);
+    };
     $('storeClose').onclick = hideStore;
   }
   function hideStore() { $('store').style.display = 'none'; }
@@ -675,7 +724,7 @@ applyQuality(quality);
           <div class="stat-row"><small>skill ${profile.skill}/${c.caps.skill}</small>${pips(profile.skill, c.caps.skill)}</div>
           <div class="stat-row"><small>stamina ${profile.stamina}/${c.caps.stamina}</small>${pips(profile.stamina, c.caps.stamina)}</div>
           <div class="stat-row"><small>health ${profile.health}/${c.caps.health}</small>${statBar(profile.health, c.caps.health, '#7fd6ff')}</div>
-          <div class="stat-row"><small style="color:${profile.injury > 0 ? '#ff9a80' : '#9bc'}">injury ${profile.injury}/${profile.health}${profile.injury >= profile.health ? ' — GAME OVER!' : ''}</small>${statBar(profile.injury, profile.health, '#ff5040')}</div>
+          <div class="stat-row"><small style="color:${profile.injury > 0 ? '#ff9a80' : '#9bc'}">injury ${profile.injury}/${profile.health}${profile.injury >= profile.health ? ' — one more fall means a long recovery' : ''}</small>${statBar(profile.injury, profile.health, '#ff5040')}</div>
           <div style="margin-top:8px">${profile.runs} run${profile.runs === 1 ? '' : 's'} · <b style="color:#ffd35c">${profile.coins || 0}</b> coin${profile.coins === 1 ? '' : 's'}</div>
           <div class="inv"><h4>Pack</h4>
             ${Object.entries(ITEMS).filter(([id]) => itemCount(profile, id) > 0).map(([id, it]) =>
@@ -852,7 +901,10 @@ applyQuality(quality);
       const keyLean = (input.leanL ? 1 : 0) - (input.leanR ? 1 : 0);
       const useTilt = isMobile && keyLean === 0 && gyro.live();
       const leanTarget = useTilt ? gyro.lean() : keyLean;
-      this.lean += (leanTarget - this.lean) * Math.min(1, dt * (useTilt ? MOBILE.leanRate : K.leanRate));
+      // key-driven leaning reacts a little faster with more skill (tilt is a physical sensor
+      // reading, not a trained reflex, so it's left at MOBILE.leanRate regardless of skill)
+      const leanRate = useTilt ? MOBILE.leanRate : K.leanRate + SKILL.leanRatePerPt * tr.skill;
+      this.lean += (leanTarget - this.lean) * Math.min(1, dt * leanRate);
 
 
       // terrain contact
@@ -910,7 +962,7 @@ applyQuality(quality);
       this.speed = Math.hypot(this.v[0], this.v[2]);
       // endRun may tear the whole run down (permadeath nulls `river` and `profile`), so nothing in
       // this tick may touch them after the call — return straight away
-      if (Math.abs(this.roll) > K.capsize || Math.abs(this.pitch) > 1.35) { endRun(false); return; }
+      if (!debugNoCapsize && (Math.abs(this.roll) > K.capsize || Math.abs(this.pitch) > 1.35)) { endRun(false); return; }
       if (this.p[2] > river.finishZ) { endRun(true); return; }
     },
   };
@@ -1150,6 +1202,180 @@ applyQuality(quality);
       for (let k = 0; k < n; k++) spawnObstacle(e, z0 + river.obstRng() * (z1 - z0));
     }
   }
+  // Bakes one landslide boulder's entire fall — bank to wherever it ends up, usually deep water,
+  // sometimes just a gentler patch of slope it stops on ("maybe slide part of the way") — as a
+  // dense keyframe trajectory, once, here at load time, instead of stepping the shared, generic
+  // stepObstacle() (built for a floating capsule pushed by drag) live every frame. Doing it once
+  // means it can afford a much finer step and a model built specifically for a tumbling rock: it
+  // follows the *local* downhill gradient fresh every step (so the path bends with the actual
+  // terrain instead of being a straight line to a precomputed target), integrates true
+  // rolling-without-slipping rotation from distance travelled, and adds a small deterministic
+  // sideways wobble so it doesn't look like it's riding a rail. Runtime playback (triggerLandslides
+  // starts it, updateObstacles samples/interpolates it every frame) never touches this model again.
+  // downBias adds a little extra +z (downstream) pull on top of whatever the terrain's own
+  // gradient gives it, rolled once per candidate in placeLandslides — see LANDSLIDE.downstreamBias
+  function bakeBoulderTrajectory(x0, z0, vrad, seed, downBias) {
+    const rng = mulberry32(seed), fdt = LANDSLIDE.bakeDt;
+    // rows: t, x, y, z, yaw, roll, speed — speed carried through so a splash at the water crossing
+    // can scale with how fast the boulder actually got there (see injectSplash/updateObstacles)
+    const rows = [[0, x0, terrainH(x0, z0) + vrad, z0, rng() * 6.2832, 0, 0]];
+    let x = x0, z = z0, vx = 0, vz = 0, roll = 0, settleT = 0, endedWet = false;
+    for (let i = 1; i <= LANDSLIDE.bakeMaxSteps; i++) {
+      const n = terrainN(x, z), slope = Math.hypot(n[0], n[2]);
+      const dirx = slope > 1e-4 ? n[0] / slope : 0, dirz = slope > 1e-4 ? n[2] / slope : 0;
+      const wob = (rng() - 0.5) * LANDSLIDE.rollWobble;   // perpendicular to the downhill direction
+      const ax = dirx * LANDSLIDE.rollAccel * slope - dirz * wob;
+      const az = dirz * LANDSLIDE.rollAccel * slope + dirx * wob + downBias;
+      const fric = LANDSLIDE.rollFric * (0.6 + 0.4 * slope);   // less friction the steeper it is
+      vx += (ax - fric * vx) * fdt; vz += (az - fric * vz) * fdt;
+      const sp = Math.hypot(vx, vz);
+      if (sp > LANDSLIDE.rollVmax) { vx *= LANDSLIDE.rollVmax / sp; vz *= LANDSLIDE.rollVmax / sp; }
+      x += vx * fdt; z += vz * fdt;
+      const speed = Math.hypot(vx, vz);
+      roll += (speed / Math.max(vrad, 0.2)) * fdt;
+      const yaw = (vx || vz) ? Math.atan2(vx, vz) : rows[rows.length - 1][4];
+      rows.push([i * fdt, x, terrainH(x, z) + vrad, z, yaw, roll, speed]);
+      if (waterAt(x, z).h > LANDSLIDE.deepWater) { endedWet = true; break; }
+      if (speed < LANDSLIDE.settleSpeed) { settleT += fdt; if (settleT > LANDSLIDE.settleTime) break; }
+      else settleT = 0;
+    }
+    const stride = 7, traj = new Float32Array(rows.length * stride);
+    rows.forEach((r, i) => traj.set(r, i * stride));
+    return { traj, dur: rows[rows.length - 1][0], endedWet };
+  }
+  // landslide boulders (R.landslideZone = { from, to, count, activeChance }): `count` candidate
+  // spots spread across [from, to] downstream, alternating banks with jitter — but only the ones
+  // that win the activeChance roll below actually get placed at all, so there's nothing sitting on
+  // the bank for a candidate that isn't live this attempt. That roll (and everything else about
+  // *which* candidates exist and roughly how) comes from real per-attempt randomness (Math.random),
+  // not river.seed, deliberately — see LANDSLIDE. Only bakeBoulderTrajectory's own internal wobble
+  // stays seeded per candidate, since reproducing one specific fall shape has no bearing on whether
+  // a player could learn fixed hazard positions from a previous attempt. Own instance-buffer sizing
+  // here too: the shared sizing loop in placeObstacles only runs when a river has an `obstacles`
+  // config, which would otherwise leave the boulder meshes' buffers never allocated for a river
+  // that only has landslides.
+  function placeLandslides() {
+    const zone = river.R.landslideZone;
+    if (!zone) return;
+    const need = Math.max(80, zone.count * 80);
+    for (const spec of [LANDSLIDE.medium, LANDSLIDE.large]) for (const name of spec.meshes) {
+      if (obstInstBufs[name] && obstInstBufs[name].size >= need) continue;
+      if (obstInstBufs[name]) obstInstBufs[name].destroy();
+      obstInstBufs[name] = mkBuf(need, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
+    }
+    const span = (zone.to - zone.from) / zone.count;
+    for (let spotIdx = 0; spotIdx < zone.count; spotIdx++) {
+      if (Math.random() >= zone.activeChance) continue;   // not live this attempt — never placed at all
+      const z = clamp(zone.from + (spotIdx + 0.15 + 0.7 * Math.random()) * span, zone.from, zone.to);
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const j = clamp(Math.floor(z / dx), 0, L - 1);
+      const chan = river.rows[j][0];   // landslide zones are kept clear of forks, so [0] is always right
+      const spec = Math.random() < 0.5 ? LANDSLIDE.medium : LANDSLIDE.large;
+      const cls = spec === LANDSLIDE.large ? 'large' : 'medium';
+      const mesh = spec.meshes[Math.floor(Math.random() * spec.meshes.length)], V = obstMeshes[mesh];
+      const len = spec.len[0] + Math.random() * (spec.len[1] - spec.len[0]), sc = len / V.len;
+      const off = chan.hw + LANDSLIDE.bankOffset[0] + Math.random() * (LANDSLIDE.bankOffset[1] - LANDSLIDE.bankOffset[0]);
+      const x = clamp(chan.c + side * off, 1, W * dx - 1);
+      const g = 0.85 + 0.25 * Math.random(), vrad = V.vrad * sc;
+      const downBias = Math.random() * LANDSLIDE.downstreamBias;
+      const { traj, dur, endedWet } = bakeBoulderTrajectory(x, z, vrad, river.seed + 800 + spotIdx, downBias);
+      // timed against this boulder's own fall duration by default — see LANDSLIDE.assumedSpeed —
+      // so it's triggered to be watched coming down rather than always finishing before the player
+      // gets there; nearChance skips that for a close-range surprise instead
+      const triggerDist = Math.random() < LANDSLIDE.nearChance ? LANDSLIDE.nearTriggerZ
+        : clamp(LANDSLIDE.assumedSpeed * (dur + LANDSLIDE.leadTime), LANDSLIDE.minTriggerZ, LANDSLIDE.maxTriggerZ);
+      river.obstacles.push({
+        kind: 'boulder', cls, mesh, len, rad: V.rad * sc, sc, vrad,
+        draft: V.draft * sc, mass: Math.max(20, spec.density * V.vol * sc * sc * sc),
+        samples: spec.samples, hitK: spec.hitK, lift: spec.lift,
+        x, z, y: terrainH(x, z) + vrad, yaw: Math.random() * 6.2832, roll: 0,
+        vx: 0, vz: 0, w: 0, bobPh: Math.random() * 6.2832,
+        fx: 0, fz: 0, tq: 0, grounded: true, sinking: false, sinkT: 0, y0: 0, alpha: 1,
+        tint: [g, g, g, 1],
+        dormant: true, triggerRolled: false, splashed: false, settled: false, triggerDist, dustT: 0,
+        traj, trajDur: dur, trajEndedWet: endedWet, replaying: false, replayT: 0,
+      });
+    }
+  }
+  // every boulder that exists at all already won its activeChance roll back in placeLandslides —
+  // that's the only probability gate; once the kayak gets within a boulder's own triggerDist it
+  // always goes, no second coin flip here. A miss isn't possible any more, but the function stays
+  // (rather than folding straight into updateObstacles) since it's still the one place that owns
+  // "has this one already gone" via triggerRolled.
+  function triggerLandslides() {
+    if (!river.R.landslideZone) return;
+    const kz = kayak.p[2];
+    for (const ob of river.obstacles) {
+      if (ob.kind !== 'boulder' || !ob.dormant || ob.triggerRolled) continue;
+      if (ob.z - kz > ob.triggerDist) continue;
+      ob.triggerRolled = true;
+      ob.dormant = false; ob.replaying = true; ob.replayT = 0;
+    }
+  }
+  // one-shot wave where a boulder first reaches real water: a local height bump added on top of
+  // the CPU-side water estimate (waterAt — the same approximation stepObstacle already reads for
+  // this exact boulder every substep, not a fresh GPU readback) written straight into stateBufs[0].
+  // That buffer is always the sim's settled, current state between frames — see the 3-stage
+  // advect/height/momentum bind-group chain in the render loop, which starts and ends each full
+  // step there — so writing it here, before this frame's compute dispatch, is exactly the right
+  // buffer with no ping-pong bookkeeping to get right. The sim's own advection then carries the
+  // bump outward as a ripple over the next several frames; nothing here animates it.
+  // speed is the boulder's own speed (m/s) at the moment it crossed into water — see the replaying-
+  // boulder pass in updateObstacles, which reads it straight out of the baked trajectory rather
+  // than re-deriving it. Scales both the height and the radius together: a boulder that barely
+  // trickled in throws a small ripple, one that built up real speed on a long run down throws a
+  // proportionally bigger one — a single fixed splash size could never tell those apart.
+  function injectSplash(cx, cz, speed) {
+    const scale = clamp(speed / LANDSLIDE.splashRefSpeed, LANDSLIDE.splashMinScale, LANDSLIDE.splashMaxScale);
+    const R = LANDSLIDE.splashRadius * scale, height = LANDSLIDE.splashHeight * scale, cells = Math.ceil(R / dx);
+    const i0 = Math.round(cx / dx), j0 = Math.round(cz / dx);
+    const cell = new Float32Array(4);
+    for (let dj = -cells; dj <= cells; dj++) for (let di = -cells; di <= cells; di++) {
+      const i = i0 + di, j = j0 + dj;
+      if (i < 0 || i >= W || j < 0 || j >= L) continue;
+      const d = Math.hypot(di * dx, dj * dx);
+      if (d > R) continue;
+      const px = (i + 0.5) * dx, pz = (j + 0.5) * dx, w = waterAt(px, pz);
+      const bump = height * (1 - d / R);
+      const outward = d > 0.01 ? bump * 1.6 : 0;
+      cell[0] = w.h + bump; cell[1] = w.u + outward * (di * dx) / Math.max(d, 0.01);
+      cell[2] = w.v + outward * (dj * dx) / Math.max(d, 0.01); cell[3] = w.h > 0.05 ? 1 : 0;
+      device.queue.writeBuffer(stateBufs[0], (j * W + i) * 16, cell);
+    }
+  }
+  // gives a settled boulder actual, lasting hydraulic presence — a real obstruction the shallow-
+  // water sim computes flow around every step from here on, not just the one-shot splash — by
+  // raising the terrain bed under it. generateRiver() (river.js) shapes *natural* river rocks with
+  // pow(dist/r, 1.6) — a gentle dome that only reads as "dry" (see the `rock` flag in momentum(),
+  // shaders.js — the thing that actually drives extra foam/turbulence around an obstacle) in a
+  // small fraction of its own radius near the centre. Fine for a small natural rock; for a boulder
+  // that can be a couple of metres across, that shrinks the actually-emergent footprint down to a
+  // pinprick under a much bigger mesh — invisible against the flow, which is exactly what wasn't
+  // working. Steep power (6) instead: a near-flat plateau at `top` for most of the radius with only
+  // a thin blend-to-`local` rim right at the edge, so most of the boulder's own footprint reads as
+  // genuinely dry, not just its centre — also just a more accurate shape for a boulder's steep
+  // sides than the dome river.js uses for a small water-worn rock. terrainBuf is read live every
+  // frame by both the sim compute pass and vsTerrain (the terrain is a live heightfield, not a
+  // static mesh baked once), so writing it here is enough — nothing downstream needs to know a
+  // boulder was ever involved.
+  function carveBoulderIntoBed(x, z, rad, topY) {
+    const local = terrainH(x, z), top = Math.max(topY, local + 0.1);
+    const i0 = clamp(Math.floor((x - rad) / dx), 0, W - 1), i1 = clamp(Math.ceil((x + rad) / dx), 0, W - 1);
+    const j0 = clamp(Math.floor((z - rad) / dx), 0, L - 1), j1 = clamp(Math.ceil((z + rad) / dx), 0, L - 1);
+    for (let jj = j0; jj <= j1; jj++) {
+      const row = new Float32Array(i1 - i0 + 1);
+      for (let ii = i0; ii <= i1; ii++) {
+        const idx = jj * W + ii, cx = (ii + 0.5) * dx, cz = (jj + 0.5) * dx, dist = Math.hypot(cx - x, cz - z);
+        let v = river.b[idx];
+        if (dist < rad) {
+          const shape = Math.pow(dist / rad, 6);
+          v = Math.max(v, top - (top - local) * shape);
+        }
+        river.b[idx] = v; row[ii - i0] = v;
+      }
+      device.queue.writeBuffer(terrainBuf, (jj * W + i0) * 4, row);
+    }
+  }
   // one obstacle of spawn entry `e`, somewhere in the channel at z. Returns false if the quota is
   // full or the spot is unusable (past the take-out, in a pond, on top of another obstacle).
   function spawnObstacle(e, z) {
@@ -1262,7 +1488,48 @@ applyQuality(quality);
     spawnObstacles();
     const list = river.obstacles;
     if (!list.length) return;
+    triggerLandslides();
     const kz = kayak.p[2], steps = OBSTACLES.substeps, dt = dtReal / steps;
+    // replaying boulders: sample the trajectory baked for them (bakeBoulderTrajectory) once per
+    // frame — no live physics involved, just interpolating position/yaw/roll/speed out of the
+    // array — and fire the splash a live-simulated one would get, keyed off wherever the baked
+    // path actually put it rather than a fresh waterAt() query. When the trajectory runs out the
+    // boulder simply stops here for good, whether that's underwater or on a gentler patch of slope
+    // it settled on along the way — it's meant to become a permanent, solid underwater rock, not
+    // despawn, so there's no sinking/fade to trigger; it just stays in the list like any other
+    // obstacle until the kayak eventually leaves it far enough behind for the generic despawn below.
+    for (const ob of list) {
+      if (!ob.replaying) continue;
+      ob.replayT += dtReal;
+      const traj = ob.traj, stride = 7, n = traj.length / stride;
+      const tEnd = traj[(n - 1) * stride];
+      const t = Math.min(ob.replayT, tEnd), fi = t / LANDSLIDE.bakeDt;
+      const i0 = clamp(Math.floor(fi), 0, n - 1), i1 = Math.min(i0 + 1, n - 1), ft = fi - i0;
+      const at = k => traj[i0 * stride + k] + (traj[i1 * stride + k] - traj[i0 * stride + k]) * ft;
+      ob.x = at(1); ob.y = at(2); ob.z = at(3); ob.yaw = at(4); ob.roll = at(5);
+      const wh = waterAt(ob.x, ob.z).h;
+      if (!ob.splashed && wh > 0.12) {
+        ob.splashed = true; injectSplash(ob.x, ob.z, at(6));
+        spawnBurst(ob.x, ob.y + ob.vrad * 0.5, ob.z, LANDSLIDE.splashCol);   // conservative — reuses the pickup burst's own count/life, not a bigger effect of its own
+      } else if (wh <= 0.05) {
+        // brief dust while it's still rolling on dry ground — throttled, not every frame
+        ob.dustT -= dtReal;
+        if (ob.dustT <= 0) { ob.dustT = LANDSLIDE.dustInterval; spawnBurst(ob.x, ob.y, ob.z, LANDSLIDE.dustCol); }
+      }
+      if (ob.replayT >= tEnd) {
+        ob.replaying = false; ob.settled = true;   // frozen for good from here — see the Y-loop below
+        // shaders.js momentum()'s `rock` term — the thing that actually generates the extra foam/
+        // turbulence around an obstacle, not the one-shot splash — only fires where a neighbouring
+        // cell is fully *dry*: bed above the local water surface. A margin of just "a hair above
+        // eta" leaves barely any actually-dry footprint even with the steep carve profile above, so
+        // aim well clear of the surface — capped at the mesh's own peak height so the terrain still
+        // never pokes out past the boulder's own silhouette. A boulder settled in water deep enough
+        // that even its own height can't clear that just won't show a surface wake — correct, not a
+        // bug: a genuinely submerged rock doesn't visibly disturb the surface either.
+        const emergeTop = waterAt(ob.x, ob.z).eta + 0.35;
+        carveBoulderIntoBed(ob.x, ob.z, ob.rad, Math.min(emergeTop, ob.y + ob.vrad));
+      }
+    }
     const active = [];
     for (const ob of list) {
       if (!ob.sinking && (ob.z < kz - OBSTACLES.despawnBehind || ob.z > river.finishZ + 15)) { ob.sinking = true; ob.sinkT = 0; ob.y0 = ob.y; }
@@ -1277,9 +1544,17 @@ applyQuality(quality);
     }
     for (let i = list.length - 1; i >= 0; i--) if (list[i].sinking && list[i].sinkT >= OBSTACLES.sinkTime) list.splice(i, 1);
     for (let s = 0; s < steps; s++) {
-      for (const ob of active) stepObstacle(ob, dt);
+      for (const ob of active) {
+        // a landslide boulder is always exactly one of dormant (still hanging) / replaying (see
+        // the sampling pass above) / settled (frozen for good, see the Y-loop below) — never live-
+        // stepped, so this never runs for one
+        if (ob.dormant || ob.replaying || ob.settled) continue;
+        stepObstacle(ob, dt);
+      }
       for (let a = 0; a < active.length; a++) for (let b = a + 1; b < active.length; b++) {
-        const A = active[a], B = active[b], reach = (A.len + B.len) / 2 + A.rad + B.rad;
+        const A = active[a], B = active[b];
+        if (A.dormant || A.replaying || A.settled || B.dormant || B.replaying || B.settled) continue;
+        const reach = (A.len + B.len) / 2 + A.rad + B.rad;
         if (Math.abs(A.z - B.z) > reach || Math.abs(A.x - B.x) > reach) continue;
         contactSegs(A, B, dt); contactSegs(B, A, dt);
       }
@@ -1289,7 +1564,21 @@ applyQuality(quality);
     const ky = 1 - Math.exp(-dtReal * OBSTACLES.ySmooth);
     for (const ob of active) {
       ob.fx = 0; ob.fz = 0; ob.tq = 0;
-      const target = surfaceAt(ob.x, ob.z) + (ob.grounded ? 0 : OBSTACLES.bob * Math.sin(simTime * OBSTACLES.bobSpeed + ob.bobPh));
+      // a *settled* boulder (ob.settled, set once its replay finishes — see below) is frozen for
+      // good and skips this entirely: it doesn't track terrainH any more. It used to (same
+      // terrainH+vrad anchor as a still-rolling boulder), which meant the moment
+      // carveBoulderIntoBed raised the bed under it — to make it emergent for the water sim —
+      // terrainH at its own position jumped, and next frame this loop chased that jump straight
+      // up: the ground it just rose because the rock is there, turning around and shoving the rock
+      // up with it. One-way relationship instead: the rock defines a bump in the terrain, the
+      // terrain never moves the rock. It keeps colliding with the kayak regardless (river.obstNear
+      // below only reads x/z/rad, all still perfectly valid on a boulder that no longer moves).
+      if (ob.kind === 'boulder' && ob.settled) continue;
+      // boulders rest on the terrain (centre one radius above it), not at the water surface like a
+      // buoyant log — anchoring a dense rock's render position to the surface is what read as
+      // "floating" regardless of how grounded the physics underneath it actually was
+      const target = ob.kind === 'boulder' ? terrainH(ob.x, ob.z) + ob.vrad
+        : surfaceAt(ob.x, ob.z) + (ob.grounded ? 0 : OBSTACLES.bob * Math.sin(simTime * OBSTACLES.bobSpeed + ob.bobPh));
       ob.y += (target - ob.y) * ky;
     }
     // broad phase for the kayak contact test, consumed by kayak.step next frame
@@ -1297,8 +1586,19 @@ applyQuality(quality);
       Math.hypot(ob.x - kayak.p[0], ob.z - kayak.p[2]) < ob.len / 2 + ob.rad + 4);
   }
   function writeObstacleInstances() {
+    // obstacles had no distance cap of their own — fine while density-spawned debris only ever
+    // exists near the kayak anyway, but a landslide boulder sits at its authored z from the moment
+    // the river loads, often well beyond RENDER.viewAhead at first. Drawn with no cull, it renders
+    // exactly where world-space says it belongs — sitting correctly on the slope — while the
+    // terrain mesh under it isn't drawn out that far yet, so it reads as floating in empty air.
+    // Same [kz-viewBehind, kz+viewAhead] window terrain's own LOD slices use, plus a small margin
+    // (mirrors VEG_SLACK for vegetation) so nothing pops the instant it crosses the terrain edge.
+    const zk = kayak.p[2], zLo = zk - RENDER.viewBehind - 4, zHi = zk + RENDER.viewAhead + 4;
     const groups = {};
-    for (const ob of river.obstacles || []) (groups[ob.mesh] || (groups[ob.mesh] = [])).push(ob);
+    for (const ob of river.obstacles || []) {
+      if (ob.z < zLo || ob.z > zHi) continue;
+      (groups[ob.mesh] || (groups[ob.mesh] = [])).push(ob);
+    }
     river.obstDraw = [];
     for (const [name, list] of Object.entries(groups)) {
       const data = new Float32Array(list.length * 20);
@@ -1439,6 +1739,10 @@ applyQuality(quality);
     
 
     runLoot = { paddles: 0, coins: 0, coinValue: 0, snacks: 0, bandaids: 0, medikits: 0, books: 0, raftFound: false, helmetFound: false };
+    // simTime restarts at 0 below, so any leftover "…Until" timestamp from the previous attempt
+    // would otherwise read as still-active for a while — snackMsgUntil already had this gap, and
+    // drinkBuffUntil actually changes gameplay, not just a HUD message, so both get zeroed here.
+    snackMsgUntil = 0; drinkBuffUntil = 0; drinkMsgUntil = 0;
     device.queue.writeBuffer(stateBufs[0], 0, river.state); device.queue.writeBuffer(kBufs[0], 0, river.kArr);
     device.queue.writeBuffer(partBuf, 0, new Float32Array(PARTS.count * 8));
     writeSimUniforms(0, 1);
@@ -1447,6 +1751,7 @@ applyQuality(quality);
     kayak.reset(); 
     cam.reset();
     placeObstacles();   // seeded relative to the boat, so after reset; redone every attempt
+    placeLandslides();
     if (isMobile) gyro.calibrate();          // however the phone is held right now counts as level
     document.body.classList.add('inrun');
     simTime = 0; runTime = 0;
@@ -1462,7 +1767,7 @@ applyQuality(quality);
     const actions = `<div class="mbtns"><button id="btnRetry">↻ Run again</button><button id="btnMenu">River menu</button></div>
         <small class="desktop-only">R — run again · Esc — river menu</small>`;
     if (won) {
-      const { pts, basePts, paddleXp, coins, ups, bandaids, medikits, snacks, bookBoost, raftFound, helmetFound } = awardRun(profile, river.R, runTime, runLoot);
+      const { pts, basePts, paddleXp, coins, sponsorCoins, ups, bandaids, medikits, snacks, bookBoost, raftFound, helmetFound, healed } = awardRun(profile, river.R, runTime, runLoot);
       const best = profile.best[river.R.name] === runTime ? ' · new best!' : '';
       const finds = [];
       if (snacks) finds.push(`${snacks} snack${snacks > 1 ? 's' : ''}`);
@@ -1474,34 +1779,34 @@ applyQuality(quality);
       msg.innerHTML = `🏁 Take-out reached!<br>${river.R.name} in ${runTime.toFixed(1)} s${best}<br>
         <span style="color:#ffe08a">+${basePts} finish${paddleXp ? ` +${paddleXp} paddle` : ''} = +${pts} xp${coins ? ` · +${coins} coin${coins > 1 ? 's' : ''}` : ''}${ups ? ` — LEVEL UP${ups > 1 ? ' ×' + ups : ''}!` : ` · ${profile.points}/${pointsForLevel(profile.level)} to level ${profile.level + 1}`}</span>
         ${finds.length ? `<br><small style="color:#9be0ff">found ${finds.join(', ')}</small>` : ''}
+        ${ownsUpgrade(profile, 'sponsor') ? `<br><small style="color:#ffd35c">📣 sponsor payout: +${sponsorCoins} coin${sponsorCoins > 1 ? 's' : ''}</small>` : ''}
+        ${healed ? `<br><small style="color:#9f7">3 clean runs in a row — injury recovers by ${healed} (${profile.injury}/${profile.health})</small>` : ''}
         ${actions}`;
       if (ups || bookBoost) setTimeout(showLevelUp, 900);
     } else {
-      const { gain, dead, injury, cap } = applyInjury(profile, river.R.tier);
-      if (dead) {
-        // permadeath: applyInjury has already wiped the save. Drop the in-memory profile/river
-        // too and send the player back to character select — there is no run/menu state left
-        // that still makes sense to offer (no Retry, no River menu).
-        profile = null; river = null;
-        msg.innerHTML = `💀 GAME OVER<br><small style="color:#ff9a80">Your injuries finally caught up with you — this paddler's story ends here.</small>
-          <br><small>+${gain} injury (${injury}/${cap})</small>
-          <div class="mbtns"><button id="btnNewPaddler">New paddler</button></div>`;
-        $('btnNewPaddler').onclick = () => showMenu();
-        return;
+      const { gain, recovered, injury, cap, levelsLost } = applyInjury(profile, river.R.tier);
+      if (recovered) {
+        // reaching the injury cap is no longer permadeath: the character and owned gear (crafts,
+        // upgrades, river packs) survive, but a long recovery costs levels, coins and consumables
+        // — see applyInjury. Retry/river menu both still make sense, same as a normal capsize.
+        msg.innerHTML = `🏥 Badly hurt — time for a long recovery.<br>${(kayak.p[2] - 15).toFixed(0)} m of ${(river.finishZ - 15).toFixed(0)} m
+          <br><small style="color:#ff9a80">${levelsLost ? `Lost ${levelsLost} level${levelsLost > 1 ? 's' : ''}, ` : ''}every coin, and the whole pack — but the rest is healed up (injury 0/${cap}).</small>
+          ${actions}`;
+      } else {
+        const lostParts = [];
+        if (runLoot.paddles) lostParts.push(`${runLoot.paddles} paddle${runLoot.paddles === 1 ? '' : 's'}`);
+        if (runLoot.coins) lostParts.push(`${runLoot.coins} coin${runLoot.coins === 1 ? '' : 's'}`);
+        if (runLoot.snacks) lostParts.push(`${runLoot.snacks} snack${runLoot.snacks === 1 ? '' : 's'}`);
+        if (runLoot.bandaids) lostParts.push(`${runLoot.bandaids} bandaid${runLoot.bandaids === 1 ? '' : 's'}`);
+        if (runLoot.medikits) lostParts.push(`${runLoot.medikits} medikit${runLoot.medikits === 1 ? '' : 's'}`);
+        if (runLoot.books) lostParts.push('a skill boost');
+        if (runLoot.raftFound) lostParts.push('the raft');
+        if (runLoot.helmetFound) lostParts.push('the helmet');
+        msg.innerHTML = `🌊 Capsized! You're swimming.<br>${(kayak.p[2] - 15).toFixed(0)} m of ${(river.finishZ - 15).toFixed(0)} m
+          <br><small style="color:#ff9a80">+${gain} injury (${injury}/${cap})</small>
+          ${lostParts.length ? `<br><small style="color:#ff9a80">lost ${lostParts.join(', ')} — loot only banks on a finish</small>` : ''}
+          ${actions}`;
       }
-      const lostParts = [];
-      if (runLoot.paddles) lostParts.push(`${runLoot.paddles} paddle${runLoot.paddles === 1 ? '' : 's'}`);
-      if (runLoot.coins) lostParts.push(`${runLoot.coins} coin${runLoot.coins === 1 ? '' : 's'}`);
-      if (runLoot.snacks) lostParts.push(`${runLoot.snacks} snack${runLoot.snacks === 1 ? '' : 's'}`);
-      if (runLoot.bandaids) lostParts.push(`${runLoot.bandaids} bandaid${runLoot.bandaids === 1 ? '' : 's'}`);
-      if (runLoot.medikits) lostParts.push(`${runLoot.medikits} medikit${runLoot.medikits === 1 ? '' : 's'}`);
-      if (runLoot.books) lostParts.push('a skill boost');
-      if (runLoot.raftFound) lostParts.push('the raft');
-      if (runLoot.helmetFound) lostParts.push('the helmet');
-      msg.innerHTML = `🌊 Capsized! You're swimming.<br>${(kayak.p[2] - 15).toFixed(0)} m of ${(river.finishZ - 15).toFixed(0)} m
-        <br><small style="color:#ff9a80">+${gain} injury (${injury}/${cap})</small>
-        ${lostParts.length ? `<br><small style="color:#ff9a80">lost ${lostParts.join(', ')} — loot only banks on a finish</small>` : ''}
-        ${actions}`;
     }
     $('btnRetry').onclick = retryRun;
     $('btnMenu').onclick = () => showMenu();
@@ -1628,7 +1933,8 @@ applyQuality(quality);
   // ---------- HUD ----------
   const hudEl = $('hud'), glEl = $('gl'), mkEl = $('mk'), dbgEl = $('dbg'), stamFill = $('stamfill'), stamTxt = $('stamtxt');
   const pcountEl = $('pcount'), ccountEl = $('ccount'), scountEl = $('scount'), mEatEl = $('mEat');
-  const lootEls = { paddle: pcountEl, coin: ccountEl, snack: scountEl };
+  const dcountEl = $('dcount'), mDrinkEl = $('mDrink');
+  const lootEls = { paddle: pcountEl, coin: ccountEl, snack: scountEl, energyDrink: dcountEl };
   function popLoot(kind) {
     const el = lootEls[kind];
     if (!el || el.classList.contains('pop')) return;
@@ -1651,12 +1957,19 @@ applyQuality(quality);
       scountEl.style.opacity = snacks ? 1 : 0.45;
       mEatEl.textContent = `🥜 ${snacks}`;
       mEatEl.style.opacity = snacks ? 1 : 0.45;
+      const drinks = itemCount(profile, 'energyDrink');
+      dcountEl.innerHTML = `⚡ <b>${drinks}</b>${isMobile ? '' : ' <kbd style="font-size:11px">Q</kbd>'}`;
+      dcountEl.style.opacity = drinks ? 1 : 0.45;
+      mDrinkEl.textContent = `⚡ ${drinks}`;
+      mDrinkEl.style.opacity = drinks ? 1 : 0.45;
 
     }
     const mapMsg = simTime < mapFoundUntil ? '<br><b style="color:#ffe08a">🗺 Hidden map found!</b>' : '';
     const snackMsg = simTime < snackMsgUntil ? `<br><b style="color:#9f7">🥜 Snack! +${ITEMS.snack.stamina} stamina</b>` : '';
+    const drinkMsg = simTime < drinkBuffUntil ? `<br><b style="color:#ffe860">⚡ Focused! +${ITEMS.energyDrink.buffSkill} skill for ${(drinkBuffUntil - simTime).toFixed(1)}s</b>`
+      : simTime < drinkMsgUntil ? '<br><b style="color:#ffe860">⚡ Energy booster!</b>' : '';
     const injuryMsg = profile.injury > 0 ? ` · <span style="color:#ff9a80">injury ${profile.injury}/${profile.health}</span>` : '';
-    hudEl.innerHTML = `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${profile.level} · ${runCraft.name}${injuryMsg}<br>speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · time <b>${runTime.toFixed(1)}</b> s${mapMsg}${snackMsg}`;
+    hudEl.innerHTML = `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${profile.level} · ${runCraft.name}${injuryMsg}<br>speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · time <b>${runTime.toFixed(1)}</b> s${mapMsg}${snackMsg}${drinkMsg}`;
     
     stamFill.style.width = (100 * kayak.stamina / STAMINA.max) + '%';
     stamFill.className = kayak.tired ? 'tired' : '';

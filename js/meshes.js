@@ -126,6 +126,16 @@ export function buildVegetationMeshes() {
   addCylinder(tree, [0, 1.9, 0], [0, 4.1, 0], 0.95, 0.0, 9, [0.10, 0.34, 0.13]);
   addCylinder(tree, [0, 2.8, 0], [0, 4.9, 0], 0.6, 0.0, 8, [0.12, 0.38, 0.15]);
   M.tree = tree;
+  // same conifer, snow-dusted: each tier blended further toward white going up, the way snow
+  // actually accumulates more on a conifer's upper boughs than lower down — for icy (see BIOMES,
+  // config.js), a plain conifer read too summery and treeBirch/treeWithered too leafy-deciduous
+  const treeSnowy = new MeshBuilder(), snowCol = [0.92, 0.95, 1.0];
+  const dust = (col, t) => [col[0] + (snowCol[0] - col[0]) * t, col[1] + (snowCol[1] - col[1]) * t, col[2] + (snowCol[2] - col[2]) * t];
+  addCylinder(treeSnowy, [0, 0, 0], [0, 1.5, 0], 0.14, 0.1, 7, [0.36, 0.24, 0.13]);
+  addCylinder(treeSnowy, [0, 0.9, 0], [0, 3.3, 0], 1.25, 0.0, 9, dust([0.08, 0.30, 0.12], 0.2));
+  addCylinder(treeSnowy, [0, 1.9, 0], [0, 4.1, 0], 0.95, 0.0, 9, dust([0.10, 0.34, 0.13], 0.45));
+  addCylinder(treeSnowy, [0, 2.8, 0], [0, 4.9, 0], 0.6, 0.0, 8, dust([0.12, 0.38, 0.15], 0.75));
+  M.treeSnowy = treeSnowy;
   const bush = new MeshBuilder();
   addSphere(bush, [0, 0.35, 0], [0.75, 0.5, 0.75], 6, 9, [0.18, 0.40, 0.14], d => 0.85 + 0.35 * vnoise3(d[0] * 2 + 5, d[1] * 2, d[2] * 2, 3));
   M.bush = bush;
@@ -346,6 +356,29 @@ function buildIce(seed, sides, len, hw, top, bot, stations) {
   addStack(mb, icePoly(sides, hw, top, bot, seed), stations.map(([zf, sx, sy]) => ({ z: zf * len, sx, sy })), ICE_UP, ICE_DOWN);
   return { mb, len, rad: hw, draft: -bot, vol: 1.3 * hw * (top - bot) * len };
 }
+// landslide boulders: a lumpy, noise-displaced rock — same primitive buildVegetationMeshes uses for
+// the 'rock'/'boulder' props (a flattened, roughened ellipsoid reads as stone far more convincingly
+// than a smooth sphere would) — but returned in the {mb, len, rad, draft, vol} shape the obstacle
+// physics needs, sized round rather than elongated (len ≈ diameter) since stepObstacle's along-axis
+// sampling degrades gracefully to "a short, chunky capsule" for a near-1:1 aspect ratio, no separate
+// code path required. draft is set deep relative to its size (see OBSTACLES kinds.boulder in
+// config.js) so it stays in stepObstacle's grounded/rolling regime instead of ever really floating —
+// a dense rock tumbling along the bed, not a log riding on top of the current.
+const ROCK_OBST = [0.44, 0.41, 0.37], ROCK_OBST_DARK = [0.30, 0.27, 0.23];
+function buildBoulder(seed, r) {
+  const mb = new MeshBuilder(), rng = mulberry32(seed);
+  const rx = r * (0.82 + 0.3 * rng()), ry = r * (0.65 + 0.18 * rng()), rz = r * (0.82 + 0.3 * rng());
+  addSphere(mb, [0, 0, 0], [rx, ry, rz], 7, 10, i => (i < 0.25 || i > 0.8 ? ROCK_OBST_DARK : ROCK_OBST),
+    d => 0.72 + 0.32 * vnoise3(d[0] * 1.7 + seed, d[1] * 1.7 - seed, d[2] * 1.7 + seed * 2, seed + 60)
+       + 0.12 * vnoise3(d[0] * 4.5 + seed, d[1] * 4.5, d[2] * 4.5 + seed, seed + 61));
+  const rMax = Math.max(rx, rz);
+  // vrad (vertical semi-axis) is separate from draft: draft keeps stepObstacle's physics in the
+  // grounded regime (see below), vrad is what main.js uses to rest the *rendered* boulder's centre
+  // exactly one radius above the terrain — otherwise it inherits the generic obstacle render path's
+  // water-surface anchor (correct for a buoyant log, wrong for a rock: half the mesh pokes up out
+  // of the water reading as "floating" no matter how grounded the physics underneath actually is).
+  return { mb, len: 2 * rMax, rad: rMax, draft: ry * 2.2, vrad: ry, vol: (4 / 3) * Math.PI * rx * ry * rz };
+}
 export function buildObstacleMeshes() {
   return {
     logMedium:  buildLog(1, 4.6,  0.28, 0.22, 10, { stubs: 3 }),
@@ -358,5 +391,8 @@ export function buildObstacleMeshes() {
     // small icebergs: a jagged mass standing clear of the water with most of the bulk below it
     iceberg:    buildIce(7, 8, 6.0, 2.2, 1.6, -1.8, [[-0.5, 0.45, 0.45], [-0.28, 0.85, 0.80], [-0.05, 1, 1], [0.18, 0.92, 0.85], [0.36, 0.70, 0.95], [0.5, 0.40, 0.50]]),
     icebergB:   buildIce(8, 8, 7.0, 1.9, 2.0, -1.6, [[-0.5, 0.55, 0.60], [-0.2, 0.95, 0.85], [0.02, 0.80, 1], [0.24, 1, 0.75], [0.5, 0.50, 0.55]]),
+    // landslide boulders — see OBSTACLES.kinds.boulder in config.js
+    boulderMedium: buildBoulder(9, 1.1),
+    boulderLarge:  buildBoulder(10, 1.9),
   };
 }
