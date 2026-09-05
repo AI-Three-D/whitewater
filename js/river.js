@@ -423,7 +423,7 @@ export function generateRiver(R) {
       }
     }
     const maxHw = (cfg.width / 2) * (1 + cfg.widthVar) * (1 + cfg.flare) * 1.07 + cfg.wander * span * 0.04;
-    bridges.push({ cfg, z: zb, xa, xb, span, eta, yDeck, zc, hwB, topAt, bottomAt, thick, clearAt, at, pillars, pillarR, seed: bseed,
+    bridges.push({ cfg, z: zb, xa, xb, span, eta, yDeck, zc, hwB, topAt, bottomAt, thick, clearAt, at, pillars, pillarK, pillarHit, seed: bseed,
       reach: maxHw + 2.5, zMin: zb - maxHw - 1, zMax: zb + maxHw + 1 });
   });
   const state = new Float32Array(N * 4), kArr = new Float32Array(N);
