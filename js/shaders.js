@@ -380,7 +380,114 @@ struct SkyOut { @builtin(position) pos: vec4f, @location(0) dir: vec3f };
 @fragment fn fsSky(in: SkyOut) -> @location(0) vec4f { return vec4f(skyColor(normalize(in.dir)), 1.0); }
 `;
 
-export const WGSL_TERRAIN = WGSL_RENDER_COMMON + /* wgsl */`
+// terrain colouring shared by the heightfield (fsTerrain) and the natural land bridges (fsBridge):
+// biome palette, noise breakup, slope blending, altitude scree, channel gravel, lighting, fog.
+const WGSL_TERRAIN_SHADE = /* wgsl */`
+// per-biome base palette for grass/dirt/rock/gravel — everything else (noise breakup, slope
+// blending, altitude scree, lighting) stays identical, only these anchor colours shift.
+// ids match BIOME_IDS in config.js: 0 alpine (default), 1 canyon, 2 desert, 3 deciduous, 4 icy,
+// 5 barren, 6 rainforest, 7 savannah, 8 glacier, 9 volcanic, 10 autumn.
+fn biomeColors(biome: i32) -> array<vec3f, 4> {
+  if (biome == 1) {          // dry canyon: redder rock, sandier dirt, olive scrub instead of lush grass
+    return array<vec3f, 4>(vec3f(0.42, 0.38, 0.15), vec3f(0.55, 0.38, 0.22), vec3f(0.53, 0.35, 0.28), vec3f(0.58, 0.42, 0.27));
+  }
+  if (biome == 2) {          // desert: sun-bleached sand and pale sandstone, sparse dry scrub
+    return array<vec3f, 4>(vec3f(0.55, 0.48, 0.22), vec3f(0.62, 0.48, 0.28), vec3f(0.62, 0.52, 0.40), vec3f(0.58, 0.50, 0.35));
+  }
+  if (biome == 3) {          // deciduous: lush leafy green, rich forest-floor dirt
+    return array<vec3f, 4>(vec3f(0.18, 0.42, 0.13), vec3f(0.30, 0.23, 0.14), vec3f(0.42, 0.42, 0.40), vec3f(0.36, 0.31, 0.21));
+  }
+  if (biome == 4) {          // icy: frosted rock and scree, near-white snow patches, cold blue cast
+    return array<vec3f, 4>(vec3f(0.58, 0.62, 0.60), vec3f(0.55, 0.56, 0.59), vec3f(0.76, 0.79, 0.83), vec3f(0.68, 0.71, 0.75));
+  }
+  if (biome == 5) {          // barren: scoured grey-brown rock, almost nothing growing
+    return array<vec3f, 4>(vec3f(0.45, 0.42, 0.32), vec3f(0.40, 0.34, 0.26), vec3f(0.38, 0.36, 0.34), vec3f(0.42, 0.38, 0.32));
+  }
+  if (biome == 6) {          // rainforest: saturated deep-jungle green, dark wet forest-floor dirt
+    return array<vec3f, 4>(vec3f(0.10, 0.36, 0.10), vec3f(0.20, 0.16, 0.10), vec3f(0.36, 0.38, 0.34), vec3f(0.26, 0.24, 0.16));
+  }
+  if (biome == 7) {          // savannah: dry golden grass, sun-baked red-brown earth
+    return array<vec3f, 4>(vec3f(0.62, 0.52, 0.20), vec3f(0.52, 0.34, 0.18), vec3f(0.55, 0.46, 0.32), vec3f(0.56, 0.42, 0.24));
+  }
+  if (biome == 8) {          // glacier: nothing but snow and ice — every channel pushed pale white-blue
+    return array<vec3f, 4>(vec3f(0.80, 0.86, 0.93), vec3f(0.70, 0.77, 0.86), vec3f(0.86, 0.91, 0.98), vec3f(0.72, 0.78, 0.87));
+  }
+  if (biome == 9) {          // volcanic: black basalt and dark ash, a warm rust-red dirt band
+    return array<vec3f, 4>(vec3f(0.10, 0.09, 0.09), vec3f(0.30, 0.13, 0.08), vec3f(0.13, 0.12, 0.12), vec3f(0.20, 0.17, 0.16));
+  }
+  if (biome == 10) {         // autumn: fall-foliage gold instead of green, warm leaf-litter dirt
+    return array<vec3f, 4>(vec3f(0.55, 0.38, 0.10), vec3f(0.40, 0.24, 0.12), vec3f(0.44, 0.40, 0.36), vec3f(0.50, 0.38, 0.22));
+  }
+  return array<vec3f, 4>(vec3f(0.24, 0.40, 0.13), vec3f(0.40, 0.32, 0.20), vec3f(0.45, 0.44, 0.42), vec3f(0.48, 0.40, 0.30));
+}
+// mask: channel gravel (terrain) / rock faces (bridge); h: water depth on top (0 for a bridge);
+// ao: baked ambient occlusion 0..1 (0 for terrain). Steep faces sample the noise on a vertical
+// plane instead of xz so a cliff or an arch's side wall doesn't streak.
+fn shadeTerrain(wp: vec3f, nIn: vec3f, mask: f32, h: f32, ao: f32) -> vec3f {
+  let n = normalize(nIn);
+  let slope = 1.0 - n.y;
+  let sun = max(dot(n, C.sunDir.xyz), 0.0);
+  let pal = biomeColors(i32(C.env.x));
+  let dark = 1.0 - 0.5 * ao;
+  let steep = smoothstep(0.5, 0.8, 1.0 - abs(n.y));
+  let uv = mix(wp.xz, vec2f(wp.x + 0.7 * wp.z, wp.y), steep);
+  if (C.dbg.z > 0.5) {
+    let n2 = noise2(uv * 2.3);
+    let grass = pal[0] * (0.8 + 0.4 * n2);
+    let rock  = pal[2] * (0.7 + 0.5 * n2);
+    var col = mix(grass, rock, smoothstep(0.3, 0.6, slope));
+    col = mix(col, rock, mask * 0.6);
+    let lit = applyExposure(col * dark * (0.4 + sun * 0.85));
+    return applyFog(lit, length(wp - C.camPos.xyz));
+  }
+  let n1 = noise2(uv * 0.35); let n2 = noise2(uv * 2.3); let n3 = noise2(uv * 0.08);
+  let grass = pal[0] * (0.72 + 0.5 * n1) * (0.85 + 0.3 * n2) * (0.85 + 0.3 * n3);
+  let dirt  = pal[1] * (0.8 + 0.4 * n2);
+  let rock  = pal[2] * (0.7 + 0.5 * n2);
+  var col = mix(grass, dirt, smoothstep(0.18, 0.38, slope));
+  col = mix(col, rock, smoothstep(0.42, 0.68, slope));
+  col = mix(col, mix(rock, vec3f(0.38,0.36,0.30), n1), smoothstep(14.0, 26.0, wp.y) * 0.7);
+  let gravel = mix(pal[3], vec3f(0.36, 0.36, 0.35), n2) * (0.8 + 0.3 * n1);
+  col = mix(col, mix(gravel, rock, smoothstep(0.25, 0.5, slope)), mask);
+  col = mix(col, col * 0.55, smoothstep(0.0, 0.05, h));
+  let amb = 0.35 + 0.15 * n.y;
+  var lit = applyExposure(col * dark * (amb + sun * 0.9));
+  return applyFog(lit, length(wp - C.camPos.xyz));
+}
+`;
+export const WGSL_TERRAIN = WGSL_RENDER_COMMON + WGSL_TERRAIN_SHADE + /* wgsl */`
+struct TVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(1) n: vec3f, @location(2) mask: f32, @location(3) h: f32 };
+@vertex fn vsTerrain(@builtin(vertex_index) vi: u32) -> TVOut {
+  let W = u32(C.prm.y); let dx = C.prm.w;
+  let i = i32(vi % W); let j = i32(vi / W);
+  let b = B[ci(i, j)];
+  let n = normalize(vec3f((B[ci(i-1,j)] - B[ci(i+1,j)]) / (2.0*dx), 1.0, (B[ci(i,j-1)] - B[ci(i,j+1)]) / (2.0*dx)));
+  let wp = vec3f((f32(i) + 0.5) * dx, b, (f32(j) + 0.5) * dx);
+  var o: TVOut;
+  o.pos = C.vp * vec4f(wp, 1.0); o.wp = wp; o.n = n; o.mask = M[ci(i, j)]; o.h = S[ci(i, j)].x;
+  return o;
+}
+@fragment fn fsTerrain(in: TVOut) -> @location(0) vec4f {
+  return vec4f(shadeTerrain(in.wp, in.n, in.mask, in.h, 0.0), 1.0);
+}
+`;
+// natural land bridges: a plain pos/normal/"colour" mesh (see buildLandBridgeMesh, meshes.js),
+// shaded as terrain so it's in the river's own biome palette; the vertex colour channels carry the
+// rock mask (.x) and baked ambient occlusion (.y) rather than an actual colour
+export const WGSL_BRIDGE = WGSL_RENDER_COMMON + WGSL_TERRAIN_SHADE + /* wgsl */`
+struct BVIn { @location(0) pos: vec3f, @location(1) nrm: vec3f, @location(2) col: vec3f };
+struct BVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(1) n: vec3f, @location(2) ex: vec3f };
+@vertex fn vsBridge(in: BVIn) -> BVOut {
+  var o: BVOut;
+  o.pos = C.vp * vec4f(in.pos, 1.0); o.wp = in.pos; o.n = in.nrm; o.ex = in.col;
+  return o;
+}
+@fragment fn fsBridge(in: BVOut) -> @location(0) vec4f {
+  return vec4f(shadeTerrain(in.wp, in.n, in.ex.x, 0.0, in.ex.y), 1.0);
+}
+`;
+
+/*
 struct TVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(1) n: vec3f, @location(2) mask: f32, @location(3) h: f32 };
 @vertex fn vsTerrain(@builtin(vertex_index) vi: u32) -> TVOut {
   let W = u32(C.prm.y); let dx = C.prm.w;
@@ -462,6 +569,7 @@ fn biomeColors(biome: i32) -> array<vec3f, 4> {
   return vec4f(lit, 1.0);
 }
 `;
+*/
 
 export const WGSL_WATER = WGSL_RENDER_COMMON + /* wgsl */`
 struct WVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(1) n: vec3f,

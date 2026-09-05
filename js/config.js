@@ -224,6 +224,7 @@ export const RIVERS = [
     meander: [[18, 170], [6, 61]], depth: 1.6, rocks: 10, rockR: [0.8, 2.0], emergent: 0.3, ledges: [],
     constrictions: 0, valleyH: 12, valleyScale: 70, seed: 11, len: 320,
     waterTint: [0.02, 0.17, 0.06], waterClarity: 1.0,   // emerald
+    landBridges: [{ z: 200, width: 7, widthVar: 0.35, height: 3.2, pillars: 2 }],
 
     forks: [{ startZ: 70, mergeZ: 83, splitLen: 22, mergeLen: 22, separation: 20, widthScale: 0.75, shares: [0.55, 0.45] }],
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 31 } },
@@ -248,6 +249,9 @@ export const RIVERS = [
     constrictions: 1, valleyH: 9, valleyScale: 65, seed: 14, len: 300,
     biome: 'desert', waterTint: [0.15, 0.12, 0.06], waterClarity: 0.6,
     pack: 'easyPack1',
+    landBridges: [{ z: 120, width: 10, widthVar: 0.25, height: 4, pillars: 1, roughness: 1.2 },
+      { z: 230, width: 4.5, widthVar: 0.5, height: 2.6, pillars: 0, rise: 0.9 }],
+
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 40 } },
 
     { name: 'Snake Creek', cls: 'Class II · easy', tier: 'easy', slope: 0.002, manning: 0.033, halfW: 6, widthVar: 0.2,art: 'img/Snake.png',
@@ -270,6 +274,7 @@ export const RIVERS = [
     ledges: [[300, 0.6]], constrictions: 2, valleyH: 9, valleyScale: 95, seed: 23, len: 300,
     biome: 'savannah', waterTint: [0.08, 0.13, 0.06], waterClarity: 1.3,   // open grassland, flat and broad
     timeOfDay: 'dawn',
+    landBridges: [{ z: 120, width: 8, widthVar: 0.3, height: 3.5, pillars: 1 }],
     boulderIslands: [{ z: 200, len: 8, widthFrac: 0.55 }],
     lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 32 } },
   { name: 'Boulder garden', cls: 'Class III · medium', tier: 'medium', slope: 0.004, manning: 0.034, halfW: 7, widthVar: 0.4,
@@ -557,41 +562,10 @@ export const OBSTACLES = {
       large:  { meshes: ['iceberg', 'icebergB'],     len: [4.0, 8.0] } },
   },
 };
-// landslide boulders: separate from the density-spawned drifting debris above — these hang
-// dormant at specific, river-authored points (R.landslides, e.g. `{ z: 150, side: 1 }`; side is
-// ±1 for which bank) instead of being continuously spawned. A dormant one starts rolling the
-// dice once the kayak gets within `triggerZ` (see triggerLandslides in main.js); once triggered
-// it's a normal stepObstacle body — groundPush (the same slope-pushes-a-grounded-object-toward-
-// water term every obstacle already has) is what actually carries it downhill, so there's no
-// separate rolling simulation to write or maintain, only the trigger and the one-shot wave
-// impulse where it first reaches the water. Medium/large only, per the brief — nothing smaller
-// reads as a real hazard. hitK is well above the debris system's own `large` (1.0): a dense rock
-// should reliably threaten a capsize on a solid hit, not just nudge the boat; lift is kept low so
-// it doesn't let the kayak gently ride up and over the way a log can.
+
 export const LANDSLIDE = {
-  // candidate spots are generated procedurally (see placeLandslides in main.js) from a river's
-  // R.landslideZone = { from, to, count, activeChance }: `count` candidates spread across [from,
-  // to] (in metres downstream), each independently kept as a real, rollable hazard this attempt
-  // with probability `activeChance` — the rest are simply never placed, not just hidden or
-  // disarmed, so there is nothing sitting there to spot in advance. That selection is reseeded
-  // from actual per-attempt randomness (Math.random(), not river.seed) every time the river loads,
-  // unlike everything else here — the point is that which handful of the 30-40 candidates are live
-  // changes on every attempt, so the player can't learn fixed positions from a previous run the
-  // way they can learn the (deliberately reproducible) terrain and rock layout. Only the *fall*
-  // each active one takes, once triggered, is still seeded/reproducible per candidate — see
-  // bakeBoulderTrajectory — since a run-to-run-identical roll for a spot that IS live isn't the
-  // part that needs hiding.
-  bankOffset: [2, 16],     // [m] beyond the channel's edge a candidate starts — a wide spread so
-                           // some are right at the water (short, quick rolls) and some sit well up
-                           // the slope (longer runs that build up real speed before they reach it)
-  // trigger distance is derived per boulder from its own baked fall duration (see
-  // bakeBoulderTrajectory/placeLandslides in main.js), not a flat number: assumedSpeed is a rough
-  // paddling pace used to convert "the fall takes N seconds" into "start it N seconds of travel
-  // out, plus leadTime to spare so the player sees it break loose instead of arriving as it's
-  // already landing" — clamped to [minTriggerZ, maxTriggerZ]. nearChance is the fraction of active
-  // candidates that instead skip that calculation and always trigger at nearTriggerZ — a close-
-  // range surprise that might genuinely land on the player, rather than something timed to be
-  // watched falling from a distance. Mixing both on one river is the point, not either alone.
+ 
+  bankOffset: [2, 16],     
   assumedSpeed: 3.2, leadTime: 1.5, minTriggerZ: 15, maxTriggerZ: 90, nearTriggerZ: 14, nearChance: 0.4,
   // wave impulse injected into the water sim on water entry, scaled by how fast the boulder is
   // actually moving when it gets there (see injectSplash) — splashHeight/splashRadius are the
@@ -605,25 +579,21 @@ export const LANDSLIDE = {
   // roughly every dustInterval seconds while still visibly rolling on dry ground beforehand
   splashCol: [0.85, 0.92, 0.98], dustCol: [0.5, 0.4, 0.27], dustInterval: 0.22,
   deepWater: 0.9,          // [m] water depth beyond which a boulder stops rolling and settles —
-                           // permanently, as a new underwater rock (see updateObstacles in main.js)
-                           // — not despawned; landslides should only be placed on a river with a
-                           // channel deep enough that this is actually reachable
-  // the fall itself is precomputed once per boulder at load time (bakeBoulderTrajectory in
-  // main.js) and replayed at trigger time rather than simulated live — see triggerLandslides.
-  // rollAccel is a genuine g·sinθ gravity-along-slope term (θ from the local terrain normal), so
-  // it's left near real gravity; rollFric is velocity relaxation (1/s, a bit higher on shallow
-  // ground so it can actually settle instead of creeping forever); rollWobble is a small sideways
-  // perturbation each step so the path isn't a perfectly straight line down the steepest gradient.
-  // downstreamBias (0 up to this, rolled once per candidate) adds a little extra +z pull on top of
-  // the terrain's own gradient, so some — not all — candidates visibly drift downstream as they
-  // fall rather than always cutting straight across to the near bank; capped low enough that it
-  // still happens in plain sight of wherever it was triggered from, not somewhere the player never sees.
+
   rollAccel: 9.0, rollFric: 0.8, rollWobble: 1.3, rollVmax: 9, downstreamBias: 1.4,
   bakeDt: 1 / 60, bakeMaxSteps: 900, settleSpeed: 0.05, settleTime: 1.2,
   // len ranges overlap a bit at the medium/large boundary on purpose — a continuous-feeling size
   // spread rather than two visibly-clustered clumps, while hitK/mass still step up with the class
   medium: { meshes: ['boulderMedium'], len: [1.3, 2.6], density: 2600, hitK: 1.6, lift: 0.03, samples: 3 },
   large:  { meshes: ['boulderLarge'],  len: [2.6, 4.8], density: 2700, hitK: 2.6, lift: 0.02, samples: 4 },
+};
+
+export const LAND_BRIDGE = {
+  width: 6, widthVar: 0.3, height: 3, pillars: 1, thickness: 1.3, rise: 0.5, roughness: 1, wander: 1, flare: 0.8,
+  minExt: 4, maxExt: 22,       // [m] how far the deck is anchored into each bank (walks out until the
+                               // bank reaches deck level, within these bounds; the abutment terrain is
+                               // then shaped to meet it exactly)
+  maxPillars: 8, minHeight: 1.5,
 };
 export const CHARACTERS = {
   ronja: { name: 'Ronja', title: 'the Technician',

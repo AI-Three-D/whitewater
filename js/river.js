@@ -1,4 +1,4 @@
-import { GRID, SIM, PUTIN, RIVER_SIDE_MARGIN } from './config.js';
+import { GRID, SIM, PUTIN, RIVER_SIDE_MARGIN, LAND_BRIDGE } from './config.js';
 import { mulberry32, vnoise2, fbm2, clamp, smoothstep, softClamp } from './math.js';
 
 function thermalErode(b, mask, W, L, iters, talus, rate) {
@@ -40,6 +40,39 @@ export function nearestChan(chans, x) {
     if (ad < bestAd) { bestAd = ad; best = chans[k]; }
   }
   return best;
+}
+// Startup validation of a river's land-bridge config (see LAND_BRIDGE in config.js). Throws with a
+// message naming the river and field, so a bad level definition is caught on load, not mid-run.
+export function validateRiverConfig(R) {
+  const bridges = R.landBridges;
+  if (bridges == null) return;
+  if (!Array.isArray(bridges)) throw new Error(`River "${R.name}": landBridges must be an array`);
+  if (!bridges.length) return;
+  if (R.obstacles) throw new Error(`River "${R.name}": landBridges cannot be combined with floating obstacles (R.obstacles) — drifting logs and ice would jam the passages under the bridge. Remove one of the two.`);
+  const Lw = GRID.L * GRID.dx, finishZ = Math.min(R.len ?? (Lw - 25), Lw - 25);
+  bridges.forEach((cfg, k) => {
+    const tag = `River "${R.name}": landBridges[${k}]`;
+    const num = (key, lo, hi) => {
+      const v = cfg[key] ?? LAND_BRIDGE[key];
+      if (typeof v !== 'number' || !(v >= lo && v <= hi)) throw new Error(`${tag}: ${key} must be a number in [${lo}, ${hi}] (got ${v})`);
+      return v;
+    };
+    const z = num('z', PUTIN + 25, finishZ - 10);
+    const width = num('width', 1.5, 40);
+    num('widthVar', 0, 1); num('height', LAND_BRIDGE.minHeight, 30); num('thickness', 0.4, 8);
+    num('rise', 0, 5); num('roughness', 0, 2.5); num('wander', 0, 3); num('flare', 0, 2);
+    const pillars = cfg.pillars ?? LAND_BRIDGE.pillars;
+    if (!Number.isInteger(pillars) || pillars < 0 || pillars > LAND_BRIDGE.maxPillars)
+      throw new Error(`${tag}: pillars must be an integer from 0 to ${LAND_BRIDGE.maxPillars} (got ${pillars})`);
+    for (const fk of R.forks || []) if (z > fk.startZ - (fk.splitLen ?? 25) - 10 && z < fk.mergeZ + (fk.mergeLen ?? 25) + 10)
+      throw new Error(`${tag}: z=${z} overlaps a fork (${fk.startZ}–${fk.mergeZ} m) — a land bridge needs a single channel`);
+    if (R.pond && Math.abs(z - R.pond.z) < R.pond.len / 2 + 20) throw new Error(`${tag}: z=${z} is too close to the pond at ${R.pond.z} m`);
+    for (const wf of R.waterfalls || []) if (Math.abs(z - wf.z) < 15) throw new Error(`${tag}: z=${z} is too close to the waterfall at ${wf.z} m`);
+    bridges.forEach((o, k2) => {
+      if (k2 > k && Math.abs((o.z ?? 0) - z) < width / 2 + (o.width ?? LAND_BRIDGE.width) / 2 + 14)
+        throw new Error(`${tag} and landBridges[${k2}] overlap — keep their z at least ${(width / 2 + (o.width ?? LAND_BRIDGE.width) / 2 + 14).toFixed(0)} m apart`);
+    });
+  });
 }
 
 export function generateRiver(R) {
@@ -240,6 +273,107 @@ export function generateRiver(R) {
       if (rzv > b[jj * W + ii]) b[jj * W + ii] = rzv;
     }
   }
+    // ---------- natural land bridges (R.landBridges — see LAND_BRIDGE in config.js) ----------
+  // Each bridge is a descriptor of *functions* (deck top/underside, centreline, width, pillar
+  // radius profile) shared by the mesh builder (meshes.js), vegetation placement, pickups and the
+  // kayak/rucksack collision code (main.js) — one definition, no two pieces of code disagreeing
+  // about where the rock is. The terrain is touched here in two ways: pillar footprints are carved
+  // into the bed above the water surface so the shallow-water sim flows round them, and each
+  // abutment is reshaped into a plateau at deck level so the deck meets the bank flush.
+  const bAt = (x, z) => {
+    const gx = x / dx - 0.5, gz = z / dx - 0.5, x0 = Math.floor(gx), z0 = Math.floor(gz), fx = gx - x0, fz = gz - z0;
+    const f = (i, jj) => b[clamp(jj, 0, L - 1) * W + clamp(i, 0, W - 1)];
+    return (f(x0, z0) * (1 - fx) + f(x0 + 1, z0) * fx) * (1 - fz) + (f(x0, z0 + 1) * (1 - fx) + f(x0 + 1, z0 + 1) * fx) * fz;
+  };
+  // steep-walled plateau (pow 6, like main.js's carveBoulderIntoBed) — most of the footprint reads
+  // as genuinely dry to the sim's `rock` term, not just a pinprick at the centre
+  const carveFoot = (x, z, r, top) => {
+    const local = bAt(x, z), t = Math.max(top, local + 0.1);
+    const i0 = clamp(Math.floor((x - r) / dx), 0, W - 1), i1 = clamp(Math.ceil((x + r) / dx), 0, W - 1);
+    const j0 = clamp(Math.floor((z - r) / dx), 0, L - 1), j1 = clamp(Math.ceil((z + r) / dx), 0, L - 1);
+    for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) {
+      const cx = (ii + 0.5) * dx, cz = (jj + 0.5) * dx, dist = Math.hypot(cx - x, cz - z);
+      if (dist >= r) continue;
+      const idx = jj * W + ii;
+      b[idx] = Math.max(b[idx], t - (t - local) * Math.pow(dist / r, 6));
+    }
+  };
+  // natural column: flared base, slight waist, flared capital where it meets the arch. fy = 0 at
+  // the bed, 1 at the deck underside. Shared by the mesh and the collision radius at water level.
+  const pillarR = (pl, fy) => pl.rMid * (1 + 0.55 * Math.pow(1 - fy, 3) + 0.3 * Math.pow(fy, 5) - 0.12 * Math.sin(Math.PI * fy));
+  const bridges = [];
+  (R.landBridges || []).forEach((cfg0, bk) => {
+    const cfg = { ...LAND_BRIDGE, ...cfg0 };
+    const bseed = seed + 700 + bk * 37 + (cfg.seed ?? 0);
+    const brng = mulberry32(bseed);
+    const zb = cfg.z, chan = rows[clamp(Math.floor(zb / dx), 0, L - 1)][0];
+    const eta = chan.eta, xL = chan.c - chan.hw, xR = chan.c + chan.hw;
+    const rough = cfg.roughness, thickMid = cfg.thickness, yDeck = eta + cfg.height + thickMid;
+    // abutments: walk out from the water's edge until the bank is about level with the deck
+    const findEnd = (x0, dir) => { let ext = cfg.minExt; while (ext < cfg.maxExt && bAt(x0 + dir * ext, zb) < yDeck - 0.3) ext += dx; return ext; };
+    const xa = Math.max(2, xL - findEnd(xL, -1)), xb = Math.min(Wd - 2, xR + findEnd(xR, 1)), span = xb - xa;
+    // s = 0 … 1 along the span (left abutment → right), u = -1 … 1 across the deck
+    const hump = s => cfg.rise * Math.pow(Math.sin(Math.PI * s), 1.6);
+    const zc = s => zb + cfg.wander * span * 0.04 * (vnoise2(s * 2.1 + 0.3, 2.5, bseed) * 2 - 1);
+    const flare = s => 1 + cfg.flare * (Math.pow(1 - smoothstep(0, 0.3, s), 1.5) + Math.pow(smoothstep(0.7, 1, s), 1.5));
+    const hwB = s => (cfg.width / 2) * Math.max(0.35, 1 + cfg.widthVar * (vnoise2(s * 3.3 + 5.2, 0.7, bseed + 1) * 2 - 1)) * flare(s)
+                   * (1 + 0.07 * rough * (vnoise2(s * 13 + 1, 4.4, bseed + 9) * 2 - 1));      // craggy edge
+    const detail = s => smoothstep(0, 0.12, s) * (1 - smoothstep(0.88, 1, s));                 // surface detail fades into the plateaus
+    const topAt = (s, u, x, z) => yDeck + hump(s) - 0.08 * u * u
+      + detail(s) * rough * (0.22 * (fbm2(x * 0.35, z * 0.35, 3, bseed + 2) - 0.5) * 2 + 0.05 * (vnoise2(x * 1.8, z * 1.8, bseed + 3) * 2 - 1));
+    // arch: thin at mid-span, thickening toward the banks until the underside sinks below the
+    // water level into the abutments — the classic natural-arch springing
+    const thickEnd = thickMid + cfg.height + 1.5;
+    const thick = s => thickMid + (thickEnd - thickMid) * Math.pow(Math.abs(2 * s - 1), 2.4);
+    const bottomAt = s => yDeck + hump(s) - thick(s);
+    const clearAt = s => bottomAt(s) - 0.05 - rough * (0.22 + 0.07 * thick(s));   // noise hangs this far below the nominal underside
+    const at = (x, z) => {
+      const s = (x - xa) / span; if (s < 0 || s > 1) return null;
+      const u = (z - zc(s)) / hwB(s); if (Math.abs(u) > 1) return null;
+      return { s, u, top: topAt(s, u, x, z), bottom: clearAt(s) };
+    };
+    // pillars, spread across the wet span with jitter, trimmed if the passages would get too tight
+    const wet = xR - xL;
+    let nP = cfg.pillars;
+    while (nP > 0 && wet / (nP + 1) < 4.7) nP--;
+    if (nP < cfg.pillars) console.warn(`River "${R.name}": land bridge at z=${zb} — channel only ${wet.toFixed(1)} m wide, pillars reduced from ${cfg.pillars} to ${nP} to keep the passages open`);
+    const pillars = [], gap = wet / (nP + 1);
+    for (let k = 0; k < nP; k++) {
+      const frac = (k + 1) / (nP + 1) + (brng() - 0.5) * 0.45 / (nP + 1);
+      const px = xL + frac * wet, s = (px - xa) / span;
+      const pz = zc(s) + (brng() - 0.5) * 0.8 * hwB(s);
+      const yBase = bAt(px, pz) - 0.4, yTop = bottomAt(s) + 0.6, h = yTop - yBase;   // sunk into the bed, poked into the arch
+      const rMid = clamp(0.16 * h + 0.35, 0.5, Math.min(2.0, 0.17 * gap)) * (0.85 + 0.3 * brng());
+      const lean = [(brng() - 0.5) * 0.1, (brng() - 0.5) * 0.1], ell = brng() * 0.25;   // slight lean; elongated along the flow
+      const pl = { x: px, z: pz, yBase, yTop, h, rMid, ell, lean, twist: (brng() - 0.5) * 1.2, seed: bseed + 50 + k };
+      const hW = clamp(eta - yBase, 0, h);
+      pl.cx = px + lean[0] * hW; pl.cz = pz + lean[1] * hW;                          // centre at the water surface
+      pl.rWater = pillarR(pl, hW / Math.max(h, 0.1)) * (1 + ell) * (1 + 0.18 * rough) + 0.1;   // collision radius at water level
+      pillars.push(pl);
+    }
+    for (const pl of pillars) carveFoot(pl.cx, pl.cz, pl.rWater * 0.9, eta + 0.6);
+    // abutment plateaus: terrain eased to deck level around each end — raised fully where it's
+    // lower, cut only partly where a hill is higher (the deck then merges into the slope). Kept
+    // off the channel via the bank distance m, so it never dams the river.
+    for (const [xe, s] of [[xa, 0], [xb, 1]]) {
+      const ze = zc(s), Rm = hwB(s) * 1.5 + 5;
+      const i0 = clamp(Math.floor((xe - Rm) / dx), 0, W - 1), i1 = clamp(Math.ceil((xe + Rm) / dx), 0, W - 1);
+      const j0 = clamp(Math.floor((ze - Rm) / dx), 0, L - 1), j1 = clamp(Math.ceil((ze + Rm) / dx), 0, L - 1);
+      for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) {
+        const cx = (ii + 0.5) * dx, cz = (jj + 0.5) * dx, d = Math.hypot(cx - xe, cz - ze);
+        if (d >= Rm) continue;
+        const ch = nearestChan(rows[jj], cx), m = (Math.abs((cx - ch.c) / ch.hw) - 1) * ch.hw;
+        const w = (1 - smoothstep(0.45 * Rm, Rm, d)) * smoothstep(0.3, 2.5, m);
+        if (w <= 0) continue;
+        const idx = jj * W + ii, target = yDeck - 0.03 + 0.06 * (vnoise2(cx * 1.3, cz * 1.3, bseed + 4) - 0.5);
+        const dh = target - b[idx];
+        b[idx] += dh * w * (dh > 0 ? 1 : 0.7);
+      }
+    }
+    const maxHw = (cfg.width / 2) * (1 + cfg.widthVar) * (1 + cfg.flare) * 1.07 + cfg.wander * span * 0.04;
+    bridges.push({ cfg, z: zb, xa, xb, span, eta, yDeck, zc, hwB, topAt, bottomAt, thick, clearAt, at, pillars, pillarR, seed: bseed,
+      reach: maxHw + 2.5, zMin: zb - maxHw - 1, zMax: zb + maxHw + 1 });
+  });
   const state = new Float32Array(N * 4), kArr = new Float32Array(N);
   for (let j = 0; j < L; j++) {
     const chans = rows[j];
@@ -250,5 +384,5 @@ export function generateRiver(R) {
       state[id * 4 + 2] = h > 0 ? Math.min(0.8 * Math.pow(h, 0.6667) * Math.sqrt(R.slope) / R.manning, 4) : 0;
     }
   }
-  return { R, rows, b, mask, state, kArr, centerAt, inEta: rows[0][0].eta, inVelScale, Q, finishZ, seed };
+  return { R, rows, b, mask, state, kArr, centerAt, inEta: rows[0][0].eta, inVelScale, Q, finishZ, seed, bridges };
 }

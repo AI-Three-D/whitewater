@@ -1,13 +1,14 @@
 'use strict';
 import { GRID, SIM, RENDER, BIOME_SKY, TIME_OF_DAY, PARTS, VEG, QUALITY, QUALITY_LEVELS, KAYAK, RIVERS, RIVERS_HIDDEN, TIERS, PICKUPS, COLLECTIBLES, SPECIAL_ITEMS, MAP_ITEM, RUCKSACK, OBSTACLES, LANDSLIDE, CHARACTERS, CRAFTS, ITEMS, UPGRADES, TRAINING, RIVER_PACKS, STORE_LISTING, STAMINA, SKILL, BIOMES, BIOME_IDS, MOBILE } from './config.js';
+import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW, WGSL_BRIDGE } from './shaders.js';
+import { generateRiver, nearestChan, validateRiverConfig } from './river.js';
+import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh, buildObstacleMeshes, buildLandBridgeMesh } from './meshes.js';
 
 
-import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW } from './shaders.js';
 import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec,
   mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, mat4Compose, mat4TRS, mat4Transform,
   mulberry32, clamp, smoothstep } from './math.js';
-import { generateRiver, nearestChan } from './river.js';
-import { MeshBuilder, addCylinder, buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh, buildObstacleMeshes } from './meshes.js';
+
 import { loadProfile, newProfile, clearProfile, saveProfile, character, canRaise, anyRaisable,
   awardRun, spendPoint, discardPending, pointsForLevel, unlockHidden,
   craftOf, itemCount, canBuyItem, canBuyCraft, buyItem, buyCraft, selectCraft, useItem,
@@ -20,7 +21,7 @@ addEventListener('unhandledrejection', e => showErr('Promise error: ' + ((e.reas
 const $ = id => document.getElementById(id);
 // bumped by hand on every edit — lets a stale/cached page or a not-yet-reloaded tab be spotted
 // on sight instead of chasing "am I even testing the current code" through several rounds
-const BUILD = 'build 29';
+const BUILD = 'build 30';
 { const v = document.getElementById('ver'); if (v) v.textContent = BUILD; }
 // ---------- platform ----------
 // modern-browser signals only: a touch screen (maxTouchPoints) whose primary pointer is coarse
@@ -94,6 +95,10 @@ applyQuality(quality);
 
 (async function main() {
   const fail = t => { showErr(t); $('menu').style.display = 'none'; };
+  // level-config sanity (land bridges vs floating obstacles etc.) — see validateRiverConfig
+  try { for (const R of [...RIVERS, ...RIVERS_HIDDEN]) validateRiverConfig(R); }
+  catch (e) { return fail('Level configuration error:\n' + e.message); }
+  
   if (!navigator.gpu) return fail('WebGPU is not available.\nUse Chrome/Edge 113+ (chrome://flags/#enable-unsafe-webgpu on Linux).');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) return fail('No WebGPU adapter found.');
@@ -204,6 +209,7 @@ applyQuality(quality);
   const pickupPipe = mkRender(WGSL_MESH, 'vsMesh', 'fsMeshFade', { buffers: meshBuffers, blend: alphaBlend, depthWrite: false });
   // floating obstacles: opaque lighting, depth-written, but alpha-blended so they can fade out
   const obstPipe = mkRender(WGSL_MESH, 'vsMesh', 'fsMeshAlpha', { buffers: meshBuffers, blend: alphaBlend });
+  const bridgePipe = mkRender(WGSL_BRIDGE, 'vsBridge', 'fsBridge', { buffers: [meshBuffers[0]] });
   
   // ---------- GPU meshes ----------
   const gpuMesh = mb => { const d = mb.data(); const vbuf = mkBuf(d.byteLength, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST); 
@@ -221,6 +227,7 @@ applyQuality(quality);
   const obstMeshes = {};
   for (const [k, v] of Object.entries(buildObstacleMeshes())) obstMeshes[k] = { ...gpuMesh(v.mb), len: v.len, rad: v.rad, draft: v.draft, vrad: v.vrad, vol: v.vol };
   const obstInstBufs = {};   // per mesh name, sized to the active quota in placeObstacles()
+  let bridgeGpu = [];   // one {vbuf, count, zMin, zMax} per land bridge of the current river (see startRun)
 
   // small spark burst shown when a paddle/coin is collected
   const sparkMesh = gpuMesh(buildSparkMesh());
@@ -578,7 +585,8 @@ applyQuality(quality);
         if (unlocked) {
           const extra = (R.forks && R.forks.length ? ` · ${R.forks.length} fork${R.forks.length > 1 ? 's' : ''}` : '')
                       + (R.waterfalls && R.waterfalls.length ? ' · waterfall' : '')
-                      + (R.obstacles ? ' · ' + Object.keys(R.obstacles).map(k => (OBSTACLES.kinds[k] || {}).label || k).join(' + ') : '');
+                      + (R.obstacles ? ' · ' + Object.keys(R.obstacles).map(k => (OBSTACLES.kinds[k] || {}).label || k).join(' + ') : '')
+                      + (R.landBridges && R.landBridges.length ? ` · ${R.landBridges.length > 1 ? R.landBridges.length + ' land bridges' : 'land bridge'}` : '');
           const best = profile.best[R.name];
           d.innerHTML = `${artSlot('riv-thumb', R.name + ' art', R.art)}
             <h3>${R.name}</h3><small>gradient ${(R.slope * 100).toFixed(1)} % · ${R.rocks} boulders · ${R.ledges.length} ledges${extra}</small>
@@ -782,6 +790,9 @@ applyQuality(quality);
   // to be tested at bow/centre/stern or the ends visibly sink into it, and it's what lets a hit
   // swing the boat parallel to the log instead of stopping it dead
   const OBST_HULL_PTS = [[0, -0.06, 1.3], [0, -0.06, 0], [0, -0.06, -1.3]];
+    // kayak-local points tested against a land bridge's arch underside: the paddler's head and the
+  // bow/stern deck — hitting the rock ceiling shoves the boat down and scrapes it, pitching it
+  const BRIDGE_CEIL_PTS = [[0, 1.05, 0.05], [0, 0.2, 1.55], [0, 0.2, -1.55]];
   // ============================================================================
   //  KAYAK
   // ============================================================================
@@ -944,6 +955,35 @@ applyQuality(quality);
           if (-vn > 0.8 && ob.hitK > 0.5) this.hitFlash = 1;
         }
       }
+
+      for (const br of river.bridges) {
+        if (Math.abs(p[2] - br.z) > br.reach + 3) continue;
+        for (const pl of br.pillars) {
+          const Rr = pl.rWater + OBSTACLES.hullR;
+          for (const lp of K.collPts) {
+            const pw = v3.add(p, R(lp));
+            let ddx = pw[0] - pl.cx, ddz = pw[2] - pl.cz, d = Math.hypot(ddx, ddz);
+            if (d >= Rr) continue;
+            if (d < 1e-4) { ddx = 1; ddz = 0; d = 1e-4; }
+            const nx = ddx / d, nz = ddz / d, pen = Rr - d, vp = pointVel(pw), vn = vp[0] * nx + vp[2] * nz;
+            const fn = K.collK * pen - K.collDamp * Math.min(vn, 0);
+            let fc = [nx * fn, 0, nz * fn];
+            fc = v3.sub(fc, v3.scale([vp[0] - vn * nx, 0, vp[2] - vn * nz], K.collFric));
+            addForceAt(pw, fc);
+            if (-vn > 0.8) this.hitFlash = 1;
+          }
+        }
+        for (const lp of BRIDGE_CEIL_PTS) {
+          const pw = v3.add(p, R(lp)), d = br.at(pw[0], pw[2]);
+          if (!d || pw[1] <= d.bottom) continue;
+          const pen = pw[1] - d.bottom, vp = pointVel(pw);
+          let fc = [0, -(K.collK * pen + K.collDamp * Math.max(vp[1], 0)), 0];
+          fc = v3.sub(fc, v3.scale([vp[0], 0, vp[2]], K.collFric * 2));   // scraping along the rock
+          addForceAt(pw, fc);
+          if (vp[1] > 0.5 || pen > 0.15) this.hitFlash = 1;
+        }
+      }
+
       // ---- roll: inverted pendulum; skill lowers instability and raises hip torque ----
       const Tl = qRotate(qConj(q), T);
       const grace = runTime < K.startGrace ? (1 - runTime / K.startGrace) : 0;
@@ -1002,25 +1042,38 @@ applyQuality(quality);
   function placeVegetation() {
     const rng = mulberry32(river.seed + 99);
     const biome = BIOMES[river.R.biome || 'alpine'];
-    // every prop mesh gets a (possibly empty) list so switching biomes always clears out
-    // whatever the previous river's biome placed, not just the roles this biome still uses
     const lists = Object.fromEntries(Object.keys(vegMeshes).filter(k => k !== 'pole').map(k => [k, []]));
     const caps = Object.fromEntries(Object.entries(VEG.caps).map(([k, v]) => [k, Math.round(v * biome.vegDensity[k])]));
-    const push = (role, x, z) => {
-      
+    // yOverride: a prop standing on a land bridge's deck rather than on the terrain heightfield
+    const push = (role, x, z, yOverride) => {
       const spec = biome.props[role];
       const meshName = Array.isArray(spec) ? spec[Math.floor(rng() * spec.length)] : spec;
       if (!meshName || lists[meshName].length >= caps[role]) return;
       const [lo, hi] = ROLE_SIZE[role], sc = lo + rng() * (hi - lo);
       const g = 0.8 + 0.4 * rng(), tint = ROLE_TINT[role](g), bt = biome.vegTint[role];
-      const y = terrainH(x, z) - 0.05;
+      const y = (yOverride ?? terrainH(x, z)) - 0.05;
       lists[meshName].push({ z, m: mat4TRS([x, y, z], rng() * 6.2832, [sc, sc * (0.85 + 0.3 * rng()), sc]), tint: [tint[0] * bt[0], tint[1] * bt[1], tint[2] * bt[2], 1] });
     };
+    // land bridges first, before the open-ground pass can exhaust a role's cap: the deck top is
+    // sampled with the biome's open-ground mix at about the same density as the rest of the world
+    // (0.6 tries/m²), kept a little inside the rim so nothing overhangs the edge
+    for (const br of river.bridges) {
+      const tries = Math.round(br.span * br.cfg.width * (1 + br.cfg.flare * 0.5) * 0.6);
+      for (let n = 0; n < tries; n++) {
+        const s = 0.03 + rng() * 0.94, u = (rng() * 2 - 1) * 0.85;
+        const x = br.xa + s * br.span, z = br.zc(s) + u * br.hwB(s);
+        const role = pickRole(biome.mix.open, rng());
+        if (role) push(role, x, z, br.topAt(s, u, x, z));
+      }
+    }
     for (let n = 0; n < VEG.attempts; n++) {
       const x = rng() * W * dx, z = rng() * L * dx, j = clamp(Math.floor(z / dx), 0, L - 1), row = nearestChan(river.rows[j], x);
       const ad = Math.abs((x - row.c) / row.hw);
       if (ad < 1.25) continue;
       const y = terrainH(x, z); if (y < row.eta + 0.35) continue;
+      // nothing under a bridge deck (a tree poking up through the arch) — the deck itself was
+      // populated above
+      if (river.bridges.some(br => Math.abs(z - br.z) <= br.reach && br.at(x, z))) continue;
       const nrm = terrainN(x, z), m = (ad - 1) * row.hw, r = rng();
       const mixTable = nrm[1] < 0.72 ? biome.mix.steep : m < 3 ? biome.mix.bank : biome.mix.open;
       const role = pickRole(mixTable, r);
@@ -1032,6 +1085,16 @@ applyQuality(quality);
        poles.push({ z, m: mat4TRS([x, terrainH(x, z), z], s > 0 ? Math.PI : 0, [1, 1, 1]), tint: [1, 1, 1, 1] }); }
     writeInstances('pole', poles);
   }
+    // a pickup spot that would sit inside a land bridge (under the arch where the hovering/bobbing
+  // item would poke into the rock, or inside a pillar) — placement re-rolls such spots
+  function bridgeBlocked(x, z) {
+    for (const br of river.bridges) {
+      if (Math.abs(z - br.z) > br.reach) continue;
+      if (br.at(x, z) || br.at(x, z - 1.5) || br.at(x, z + 1.5)) return true;
+      for (const pl of br.pillars) if (Math.hypot(x - pl.cx, z - pl.cz) < pl.rWater + 1.2) return true;
+    }
+    return false;
+  }
   // spinning paddle (xp) and coin pickups, scattered along the navigable channel
   function placePickups() {
     const total = PICKUPS.countForTier(river.R.tier);
@@ -1041,10 +1104,14 @@ applyQuality(quality);
       const rng = mulberry32(river.seed + seedOff), flagRng = mulberry32(river.seed + seedOff + 1);
       const list = [];
       for (let n = 0; n < total; n++) {
-        const z = 45 + rng() * (river.finishZ - 65);
-        const j = clamp(Math.floor(z / dx), 0, L - 1), chans = river.rows[j];
-        const chan = chans[Math.floor(rng() * chans.length)];
-        const x = clamp(chan.c + (rng() * 1.4 - 0.7) * chan.hw, 1, W * dx - 1);
+        let x = 0, z = 0;
+        for (let tries = 0; tries < 12; tries++) {
+          z = 45 + rng() * (river.finishZ - 65);
+          const j = clamp(Math.floor(z / dx), 0, L - 1), chans = river.rows[j];
+          const chan = chans[Math.floor(rng() * chans.length)];
+          x = clamp(chan.c + (rng() * 1.4 - 0.7) * chan.hw, 1, W * dx - 1);
+          if (!bridgeBlocked(x, z)) break;
+        }
         list.push({ x, z, floating: false, spinPh: rng() * 6.2832, bobPh: rng() * 6.2832, alive: true, collected: false, seenT: -1 });
       }
       const flags = Array.from({ length: total }, (_, i) => i < floatCount);
@@ -1105,6 +1172,20 @@ applyQuality(quality);
       it.vz += (targV - it.vz) * k;
       it.x = clamp(it.x + it.vx * dtReal, 1, W * dx - 1);
       it.z = clamp(it.z + it.vz * dtReal, 0, river.finishZ + 15);
+
+      for (const br of river.bridges) {
+        if (Math.abs(it.z - br.z) > br.reach) continue;
+        for (const pl of br.pillars) {
+          const Rr = pl.rWater + 0.35;
+          let ddx = it.x - pl.cx, ddz = it.z - pl.cz, d = Math.hypot(ddx, ddz);
+          if (d >= Rr) continue;
+          if (d < 1e-3) { ddx = 1; ddz = 0; d = 1; }
+          const nx = ddx / d, nz = ddz / d;
+          it.x = pl.cx + nx * Rr; it.z = pl.cz + nz * Rr;
+          const vn = it.vx * nx + it.vz * nz;
+          if (vn < 0) { it.vx -= vn * nx; it.vz -= vn * nz; }
+        }
+      }
     }
   }
   // dropped rucksacks aren't laid out along the river up front — up to RUCKSACK.count of them
@@ -1126,10 +1207,14 @@ applyQuality(quality);
     const ahead = Math.random() < RUCKSACK.aheadFrac;
     const dist = ahead ? RUCKSACK.spawnAheadMin + Math.random() * (RUCKSACK.spawnAheadMax - RUCKSACK.spawnAheadMin)
                         : RUCKSACK.spawnBehindMin + Math.random() * (RUCKSACK.spawnBehindMax - RUCKSACK.spawnBehindMin);
-    const z = clamp(kayak.p[2] + (ahead ? dist : -dist), 20, river.finishZ - 10);
-    const j = clamp(Math.floor(z / dx), 0, L - 1), chans = river.rows[j];
-    const chan = chans[Math.floor(Math.random() * chans.length)];
-    const x = clamp(chan.c + (Math.random() * 1.4 - 0.7) * chan.hw, 1, W * dx - 1);
+    let x = 0, z = 0;
+    for (let tries = 0; tries < 12; tries++) {
+      z = clamp(kayak.p[2] + (ahead ? dist : -dist) + (tries ? (Math.random() - 0.5) * 6 : 0), 20, river.finishZ - 10);
+      const j = clamp(Math.floor(z / dx), 0, L - 1), chans = river.rows[j];
+      const chan = chans[Math.floor(Math.random() * chans.length)];
+      x = clamp(chan.c + (Math.random() * 1.4 - 0.7) * chan.hw, 1, W * dx - 1);
+      if (!bridgeBlocked(x, z)) break;
+    }
     // launched downstream faster than the current, held there for RUCKSACK.spawnBoostDist metres
     // of actual travel, then eased back down to normal floating speed by the same drag relaxation
     // in updateRucksackDrift — so it visibly overtakes and pulls ahead of a slowed-down player
@@ -1148,10 +1233,16 @@ applyQuality(quality);
     const tier = river.R.tier;
     const isCarrier = !river.R.hidden && profile.mapCarrier[tier] === river.R.name && !profile.unlockedHidden[tier];
     if (!isCarrier) { river.pickups.map = []; return; }
-    const z = 45 + Math.random() * (river.finishZ - 65);
-    const j = clamp(Math.floor(z / dx), 0, L - 1), chans = river.rows[j];
-    const chan = chans[Math.floor(Math.random() * chans.length)];
-    const x = clamp(chan.c + (Math.random() * 1.4 - 0.7) * chan.hw, 1, W * dx - 1);
+    let x = 0, z = 0;
+    for (let tries = 0; tries < 12; tries++) {
+      z = 45 + Math.random() * (river.finishZ - 65);
+      const j = clamp(Math.floor(z / dx), 0, L - 1), chans = river.rows[j];
+      const chan = chans[Math.floor(Math.random() * chans.length)];
+      x = clamp(chan.c + (Math.random() * 1.4 - 0.7) * chan.hw, 1, W * dx - 1);
+      if (!bridgeBlocked(x, z)) break;
+    }
+
+
     river.pickups.map = [{ x, z, floating: false, spinPh: Math.random() * 6.2832, bobPh: Math.random() * 6.2832, alive: true, collected: false, seenT: -1 }];
   }
   // ---------- floating obstacles ----------
@@ -1729,6 +1820,8 @@ applyQuality(quality);
       device.queue.writeBuffer(terrainBuf, 0, river.b); device.queue.writeBuffer(maskBuf, 0, river.mask);
       placeVegetation();
       placePickups();
+      for (const bm of bridgeGpu) bm.vbuf.destroy();
+      bridgeGpu = river.bridges.map(br => ({ ...gpuMesh(buildLandBridgeMesh(br)), zMin: br.zMin, zMax: br.zMax }));
     }
     for (const kind of river.pickupKinds) if (kind !== 'rucksack') for (const it of river.pickups[kind]) { it.alive = true; it.collected = false; it.seenT = -1; }
     // rucksacks aren't pre-placed, so a restart deactivates every slot instead of reviving it in
@@ -1828,6 +1921,13 @@ applyQuality(quality);
       const back = (camMode === 2 ? 16 : 8.5) * cs, up = (camMode === 2 ? 11 : 3.4) * cs;
       const want = v3.add(v3.sub(p, v3.scale(this.dir, back)), [0, up, 0]);
       want[1] = Math.max(want[1], terrainH(want[0], want[2]) + 1.5);
+
+      // passing under a land bridge: keep the camera below the arch instead of inside the rock
+      for (const br of river.bridges) {
+        const d = br.at(want[0], want[2]);
+        if (d && want[1] > d.bottom - 0.4 && want[1] < d.top + 1.0) want[1] = d.bottom - 0.4;
+      }
+      
       const kp = 1 - Math.exp(-dt * 5);
       this.pos = v3.add(this.pos, v3.scale(v3.sub(want, this.pos), kp));
       const wantLook = v3.add(p, v3.add(v3.scale(this.dir, camMode === 2 ? 8 : 5), [0, 0.4, 0]));
@@ -2086,18 +2186,28 @@ applyQuality(quality);
     pass.setPipeline(terrainPipe);
     for (const sl of terrainSlices) { 
       pass.setIndexBuffer(sl.buf, 'uint32');
-      pass.drawIndexed(sl.count, 1, sl.first); }
+      pass.drawIndexed(sl.count, 1, sl.first); 
+    }
  
 
-   
-      pass.setPipeline(meshPipe);
-      for (const name of Object.keys(vegMeshes)) {
-        const ib = instBufs[name]; if (!ib || !ib.count) continue;
-        const [first, n] = instRange(ib); if (!n) continue;
-        pass.setVertexBuffer(0, vegMeshes[name].vbuf);
-        pass.setVertexBuffer(1, ib.buf);
-        pass.draw(vegMeshes[name].count, n, 0, first);   // firstInstance offsets into the instance buffer
+      // natural land bridges — same z window as the terrain slices, so one never hangs over undrawn ground
+      if (bridgeGpu.length) {
+      pass.setPipeline(bridgePipe);
+      const zk = kayak.p[2];
+      for (const bm of bridgeGpu) {
+        if (bm.zMax < zk - RENDER.viewBehind || bm.zMin > zk + RENDER.viewAhead) continue;
+        pass.setVertexBuffer(0, bm.vbuf); pass.draw(bm.count);
       }
+    }
+    
+    pass.setPipeline(meshPipe);
+    for (const name of Object.keys(vegMeshes)) {
+      const ib = instBufs[name]; if (!ib || !ib.count) continue;
+      const [first, n] = instRange(ib); if (!n) continue;
+      pass.setVertexBuffer(0, vegMeshes[name].vbuf);
+      pass.setVertexBuffer(1, ib.buf);
+      pass.draw(vegMeshes[name].count, n, 0, first);   // firstInstance offsets into the instance buffer
+    }
 
 
     for (const name of ['hull', 'cockpit', 'torso', 'head', 'paddle']) {

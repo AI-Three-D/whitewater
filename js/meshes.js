@@ -1,12 +1,10 @@
-import { v3, vnoise3, mulberry32 } from './math.js';
-
+import { v3, vnoise3, mulberry32, clamp } from './math.js';
 export class MeshBuilder {
   constructor() { this.d = []; }
-  tri(a, b, c, col) {
-    const n = v3.norm(v3.cross(v3.sub(b, a), v3.sub(c, a)));
-    for (const p of [a, b, c]) this.d.push(p[0], p[1], p[2], n[0], n[1], n[2], col[0], col[1], col[2]);
-  }
+  tri(a, b, c, col) { /* unchanged */ }
   quad(a, b, c, d, col) { this.tri(a, b, c, col); this.tri(a, c, d, col); }
+  // one vertex with an explicit (smooth) normal — for swept surfaces that compute their own normals
+  vert(p, n, col) { this.d.push(p[0], p[1], p[2], n[0], n[1], n[2], col[0], col[1], col[2]); }
   get count() { return this.d.length / 9; }
   data() { return new Float32Array(this.d); }
 }
@@ -395,4 +393,95 @@ export function buildObstacleMeshes() {
     boulderMedium: buildBoulder(9, 1.1),
     boulderLarge:  buildBoulder(10, 1.9),
   };
+}
+
+// ---------- natural land bridges ----------
+// Geometry for one bridge descriptor from generateRiver() (river.js). Everything the descriptor
+// defines analytically (deck top, centreline, width, pillar radius profile) is sampled here rather
+// than re-derived, so the rendered deck is exactly the surface props stand on and the collision
+// code tests against. The vertex "colour" isn't a colour: .x is a rock mask (0 = deck top, shaded
+// grass/dirt/rock by slope like any terrain; 1 = rock faces), .y is baked ambient occlusion, both
+// consumed by fsBridge (shaders.js) which otherwise shades the bridge exactly like the terrain.
+// swept tube: rings[si][k] is vertex k of cross-section si, cens[si] its centre (used to orient
+// the smooth normals outward), cols the per-vertex mask/ao. Optional end caps as fans.
+function emitTube(mb, rings, cols, cens, caps) {
+  const nS = rings.length - 1, M = rings[0].length, N = [];
+  for (let si = 0; si <= nS; si++) {
+    const row = [];
+    for (let k = 0; k < M; k++) {
+      const a = rings[Math.min(si + 1, nS)][k], b = rings[Math.max(si - 1, 0)][k];
+      const c = rings[si][(k + 1) % M], d = rings[si][(k - 1 + M) % M];
+      let n = v3.norm(v3.cross(v3.sub(a, b), v3.sub(c, d)));
+      if (v3.dot(n, v3.sub(rings[si][k], cens[si])) < 0) n = v3.scale(n, -1);
+      row.push(n);
+    }
+    N.push(row);
+  }
+  const V = (si, k) => mb.vert(rings[si][k], N[si][k], cols[si][k]);
+  for (let si = 0; si < nS; si++) for (let k = 0; k < M; k++) {
+    const k2 = (k + 1) % M;
+    V(si, k); V(si, k2); V(si + 1, k2);
+    V(si, k); V(si + 1, k2); V(si + 1, k);
+  }
+  if (caps) {
+    const axis = v3.norm(v3.sub(cens[nS], cens[0]));
+    for (const [si, sg] of [[0, -1], [nS, 1]]) {
+      const n = v3.scale(axis, sg), c = cens[si], col = [1, 0.3, 0];
+      for (let k = 0; k < M; k++) { mb.vert(c, n, col); mb.vert(rings[si][k], n, col); mb.vert(rings[si][(k + 1) % M], n, col); }
+    }
+  }
+}
+export function buildLandBridgeMesh(br) {
+  const mb = new MeshBuilder(), rough = br.cfg.roughness, M = 30;
+  const nS = clamp(Math.ceil(br.span / 0.5), 24, 160);
+  const rings = [], cols = [], cens = [];
+  for (let si = 0; si <= nS; si++) {
+    const s = si / nS, x = br.xa + s * br.span, zc = br.zc(s), hw = br.hwB(s), th = br.thick(s);
+    const cen = [x, br.topAt(s, 0, x, zc) - th * 0.35, zc];
+    const ring = [], col = [];
+    for (let k = 0; k < M; k++) {
+      const a = 2 * Math.PI * k / M, ca = Math.cos(a), sa = Math.sin(a);
+      if (sa >= -1e-9) {
+        // deck top: the exact analytic surface (u = cos a → denser sampling toward the edges)
+        const u = ca, z = zc + u * hw;
+        ring.push([x, br.topAt(s, u, x, z), z]);
+        col.push([clamp((Math.abs(u) - 0.7) / 0.3, 0, 1), 0, 0]);   // the rim turns rocky
+      } else {
+        // sides + underside: a rounded superellipse hanging from the deck edges, displaced
+        // outward by two noise octaves — strongest on the underside, fading at the rim so the
+        // top edge stays put
+        const e = 2 / 2.6, u = Math.sign(ca) * Math.pow(Math.abs(ca), e), v = Math.pow(-sa, e);
+        const z0 = zc + u * hw, y0 = br.topAt(s, u, x, z0) - v * th;
+        const nz = vnoise3(x * 0.45, y0 * 0.45, z0 * 0.45, br.seed + 7) * 2 - 1;
+        const nf = vnoise3(x * 1.7 + 3, y0 * 1.7, z0 * 1.7 + 9, br.seed + 8) * 2 - 1;
+        const disp = rough * (0.18 + 0.06 * th) * (0.7 * nz + 0.4 * nf) * Math.min(1, 0.15 + 2.5 * v);
+        const dz = z0 - cen[2], dy = y0 - cen[1], dl = Math.hypot(dz, dy) || 1;
+        ring.push([x, y0 + disp * dy / dl, z0 + disp * dz / dl]);
+        col.push([1, 0.9 * v * v, 0]);   // darkest under the middle of the arch
+      }
+    }
+    rings.push(ring); cols.push(col); cens.push(cen);
+  }
+  emitTube(mb, rings, cols, cens, true);
+  // pillars: stacked rings from below the bed to inside the arch, radius from the shared profile,
+  // roughened and slightly twisted; elongated along the flow, leaning a touch
+  for (const pl of br.pillars) {
+    const nL = clamp(Math.ceil(pl.h / 0.35), 6, 70), Mp = 18, pr = [], pc = [], pcen = [];
+    for (let li = 0; li <= nL; li++) {
+      const fy = li / nL, y = pl.yBase + fy * pl.h;
+      const cx = pl.x + pl.lean[0] * fy * pl.h, cz = pl.z + pl.lean[1] * fy * pl.h, r0 = br.pillarR(pl, fy);
+      const ring = [], col = [];
+      for (let k = 0; k < Mp; k++) {
+        const a = 2 * Math.PI * k / Mp + pl.twist * fy, ca = Math.cos(a), sa = Math.sin(a);
+        const nr = vnoise3(ca * 1.3 + 7, y * 0.7, sa * 1.3, pl.seed) * 2 - 1;
+        const nf = vnoise3(ca * 3.5, y * 2.2, sa * 3.5 + 5, pl.seed + 1) * 2 - 1;
+        const r = r0 * (1 + rough * (0.16 * nr + 0.07 * nf));
+        ring.push([cx + r * ca * (1 - pl.ell), y, cz + r * sa * (1 + pl.ell)]);
+        col.push([1, 0.55 * fy * fy, 0]);
+      }
+      pr.push(ring); pc.push(col); pcen.push([cx, y, cz]);
+    }
+    emitTube(mb, pr, pc, pcen, true);
+  }
+  return mb;
 }
