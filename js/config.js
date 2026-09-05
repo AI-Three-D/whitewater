@@ -594,6 +594,7 @@ export const LAND_BRIDGE = {
                                // bank reaches deck level, within these bounds; the abutment terrain is
                                // then shaped to meet it exactly)
   maxPillars: 8, minHeight: 1.5,
+  propDensity: 0.3, treeScale: 0.4, rockScale: 1.6, grassScale: 1.2,
 };
 export const CHARACTERS = {
   ronja: { name: 'Ronja', title: 'the Technician',

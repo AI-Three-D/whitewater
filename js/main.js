@@ -1058,11 +1058,16 @@ applyQuality(quality);
     // sampled with the biome's open-ground mix at about the same density as the rest of the world
     // (0.6 tries/m²), kept a little inside the rim so nothing overhangs the edge
     for (const br of river.bridges) {
-      const tries = Math.round(br.span * br.cfg.width * (1 + br.cfg.flare * 0.5) * 0.6);
+      const C = br.cfg, open = biome.mix.open;
+      const mixTable = biome.mix.bridge || {
+        ...open,
+        tree: (open.tree || 0) * C.treeScale, rock: (open.rock || 0) * C.rockScale, grass: (open.grass || 0) * C.grassScale,
+      };
+      const tries = Math.round(br.span * C.width * (1 + C.flare * 0.3) * C.propDensity);
       for (let n = 0; n < tries; n++) {
         const s = 0.03 + rng() * 0.94, u = (rng() * 2 - 1) * 0.85;
         const x = br.xa + s * br.span, z = br.zc(s) + u * br.hwB(s);
-        const role = pickRole(biome.mix.open, rng());
+        const role = pickRole(mixTable, rng());
         if (role) push(role, x, z, br.topAt(s, u, x, z));
       }
     }

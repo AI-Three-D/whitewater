@@ -429,10 +429,15 @@ fn shadeTerrain(wp: vec3f, nIn: vec3f, mask: f32, h: f32, ao: f32) -> vec3f {
   let sun = max(dot(n, C.sunDir.xyz), 0.0);
   let pal = biomeColors(i32(C.env.x));
   let dark = 1.0 - 0.5 * ao;
-  let steep = smoothstep(0.5, 0.8, 1.0 - abs(n.y));
-  let uv = mix(wp.xz, vec2f(wp.x + 0.7 * wp.z, wp.y), steep);
+  // steep faces (cliffs, the arch's sides, pillars) sample the noise on a vertical plane as well and
+  // blend the *values* — blending the coordinates instead beats the two patterns against each other
+  // in the transition band and reads as moiré
+  let steep = smoothstep(0.45, 0.8, 1.0 - abs(n.y));
+  let uvH = wp.xz;
+  let uvV = vec2f(wp.x * 0.6 + wp.z * 0.8, wp.y);
   if (C.dbg.z > 0.5) {
-    let n2 = noise2(uv * 2.3);
+    var n2 = noise2(uvH * 2.3);
+    if (steep > 0.001) { n2 = mix(n2, noise2(uvV * 2.3), steep); }
     let grass = pal[0] * (0.8 + 0.4 * n2);
     let rock  = pal[2] * (0.7 + 0.5 * n2);
     var col = mix(grass, rock, smoothstep(0.3, 0.6, slope));
@@ -440,7 +445,12 @@ fn shadeTerrain(wp: vec3f, nIn: vec3f, mask: f32, h: f32, ao: f32) -> vec3f {
     let lit = applyExposure(col * dark * (0.4 + sun * 0.85));
     return applyFog(lit, length(wp - C.camPos.xyz));
   }
-  let n1 = noise2(uv * 0.35); let n2 = noise2(uv * 2.3); let n3 = noise2(uv * 0.08);
+  var n1 = noise2(uvH * 0.35); var n2 = noise2(uvH * 2.3); var n3 = noise2(uvH * 0.08);
+  if (steep > 0.001) {
+    n1 = mix(n1, noise2(uvV * 0.35), steep);
+    n2 = mix(n2, noise2(uvV * 2.3), steep);
+    n3 = mix(n3, noise2(uvV * 0.08), steep);
+  }
   let grass = pal[0] * (0.72 + 0.5 * n1) * (0.85 + 0.3 * n2) * (0.85 + 0.3 * n3);
   let dirt  = pal[1] * (0.8 + 0.4 * n2);
   let rock  = pal[2] * (0.7 + 0.5 * n2);

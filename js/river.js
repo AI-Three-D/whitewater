@@ -320,7 +320,7 @@ export function generateRiver(R) {
                    * (1 + 0.07 * rough * (vnoise2(s * 13 + 1, 4.4, bseed + 9) * 2 - 1));      // craggy edge
     const detail = s => smoothstep(0, 0.12, s) * (1 - smoothstep(0.88, 1, s));                 // surface detail fades into the plateaus
     const topAt = (s, u, x, z) => yDeck + hump(s) - 0.08 * u * u
-      + detail(s) * rough * (0.22 * (fbm2(x * 0.35, z * 0.35, 3, bseed + 2) - 0.5) * 2 + 0.05 * (vnoise2(x * 1.8, z * 1.8, bseed + 3) * 2 - 1));
+      + detail(s) * rough * (0.22 * (fbm2(x * 0.35, z * 0.35, 3, bseed + 2) - 0.5) * 2 + 0.06 * (vnoise2(x * 0.9, z * 0.9, bseed + 3) * 2 - 1));
     // arch: thin at mid-span, thickening toward the banks until the underside sinks below the
     // water level into the abutments — the classic natural-arch springing
     const thickEnd = thickMid + cfg.height + 1.5;
