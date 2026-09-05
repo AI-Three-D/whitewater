@@ -21,7 +21,7 @@ addEventListener('unhandledrejection', e => showErr('Promise error: ' + ((e.reas
 const $ = id => document.getElementById(id);
 // bumped by hand on every edit — lets a stale/cached page or a not-yet-reloaded tab be spotted
 // on sight instead of chasing "am I even testing the current code" through several rounds
-const BUILD = 'build 30';
+const BUILD = 'build 32';
 { const v = document.getElementById('ver'); if (v) v.textContent = BUILD; }
 // ---------- platform ----------
 // modern-browser signals only: a touch screen (maxTouchPoints) whose primary pointer is coarse
@@ -903,8 +903,6 @@ applyQuality(quality);
           if (!input.fwd && !input.back) F = v3.add(F, v3.scale(fwdH, K.sweepFwd * power * this.env * 0.5));
         }
       } else {
-        // idle: strokeT deliberately stays put — zeroing it here flipped cos(πt) and snapped the
-        // drawn paddle; the stroke is restarted from 0 when input comes back instead (env is ~0 by then)
         this.paddling = false; this.env *= Math.exp(-dt * 8);
       }
       // ---- lean: A/D give a binary target, the device tilt an analog one. Keys win while
@@ -916,7 +914,6 @@ applyQuality(quality);
       // reading, not a trained reflex, so it's left at MOBILE.leanRate regardless of skill)
       const leanRate = useTilt ? MOBILE.leanRate : K.leanRate + SKILL.leanRatePerPt * tr.skill;
       this.lean += (leanTarget - this.lean) * Math.min(1, dt * leanRate);
-
 
       // terrain contact
       this.hitFlash *= Math.exp(-dt * 4);
@@ -958,20 +955,15 @@ applyQuality(quality);
 
       for (const br of river.bridges) {
         if (Math.abs(p[2] - br.z) > br.reach + 3) continue;
-        for (const pl of br.pillars) {
-          const Rr = pl.rWater + OBSTACLES.hullR;
-          for (const lp of K.collPts) {
-            const pw = v3.add(p, R(lp));
-            let ddx = pw[0] - pl.cx, ddz = pw[2] - pl.cz, d = Math.hypot(ddx, ddz);
-            if (d >= Rr) continue;
-            if (d < 1e-4) { ddx = 1; ddz = 0; d = 1e-4; }
-            const nx = ddx / d, nz = ddz / d, pen = Rr - d, vp = pointVel(pw), vn = vp[0] * nx + vp[2] * nz;
-            const fn = K.collK * pen - K.collDamp * Math.min(vn, 0);
-            let fc = [nx * fn, 0, nz * fn];
-            fc = v3.sub(fc, v3.scale([vp[0] - vn * nx, 0, vp[2] - vn * nz], K.collFric));
-            addForceAt(pw, fc);
-            if (-vn > 0.8) this.hitFlash = 1;
-          }
+        for (const pl of br.pillars) for (const lp of K.collPts) {
+          const pw = v3.add(p, R(lp)), hit = br.pillarHit(pl, pw[0], pw[2], OBSTACLES.hullR);
+          if (!hit) continue;
+          const { nx, nz, pen } = hit, vp = pointVel(pw), vn = vp[0] * nx + vp[2] * nz;
+          const fn = K.collK * pen - K.collDamp * Math.min(vn, 0);
+          let fc = [nx * fn, 0, nz * fn];
+          fc = v3.sub(fc, v3.scale([vp[0] - vn * nx, 0, vp[2] - vn * nz], K.collFric));
+          addForceAt(pw, fc);
+          if (-vn > 0.8) this.hitFlash = 1;
         }
         for (const lp of BRIDGE_CEIL_PTS) {
           const pw = v3.add(p, R(lp)), d = br.at(pw[0], pw[2]);
@@ -1096,7 +1088,7 @@ applyQuality(quality);
     for (const br of river.bridges) {
       if (Math.abs(z - br.z) > br.reach) continue;
       if (br.at(x, z) || br.at(x, z - 1.5) || br.at(x, z + 1.5)) return true;
-      for (const pl of br.pillars) if (Math.hypot(x - pl.cx, z - pl.cz) < pl.rWater + 1.2) return true;
+      for (const pl of br.pillars) if (br.pillarHit(pl, x, z, 1.2)) return true;
     }
     return false;
   }
@@ -1181,14 +1173,11 @@ applyQuality(quality);
       for (const br of river.bridges) {
         if (Math.abs(it.z - br.z) > br.reach) continue;
         for (const pl of br.pillars) {
-          const Rr = pl.rWater + 0.35;
-          let ddx = it.x - pl.cx, ddz = it.z - pl.cz, d = Math.hypot(ddx, ddz);
-          if (d >= Rr) continue;
-          if (d < 1e-3) { ddx = 1; ddz = 0; d = 1; }
-          const nx = ddx / d, nz = ddz / d;
-          it.x = pl.cx + nx * Rr; it.z = pl.cz + nz * Rr;
-          const vn = it.vx * nx + it.vz * nz;
-          if (vn < 0) { it.vx -= vn * nx; it.vz -= vn * nz; }
+          const hit = br.pillarHit(pl, it.x, it.z, 0.35);
+          if (!hit) continue;
+          it.x += hit.nx * hit.pen; it.z += hit.nz * hit.pen;
+          const vn = it.vx * hit.nx + it.vz * hit.nz;
+          if (vn < 0) { it.vx -= vn * hit.nx; it.vz -= vn * hit.nz; }
         }
       }
     }

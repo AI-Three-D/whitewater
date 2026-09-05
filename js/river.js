@@ -62,10 +62,25 @@ export function validateRiverConfig(R) {
     num('widthVar', 0, 1); num('height', LAND_BRIDGE.minHeight, 30); num('thickness', 0.4, 8);
     num('rise', 0, 5); num('roughness', 0, 2.5); num('wander', 0, 3); num('flare', 0, 2);
     const pillars = cfg.pillars ?? LAND_BRIDGE.pillars;
-    if (!Number.isInteger(pillars) || pillars < 0 || pillars > LAND_BRIDGE.maxPillars)
-      throw new Error(`${tag}: pillars must be an integer from 0 to ${LAND_BRIDGE.maxPillars} (got ${pillars})`);
+    if (Array.isArray(pillars)) {
+      if (pillars.length > LAND_BRIDGE.maxPillars) throw new Error(`${tag}: at most ${LAND_BRIDGE.maxPillars} pillars (got ${pillars.length})`);
+      pillars.forEach((p, i) => {
+        const ptag = `${tag}.pillars[${i}]`;
+        const pn = (key, lo, hi) => {
+          const v = p[key] ?? LAND_BRIDGE.pillar[key];
+          if (v == null && key === 'radius') return;
+          if (typeof v !== 'number' || !(v >= lo && v <= hi)) throw new Error(`${ptag}: ${key} must be a number in [${lo}, ${hi}] (got ${v})`);
+        };
+        pn('along', -0.2, 1.2); pn('across', -1.5, 1.5); pn('radius', 0.2, 25); pn('sizeAlong', 0.1, 12); pn('sizeAcross', 0.1, 12);
+        pn('yaw', -360, 360); pn('irregular', 0, 3); pn('baseFlare', 0, 3); pn('waist', 0, 0.7); pn('flare', 0, 4); pn('flareFrom', 0, 0.98); pn('flareCurve', 0.3, 6);
+      });
+    } else if (!Number.isInteger(pillars) || pillars < 0 || pillars > LAND_BRIDGE.maxPillars)
+      throw new Error(`${tag}: pillars must be an integer from 0 to ${LAND_BRIDGE.maxPillars}, or an array of pillar specs (got ${pillars})`);
+
     for (const fk of R.forks || []) if (z > fk.startZ - (fk.splitLen ?? 25) - 10 && z < fk.mergeZ + (fk.mergeLen ?? 25) + 10)
       throw new Error(`${tag}: z=${z} overlaps a fork (${fk.startZ}–${fk.mergeZ} m) — a land bridge needs a single channel`);
+    
+    
     if (R.pond && Math.abs(z - R.pond.z) < R.pond.len / 2 + 20) throw new Error(`${tag}: z=${z} is too close to the pond at ${R.pond.z} m`);
     for (const wf of R.waterfalls || []) if (Math.abs(z - wf.z) < 15) throw new Error(`${tag}: z=${z} is too close to the waterfall at ${wf.z} m`);
     bridges.forEach((o, k2) => {
@@ -287,20 +302,38 @@ export function generateRiver(R) {
   };
   // steep-walled plateau (pow 6, like main.js's carveBoulderIntoBed) — most of the footprint reads
   // as genuinely dry to the sim's `rock` term, not just a pinprick at the centre
-  const carveFoot = (x, z, r, top) => {
-    const local = bAt(x, z), t = Math.max(top, local + 0.1);
+  // steep-walled elliptical plateau (pow 6) for a pillar's footprint: (ax, az) half-axes in the
+  // pillar's own frame (cy/sy = cos/sin of its yaw) — most of the footprint reads as dry to the sim
+  const carveFoot = (x, z, ax, az, cy, sy, top) => {
+    const local = bAt(x, z), t = Math.max(top, local + 0.1), r = Math.max(ax, az);
     const i0 = clamp(Math.floor((x - r) / dx), 0, W - 1), i1 = clamp(Math.ceil((x + r) / dx), 0, W - 1);
     const j0 = clamp(Math.floor((z - r) / dx), 0, L - 1), j1 = clamp(Math.ceil((z + r) / dx), 0, L - 1);
     for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) {
-      const cx = (ii + 0.5) * dx, cz = (jj + 0.5) * dx, dist = Math.hypot(cx - x, cz - z);
-      if (dist >= r) continue;
+      const dx0 = (ii + 0.5) * dx - x, dz0 = (jj + 0.5) * dx - z;
+      const lx = dx0 * cy + dz0 * sy, lz = -dx0 * sy + dz0 * cy;
+      const rho = Math.hypot(lx / ax, lz / az);
+      if (rho >= 1) continue;
       const idx = jj * W + ii;
-      b[idx] = Math.max(b[idx], t - (t - local) * Math.pow(dist / r, 6));
+      b[idx] = Math.max(b[idx], t - (t - local) * Math.pow(rho, 6));
     }
   };
-  // natural column: flared base, slight waist, flared capital where it meets the arch. fy = 0 at
-  // the bed, 1 at the deck underside. Shared by the mesh and the collision radius at water level.
-  const pillarR = (pl, fy) => pl.rMid * (1 + 0.55 * Math.pow(1 - fy, 3) + 0.3 * Math.pow(fy, 5) - 0.12 * Math.sin(Math.PI * fy));
+  // radius multiplier of a column at height fraction fy (0 bed → 1 deck underside): talus foot,
+  // waist, then a flare into the arch starting at flareFrom. Shared by the mesh and collision.
+  const pillarK = (pl, fy) => (1 + pl.baseFlare * Math.pow(1 - fy, 3)) * (1 - pl.waist * Math.sin(Math.PI * fy))
+    * (1 + pl.flare * Math.pow(smoothstep(pl.flareFrom, 1, fy), pl.flareCurve));
+  // elliptical contact test at water level against pillar pl, grown by `margin` metres: returns the
+  // outward normal and an approximate penetration depth, or null when clear. Used by the kayak,
+  // drifting rucksacks and pickup placement.
+  const pillarHit = (pl, x, z, margin) => {
+    const ax = pl.rx * pl.kWater + margin, az = pl.rz * pl.kWater + margin;
+    const dx0 = x - pl.cx, dz0 = z - pl.cz;
+    const lx = dx0 * pl.cy + dz0 * pl.sy, lz = -dx0 * pl.sy + dz0 * pl.cy;
+    const ex = lx / ax, ez = lz / az, rho = Math.hypot(ex, ez);
+    if (rho >= 1) return null;
+    if (rho < 1e-4) return { nx: pl.cy, nz: pl.sy, pen: Math.min(ax, az) };
+    let gx = ex / ax, gz = ez / az; const gl = Math.hypot(gx, gz); gx /= gl; gz /= gl;
+    return { nx: gx * pl.cy - gz * pl.sy, nz: gx * pl.sy + gz * pl.cy, pen: (1 - rho) * rho / gl };
+  };
   const bridges = [];
   (R.landBridges || []).forEach((cfg0, bk) => {
     const cfg = { ...LAND_BRIDGE, ...cfg0 };
@@ -333,25 +366,44 @@ export function generateRiver(R) {
       return { s, u, top: topAt(s, u, x, z), bottom: clearAt(s) };
     };
     // pillars, spread across the wet span with jitter, trimmed if the passages would get too tight
+    // pillar specs: a count = auto-spread columns (trimmed if the passages would get too tight),
+    // an array = one spec per column, hand-placed — see LAND_BRIDGE.pillar for the fields
     const wet = xR - xL;
-    let nP = cfg.pillars;
-    while (nP > 0 && wet / (nP + 1) < 4.7) nP--;
-    if (nP < cfg.pillars) console.warn(`River "${R.name}": land bridge at z=${zb} — channel only ${wet.toFixed(1)} m wide, pillars reduced from ${cfg.pillars} to ${nP} to keep the passages open`);
-    const pillars = [], gap = wet / (nP + 1);
-    for (let k = 0; k < nP; k++) {
-      const frac = (k + 1) / (nP + 1) + (brng() - 0.5) * 0.45 / (nP + 1);
-      const px = xL + frac * wet, s = (px - xa) / span;
-      const pz = zc(s) + (brng() - 0.5) * 0.8 * hwB(s);
-      const yBase = bAt(px, pz) - 0.4, yTop = bottomAt(s) + 0.6, h = yTop - yBase;   // sunk into the bed, poked into the arch
-      const rMid = clamp(0.16 * h + 0.35, 0.5, Math.min(2.0, 0.17 * gap)) * (0.85 + 0.3 * brng());
-      const lean = [(brng() - 0.5) * 0.1, (brng() - 0.5) * 0.1], ell = brng() * 0.25;   // slight lean; elongated along the flow
-      const pl = { x: px, z: pz, yBase, yTop, h, rMid, ell, lean, twist: (brng() - 0.5) * 1.2, seed: bseed + 50 + k };
-      const hW = clamp(eta - yBase, 0, h);
-      pl.cx = px + lean[0] * hW; pl.cz = pz + lean[1] * hW;                          // centre at the water surface
-      pl.rWater = pillarR(pl, hW / Math.max(h, 0.1)) * (1 + ell) * (1 + 0.18 * rough) + 0.1;   // collision radius at water level
-      pillars.push(pl);
+    let specs;
+    if (Array.isArray(cfg.pillars)) specs = cfg.pillars.map(p => ({ ...LAND_BRIDGE.pillar, ...p }));
+    else {
+      let nP = cfg.pillars;
+      while (nP > 0 && wet / (nP + 1) < 4.7) nP--;
+      if (nP < cfg.pillars) console.warn(`River "${R.name}": land bridge at z=${zb} — channel only ${wet.toFixed(1)} m wide, pillars reduced from ${cfg.pillars} to ${nP} to keep the passages open`);
+      specs = Array.from({ length: nP }, (_, k) => ({ ...LAND_BRIDGE.pillar,
+        along: (k + 1) / (nP + 1) + (brng() - 0.5) * 0.45 / (nP + 1), across: (brng() - 0.5) * 0.8 }));
     }
-    for (const pl of pillars) carveFoot(pl.cx, pl.cz, pl.rWater * 0.9, eta + 0.6);
+    const gapAuto = wet / (specs.length + 1);
+    const pillars = specs.map((sp, k) => {
+      const s = clamp((xL + sp.along * wet - xa) / span, 0.02, 0.98), px = xa + s * span;
+      const pz = zc(s) + sp.across * hwB(s);
+      const yBase = bAt(px, pz) - 0.4, yTop = bottomAt(s) + 0.6, h = Math.max(yTop - yBase, 0.5);
+      const r = sp.radius ?? clamp(0.16 * h + 0.35, 0.5, Math.min(2.0, 0.17 * gapAuto)) * (0.85 + 0.3 * brng());
+      const yaw = sp.yaw * Math.PI / 180;
+      const lean = sp.lean ?? [(brng() - 0.5) * 0.1, (brng() - 0.5) * 0.1];
+      const pl = { x: px, z: pz, yBase, yTop, h, rx: r * sp.sizeAlong, rz: r * sp.sizeAcross, yaw, cy: Math.cos(yaw), sy: Math.sin(yaw),
+        lean, twist: sp.twist ?? (brng() - 0.5) * 1.2, irregular: sp.irregular, baseFlare: sp.baseFlare, waist: sp.waist,
+        flare: sp.flare, flareFrom: sp.flareFrom, flareCurve: sp.flareCurve, seed: bseed + 50 + k };
+      const hW = clamp(eta - yBase, 0, h);
+      pl.cx = px + lean[0] * hW; pl.cz = pz + lean[1] * hW;                       // centre at the water surface
+      pl.kWater = pillarK(pl, hW / h) * (1 + 0.2 * pl.irregular) + 0.05;          // radius multiplier there, incl. lumpiness
+      return pl;
+    });
+    for (const pl of pillars) carveFoot(pl.cx, pl.cz, pl.rx * pl.kWater * 0.9, pl.rz * pl.kWater * 0.9, pl.cy, pl.sy, eta + 0.6);
+    // hand-placed columns that run into each other are the designer's call — just say so
+    for (let a = 0; a < pillars.length; a++) for (let c = a + 1; c < pillars.length; c++) {
+      const A = pillars[a], Bp = pillars[c];
+      const ra = Math.max(A.rx, A.rz) * A.kWater, rb = Math.max(Bp.rx, Bp.rz) * Bp.kWater;
+      const d = Math.hypot(A.cx - Bp.cx, A.cz - Bp.cz);
+      if (d < ra + rb + 1.0) console.warn(`River "${R.name}": land bridge at z=${zb} — pillars ${a} and ${c} are ${d.toFixed(1)} m apart (radii ~${ra.toFixed(1)} + ${rb.toFixed(1)} m); they overlap or leave no passage`);
+    }
+
+
     // abutment plateaus: terrain eased to deck level around each end — raised fully where it's
     // lower, cut only partly where a hill is higher (the deck then merges into the slope). Kept
     // off the channel via the bank distance m, so it never dams the river.

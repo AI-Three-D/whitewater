@@ -249,8 +249,12 @@ export const RIVERS = [
     constrictions: 1, valleyH: 9, valleyScale: 65, seed: 14, len: 300,
     biome: 'desert', waterTint: [0.15, 0.12, 0.06], waterClarity: 0.6,
     pack: 'easyPack1',
-    landBridges: [{ z: 120, width: 10, widthVar: 0.25, height: 4, pillars: 1, roughness: 1.2 },
-      { z: 230, width: 4.5, widthVar: 0.5, height: 2.6, pillars: 0, rise: 0.9 }],
+    landBridges: [{ z: 120, width: 10, widthVar: 0.25, height: 4, roughness: 1.2, pillars: [
+      { along: 0.3, across: -0.7, radius: 1.1, irregular: 1.4, flare: 0.8, flareFrom: 0.45 },
+      { along: 0.32, across: 0.75, radius: 0.8, sizeAcross: 0.6, irregular: 1.8, flare: 1.2, flareFrom: 0.7 },
+      { along: 0.72, across: 0.1, radius: 1.3, sizeAlong: 0.7, sizeAcross: 3.2, yaw: 8, irregular: 0.8, flare: 0.3, waist: 0.05 },
+    ] },
+    { z: 230, width: 4.5, widthVar: 0.5, height: 2.6, pillars: 0, rise: 0.9 }],
 
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 40 } },
 
@@ -588,6 +592,26 @@ export const LANDSLIDE = {
   large:  { meshes: ['boulderLarge'],  len: [2.6, 4.8], density: 2700, hitK: 2.6, lift: 0.02, samples: 4 },
 };
 
+//   pillars    either a count (0 … maxPillars auto-spread columns — trimmed with a warning if the
+//              channel is too narrow), or an array of per-pillar specs for hand-placed "caves":
+//                { along, across, radius, sizeAlong, sizeAcross, yaw, irregular,
+//                  baseFlare, waist, flare, flareFrom, flareCurve, lean, twist }
+//              along      0 … 1 position across the river (0 = left water's edge, 1 = right);
+//                         -0.2 … 1.2 allowed so a column can stand right at the bank
+//              across     -1 … 1 position along the river as a fraction of the local deck
+//                         half-width (0 = under the centreline; ±1 = at the deck's edge)
+//              radius     [m] mid-height radius; null = automatic from the column's height
+//              sizeAlong / sizeAcross   stretch of that radius along / across the bridge — so
+//                         sizeAcross ≈ width/(2·radius) spans the whole deck, 0.4 is a slender fin
+//              yaw        [deg] rotation of the ellipse about vertical
+//              irregular  0 … 3 how lumpy/off-round the column is (0 = clean ellipse)
+//              baseFlare  extra radius at the bed (talus foot), as a multiplier delta
+//              waist      narrowing at mid-height (0 = straight)
+//              flare      how much the column widens into the arch; flareFrom 0 … 1 height fraction
+//                         where that widening starts; flareCurve its exponent (>1 = late, abrupt)
+//              Several pillars may share an `along` as long as their `across` differ — overlap is
+//              only warned about (console), never rejected: placing them well is the designer's job.
+
 export const LAND_BRIDGE = {
   width: 6, widthVar: 0.3, height: 3, pillars: 1, thickness: 1.3, rise: 0.5, roughness: 1, wander: 1, flare: 0.8,
   minExt: 4, maxExt: 22,       // [m] how far the deck is anchored into each bank (walks out until the
@@ -595,6 +619,8 @@ export const LAND_BRIDGE = {
                                // then shaped to meet it exactly)
   maxPillars: 8, minHeight: 1.5,
   propDensity: 0.3, treeScale: 0.4, rockScale: 1.6, grassScale: 1.2,
+  pillar: { along: 0.5, across: 0, radius: null, sizeAlong: 1, sizeAcross: 1.15, yaw: 0, irregular: 1,
+    baseFlare: 0.55, waist: 0.12, flare: 0.35, flareFrom: 0.6, flareCurve: 1.5 },
 };
 export const CHARACTERS = {
   ronja: { name: 'Ronja', title: 'the Technician',

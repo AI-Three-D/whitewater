@@ -468,18 +468,25 @@ export function buildLandBridgeMesh(br) {
   emitTube(mb, rings, cols, cens, true);
   // pillars: stacked rings from below the bed to inside the arch, radius from the shared profile,
   // roughened and slightly twisted; elongated along the flow, leaning a touch
+  // pillars: stacked rings from below the bed to inside the arch. Elliptical (rx along the bridge,
+  // rz across), rotated by yaw, radius from the shared profile (talus foot / waist / flare into the
+  // arch), roughened by the column's own `irregular` — a low octave for lobes and asymmetry, two
+  // finer ones for surface — and slightly twisted and leaning
   for (const pl of br.pillars) {
-    const nL = clamp(Math.ceil(pl.h / 0.35), 6, 70), Mp = 18, pr = [], pc = [], pcen = [];
+    const nL = clamp(Math.ceil(pl.h / 0.35), 6, 70);
+    const Mp = clamp(Math.round(Math.max(pl.rx, pl.rz) * 12), 16, 48), pr = [], pc = [], pcen = [];
     for (let li = 0; li <= nL; li++) {
       const fy = li / nL, y = pl.yBase + fy * pl.h;
-      const cx = pl.x + pl.lean[0] * fy * pl.h, cz = pl.z + pl.lean[1] * fy * pl.h, r0 = br.pillarR(pl, fy);
+      const cx = pl.x + pl.lean[0] * fy * pl.h, cz = pl.z + pl.lean[1] * fy * pl.h, k0 = br.pillarK(pl, fy);
       const ring = [], col = [];
       for (let k = 0; k < Mp; k++) {
         const a = 2 * Math.PI * k / Mp + pl.twist * fy, ca = Math.cos(a), sa = Math.sin(a);
+        const nl = vnoise3(ca * 0.8 + 3, y * 0.25, sa * 0.8, pl.seed + 2) * 2 - 1;
         const nr = vnoise3(ca * 1.3 + 7, y * 0.7, sa * 1.3, pl.seed) * 2 - 1;
         const nf = vnoise3(ca * 3.5, y * 2.2, sa * 3.5 + 5, pl.seed + 1) * 2 - 1;
-        const r = r0 * (1 + rough * (0.16 * nr + 0.07 * nf));
-        ring.push([cx + r * ca * (1 - pl.ell), y, cz + r * sa * (1 + pl.ell)]);
+        const kk = k0 * (1 + pl.irregular * (0.12 * nl + 0.16 * nr + 0.07 * nf));
+        const lx = pl.rx * kk * ca, lz = pl.rz * kk * sa;                       // pillar frame → world
+        ring.push([cx + lx * pl.cy - lz * pl.sy, y, cz + lx * pl.sy + lz * pl.cy]);
         col.push([1, 0.55 * fy * fy, 0]);
       }
       pr.push(ring); pc.push(col); pcen.push([cx, y, cz]);
