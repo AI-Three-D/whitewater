@@ -1,7 +1,10 @@
 import { v3, vnoise3, mulberry32, clamp } from './math.js';
 export class MeshBuilder {
   constructor() { this.d = []; }
-  tri(a, b, c, col) { /* unchanged */ }
+  tri(a, b, c, col) {
+    const n = v3.norm(v3.cross(v3.sub(b, a), v3.sub(c, a)));
+    for (const p of [a, b, c]) this.d.push(p[0], p[1], p[2], n[0], n[1], n[2], col[0], col[1], col[2]);
+  }
   quad(a, b, c, d, col) { this.tri(a, b, c, col); this.tri(a, c, d, col); }
   // one vertex with an explicit (smooth) normal — for swept surfaces that compute their own normals
   vert(p, n, col) { this.d.push(p[0], p[1], p[2], n[0], n[1], n[2], col[0], col[1], col[2]); }
