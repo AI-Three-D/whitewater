@@ -19,30 +19,16 @@ const showErr = t => { const el = document.getElementById('err'); el.style.displ
 addEventListener('error', e => showErr('Script error: ' + e.message + ' (line ' + e.lineno + ')'));
 addEventListener('unhandledrejection', e => showErr('Promise error: ' + ((e.reason && e.reason.stack) || e.reason)));
 const $ = id => document.getElementById(id);
-// bumped by hand on every edit — lets a stale/cached page or a not-yet-reloaded tab be spotted
-// on sight instead of chasing "am I even testing the current code" through several rounds
 const BUILD = 'build 33';
 { const v = document.getElementById('ver'); if (v) v.textContent = BUILD; }
-// ---------- platform ----------
-// modern-browser signals only: a touch screen (maxTouchPoints) whose primary pointer is coarse
-// (a finger) or that cannot hover. A touch-screen laptop driven by a mouse/trackpad reports a
-// fine, hovering primary pointer and stays in desktop mode. MOBILE.force (config.js) overrides
-// the detection so the touch/tilt controls can be developed on a desktop.
+
 const isMobile = MOBILE.force || (navigator.maxTouchPoints > 0 &&
   (matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches));
 document.body.classList.add(isMobile ? 'mobile' : 'desktop');
-
-// ---------- device tilt → lean (mobile) ----------
-// deviceorientation reports beta/gamma in the device's natural (portrait) frame. Reading gamma
-// (portrait) or beta (landscape) directly is unreliable near the gimbal singularity at
-// gamma = ±90° — exactly where a phone held up in landscape sits. So: rebuild the world "up"
-// vector in device coordinates (alpha/compass drops out), rotate it into the screen's frame with
-// screen.orientation.angle and take the roll about the viewing axis. Stable in any orientation,
-// flat on a table or held upright.
 const gyro = {
   supported: typeof DeviceOrientationEvent !== 'undefined',
   active: false, requesting: false, rollRaw: 0, offset: 0, lastEvent: -1e9,
-  request() {                // call synchronously from inside a user gesture — iOS shows a permission prompt
+  request() {
     if (!this.supported || this.active || this.requesting) return;
     const start = () => { addEventListener('deviceorientation', e => this.onOrient(e)); this.active = true; this.requesting = false; };
     if (typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -55,7 +41,6 @@ const gyro = {
   onOrient(e) {
     if (e.beta == null || e.gamma == null) return;
     const b = e.beta * Math.PI / 180, c = e.gamma * Math.PI / 180;
-    // world up in device coords = third row of Rz(α)·Rx(β)·Ry(γ); α cancels out
     const ux = -Math.cos(b) * Math.sin(c), uy = Math.sin(b), uz = Math.cos(b) * Math.cos(c);
     const deg = (screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0;   // screen rotated CCW from natural
     const a = deg * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
@@ -301,15 +286,6 @@ applyQuality(quality);
   let river = null, simTime = 0, gameState = 'menu', runTime = 0, camMode = 0, dbgMode = 0, fps = 60, warmingUp = false;
   let debugUnlockAll = false;   // dev toggle: show every river as unlocked regardless of pack ownership
   let debugNoCapsize = false;   // dev toggle: kayak.step ignores roll/pitch capsize — toggled in-run (KeyG / mGod)
-  // fixed-timestep physics: frame() below advances simTime/kayak.step by however many SIM.dt
-  // ticks are owed against real elapsed time, not a hardcoded count per rendered frame — see the
-  // accumulator there. frameTicks is how many actually ran *this* frame; kayak.step's obstacle
-  // force accumulation (search `kf =`) divides by it, since that force is built up once per tick
-  // but only consumed once per frame, and how many ticks make up "this frame" now varies.
-  // TIME_SCALE runs that real-time accumulation at a fixed multiple of wall-clock speed — 2x
-  // keeps the faster, more action-packed pace a 120Hz display used to produce by accident
-  // (twice the rAF calls -> twice the ticks -> 2x speed) now that speed no longer depends on
-  // monitor Hz at all.
   const TIME_SCALE = 2;
   let frameTicks = 2;
   const MAX_PHYS_TICKS = 8;  // hard cap on ticks replayed in one frame — after a big stall (tab
@@ -1023,9 +999,7 @@ applyQuality(quality);
     for (let k = 0; k < 3; k++) { pass.setPipeline(simPipes[k]); pass.setBindGroup(0, simBGs[k]); pass.dispatchWorkgroups(W / 8, Math.ceil(rows / 8)); }
     pass.end();
   }
-  // per-role size range and base-tint formula, shared by every biome — what actually varies per
-  // biome is which concrete mesh a role resolves to (biome.props) and how often each role is
-  // picked in a given terrain context (biome.mix), not these numbers
+
   const ROLE_SIZE = { tree: [0.8, 1.7], bush: [0.6, 1.4], rock: [0.4, 1.4], grass: [0.6, 1.4], boulder: [1.6, 3.0] };
   const ROLE_TINT = { tree: g => [g * 0.9, g, g * 0.9], bush: g => [g, g * 1.05, g * 0.9], rock: g => [g, g, g], boulder: g => [g * 0.95, g * 0.93, g * 0.9], grass: g => [g, 1, 0.9 * g] };
   // weighted pick among a mix table's roles; weights need not sum to 1 — the remainder is "place nothing"
@@ -1136,13 +1110,6 @@ applyQuality(quality);
       pickupInstBufs[kind] = mkBuf(Math.max(80, river.pickups[kind].length * 80), GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST);
     }
   }
-  // pushes each alive rucksack with the locally-sampled water velocity (waterAt is already the
-  // right tool: real simulated flow — eddies, recirculation — near the boat, a Manning's-equation
-  // downstream estimate further out). A dry/near-still cell naturally gives ~0 velocity, which is
-  // exactly "washed up on the bank" with no extra logic. Every RUCKSACK.checkInterval seconds we
-  // check how far it's actually moved; if it's under RUCKSACK.stuckDist (beached, or stuck in a
-  // dead eddy) we blend in a small nudge back toward mid-channel — not a random direction, since
-  // a random push near the bank is as likely to shove it further onto the shore as off it.
   function updateRucksackDrift(dtReal) {
     const list = river.pickups && river.pickups.rucksack;
     if (!list || !list.length) return;
@@ -1186,10 +1153,6 @@ applyQuality(quality);
       }
     }
   }
-  // dropped rucksacks aren't laid out along the river up front — up to RUCKSACK.count of them
-  // spawn live, one every RUCKSACK.spawnInterval seconds, just upstream of the kayak's current
-  // position. That way, if the player slows or stops paddling, the current is likely to carry
-  // one right past them instead of it always being somewhere already behind on the map.
   function spawnRucksacks(dtReal) {
     const list = river.pickups && river.pickups.rucksack;
     if (!list) return;
@@ -1198,10 +1161,6 @@ applyQuality(quality);
     const slot = list.find(it => !it.alive && !it.collected);
     if (!slot) return;
     river.rucksackSpawnT = 0;
-    // half spawn downstream, in front of the player — far enough out to be beyond render
-    // distance, so it just quietly comes into view rather than popping in. It gets no speed
-    // boost (unlike a behind-spawn): it drifts at the current's own pace, so actually reaching it
-    // before it drifts on down to the take-out takes real paddling, not just holding a line.
     const ahead = Math.random() < RUCKSACK.aheadFrac;
     const dist = ahead ? RUCKSACK.spawnAheadMin + Math.random() * (RUCKSACK.spawnAheadMax - RUCKSACK.spawnAheadMin)
                         : RUCKSACK.spawnBehindMin + Math.random() * (RUCKSACK.spawnBehindMax - RUCKSACK.spawnBehindMin);
@@ -1213,20 +1172,12 @@ applyQuality(quality);
       x = clamp(chan.c + (Math.random() * 1.4 - 0.7) * chan.hw, 1, W * dx - 1);
       if (!bridgeBlocked(x, z)) break;
     }
-    // launched downstream faster than the current, held there for RUCKSACK.spawnBoostDist metres
-    // of actual travel, then eased back down to normal floating speed by the same drag relaxation
-    // in updateRucksackDrift — so it visibly overtakes and pulls ahead of a slowed-down player
-    // for a stretch before settling, instead of just gently appearing nearby. An ahead-spawn skips
-    // the boost entirely — it's already out front, so goosing it further downstream would only
-    // make it harder to catch.
+
     const w = waterAt(x, z);
     Object.assign(slot, { x, z, vx: w.u, vz: ahead ? w.v : w.v * RUCKSACK.spawnBoost, boostDist: ahead ? 0 : RUCKSACK.spawnBoostDist,
       spinPh: Math.random() * 6.2832, bobPh: Math.random() * 6.2832,
       alive: true, collected: false, seenT: -1, checkT: 0, checkX: x, checkZ: z, nudging: false });
   }
-  // the tier's one-of-a-kind hidden-map pickup: only exists on that tier's predetermined carrier
-  // river (profile.mapCarrier), and re-rolls to a fresh random spot — via Math.random(), not the
-  // river's seed — every time this function runs, i.e. every attempt, until it's found for good.
   function placeMapItem() {
     const tier = river.R.tier;
     const isCarrier = !river.R.hidden && profile.mapCarrier[tier] === river.R.name && !profile.unlockedHidden[tier];
@@ -1243,12 +1194,7 @@ applyQuality(quality);
 
     river.pickups.map = [{ x, z, floating: false, spinPh: Math.random() * 6.2832, bobPh: Math.random() * 6.2832, alive: true, collected: false, seenT: -1 }];
   }
-  // ---------- floating obstacles ----------
-  // The floating-height reference. waterAt() switches hard between the live simulated surface
-  // (inside the 16 m readback band around the boat) and the channel's nominal level outside it,
-  // and in a riffle the two differ by tens of centimetres — fine for forces, but a log riding
-  // that step visibly jumped, and a thin one jumped under the water and flickered out of sight.
-  // Blend across the band edge instead; the caller additionally low-passes the result.
+
   function surfaceAt(x, z) {
     const jr = clamp(Math.floor(z / dx), 0, L - 1);
     const nominal = Math.max(nearestChan(river.rows[jr], x).eta, terrainH(x, z));
@@ -1257,9 +1203,7 @@ applyQuality(quality);
     const wgt = 1 - smoothstep(BAND_ROWS / 2 - 8, BAND_ROWS / 2 - 3.5, dj);
     return wgt <= 0 ? nominal : nominal + (waterAt(x, z).eta - nominal) * wgt;
   }
-  // per-run setup: parses RIVERS[].obstacles into spawn entries, sizes the instance buffers to the
-  // quota, and pre-populates the reach ahead so the run doesn't start on an empty river.
-  // Must run after kayak.reset() — the seeding is relative to the boat.
+
   function placeObstacles() {
     river.obstacles = []; river.obstNear = []; river.obstSpawn = []; river.obstDraw = [];
     river.obstCap = 0;
@@ -1291,18 +1235,6 @@ applyQuality(quality);
       for (let k = 0; k < n; k++) spawnObstacle(e, z0 + river.obstRng() * (z1 - z0));
     }
   }
-  // Bakes one landslide boulder's entire fall — bank to wherever it ends up, usually deep water,
-  // sometimes just a gentler patch of slope it stops on ("maybe slide part of the way") — as a
-  // dense keyframe trajectory, once, here at load time, instead of stepping the shared, generic
-  // stepObstacle() (built for a floating capsule pushed by drag) live every frame. Doing it once
-  // means it can afford a much finer step and a model built specifically for a tumbling rock: it
-  // follows the *local* downhill gradient fresh every step (so the path bends with the actual
-  // terrain instead of being a straight line to a precomputed target), integrates true
-  // rolling-without-slipping rotation from distance travelled, and adds a small deterministic
-  // sideways wobble so it doesn't look like it's riding a rail. Runtime playback (triggerLandslides
-  // starts it, updateObstacles samples/interpolates it every frame) never touches this model again.
-  // downBias adds a little extra +z (downstream) pull on top of whatever the terrain's own
-  // gradient gives it, rolled once per candidate in placeLandslides — see LANDSLIDE.downstreamBias
   function bakeBoulderTrajectory(x0, z0, vrad, seed, downBias) {
     const rng = mulberry32(seed), fdt = LANDSLIDE.bakeDt;
     // rows: t, x, y, z, yaw, roll, speed — speed carried through so a splash at the water crossing
@@ -1332,17 +1264,7 @@ applyQuality(quality);
     rows.forEach((r, i) => traj.set(r, i * stride));
     return { traj, dur: rows[rows.length - 1][0], endedWet };
   }
-  // landslide boulders (R.landslideZone = { from, to, count, activeChance }): `count` candidate
-  // spots spread across [from, to] downstream, alternating banks with jitter — but only the ones
-  // that win the activeChance roll below actually get placed at all, so there's nothing sitting on
-  // the bank for a candidate that isn't live this attempt. That roll (and everything else about
-  // *which* candidates exist and roughly how) comes from real per-attempt randomness (Math.random),
-  // not river.seed, deliberately — see LANDSLIDE. Only bakeBoulderTrajectory's own internal wobble
-  // stays seeded per candidate, since reproducing one specific fall shape has no bearing on whether
-  // a player could learn fixed hazard positions from a previous attempt. Own instance-buffer sizing
-  // here too: the shared sizing loop in placeObstacles only runs when a river has an `obstacles`
-  // config, which would otherwise leave the boulder meshes' buffers never allocated for a river
-  // that only has landslides.
+
   function placeLandslides() {
     const zone = river.R.landslideZone;
     if (!zone) return;
@@ -1386,11 +1308,7 @@ applyQuality(quality);
       });
     }
   }
-  // every boulder that exists at all already won its activeChance roll back in placeLandslides —
-  // that's the only probability gate; once the kayak gets within a boulder's own triggerDist it
-  // always goes, no second coin flip here. A miss isn't possible any more, but the function stays
-  // (rather than folding straight into updateObstacles) since it's still the one place that owns
-  // "has this one already gone" via triggerRolled.
+
   function triggerLandslides() {
     if (!river.R.landslideZone) return;
     const kz = kayak.p[2];
@@ -1401,19 +1319,7 @@ applyQuality(quality);
       ob.dormant = false; ob.replaying = true; ob.replayT = 0;
     }
   }
-  // one-shot wave where a boulder first reaches real water: a local height bump added on top of
-  // the CPU-side water estimate (waterAt — the same approximation stepObstacle already reads for
-  // this exact boulder every substep, not a fresh GPU readback) written straight into stateBufs[0].
-  // That buffer is always the sim's settled, current state between frames — see the 3-stage
-  // advect/height/momentum bind-group chain in the render loop, which starts and ends each full
-  // step there — so writing it here, before this frame's compute dispatch, is exactly the right
-  // buffer with no ping-pong bookkeeping to get right. The sim's own advection then carries the
-  // bump outward as a ripple over the next several frames; nothing here animates it.
-  // speed is the boulder's own speed (m/s) at the moment it crossed into water — see the replaying-
-  // boulder pass in updateObstacles, which reads it straight out of the baked trajectory rather
-  // than re-deriving it. Scales both the height and the radius together: a boulder that barely
-  // trickled in throws a small ripple, one that built up real speed on a long run down throws a
-  // proportionally bigger one — a single fixed splash size could never tell those apart.
+
   function injectSplash(cx, cz, speed) {
     const scale = clamp(speed / LANDSLIDE.splashRefSpeed, LANDSLIDE.splashMinScale, LANDSLIDE.splashMaxScale);
     const R = LANDSLIDE.splashRadius * scale, height = LANDSLIDE.splashHeight * scale, cells = Math.ceil(R / dx);
@@ -1432,21 +1338,7 @@ applyQuality(quality);
       device.queue.writeBuffer(stateBufs[0], (j * W + i) * 16, cell);
     }
   }
-  // gives a settled boulder actual, lasting hydraulic presence — a real obstruction the shallow-
-  // water sim computes flow around every step from here on, not just the one-shot splash — by
-  // raising the terrain bed under it. generateRiver() (river.js) shapes *natural* river rocks with
-  // pow(dist/r, 1.6) — a gentle dome that only reads as "dry" (see the `rock` flag in momentum(),
-  // shaders.js — the thing that actually drives extra foam/turbulence around an obstacle) in a
-  // small fraction of its own radius near the centre. Fine for a small natural rock; for a boulder
-  // that can be a couple of metres across, that shrinks the actually-emergent footprint down to a
-  // pinprick under a much bigger mesh — invisible against the flow, which is exactly what wasn't
-  // working. Steep power (6) instead: a near-flat plateau at `top` for most of the radius with only
-  // a thin blend-to-`local` rim right at the edge, so most of the boulder's own footprint reads as
-  // genuinely dry, not just its centre — also just a more accurate shape for a boulder's steep
-  // sides than the dome river.js uses for a small water-worn rock. terrainBuf is read live every
-  // frame by both the sim compute pass and vsTerrain (the terrain is a live heightfield, not a
-  // static mesh baked once), so writing it here is enough — nothing downstream needs to know a
-  // boulder was ever involved.
+
   function carveBoulderIntoBed(x, z, rad, topY) {
     const local = terrainH(x, z), top = Math.max(topY, local + 0.1);
     const i0 = clamp(Math.floor((x - rad) / dx), 0, W - 1), i1 = clamp(Math.ceil((x + rad) / dx), 0, W - 1);
@@ -1465,8 +1357,7 @@ applyQuality(quality);
       device.queue.writeBuffer(terrainBuf, (jj * W + i0) * 4, row);
     }
   }
-  // one obstacle of spawn entry `e`, somewhere in the channel at z. Returns false if the quota is
-  // full or the spot is unusable (past the take-out, in a pond, on top of another obstacle).
+
   function spawnObstacle(e, z) {
     const list = river.obstacles, rng = river.obstRng;
     if (list.length >= river.obstCap || z > river.finishZ - 5) return false;
@@ -1495,8 +1386,7 @@ applyQuality(quality);
     });
     return true;
   }
-  // density-based: per100m spawns accrue per metre of downstream progress (not per second — an
-  // idle boat doesn't fill the river up), dropped in `spawnAhead` metres downstream
+
   function spawnObstacles() {
     if (!river.obstSpawn.length) return;
     const kz = kayak.p[2], prog = Math.max(0, kz - river.obstLastZ);
@@ -1507,7 +1397,7 @@ applyQuality(quality);
       while (e.acc >= 1) { e.acc -= 1; spawnObstacle(e, kz + a0 + river.obstRng() * (a1 - a0)); }
     }
   }
-  // one body, one substep (see OBSTACLES in config.js for the model)
+
   function stepObstacle(ob, dt) {
     const dirx = Math.sin(ob.yaw), dirz = Math.cos(ob.yaw), half = ob.len / 2, S = ob.samples;
     let Fx = ob.fx, Fz = ob.fz, T = ob.tq, grounded = false;
@@ -1579,14 +1469,7 @@ applyQuality(quality);
     if (!list.length) return;
     triggerLandslides();
     const kz = kayak.p[2], steps = OBSTACLES.substeps, dt = dtReal / steps;
-    // replaying boulders: sample the trajectory baked for them (bakeBoulderTrajectory) once per
-    // frame — no live physics involved, just interpolating position/yaw/roll/speed out of the
-    // array — and fire the splash a live-simulated one would get, keyed off wherever the baked
-    // path actually put it rather than a fresh waterAt() query. When the trajectory runs out the
-    // boulder simply stops here for good, whether that's underwater or on a gentler patch of slope
-    // it settled on along the way — it's meant to become a permanent, solid underwater rock, not
-    // despawn, so there's no sinking/fade to trigger; it just stays in the list like any other
-    // obstacle until the kayak eventually leaves it far enough behind for the generic despawn below.
+
     for (const ob of list) {
       if (!ob.replaying) continue;
       ob.replayT += dtReal;
@@ -1607,14 +1490,7 @@ applyQuality(quality);
       }
       if (ob.replayT >= tEnd) {
         ob.replaying = false; ob.settled = true;   // frozen for good from here — see the Y-loop below
-        // shaders.js momentum()'s `rock` term — the thing that actually generates the extra foam/
-        // turbulence around an obstacle, not the one-shot splash — only fires where a neighbouring
-        // cell is fully *dry*: bed above the local water surface. A margin of just "a hair above
-        // eta" leaves barely any actually-dry footprint even with the steep carve profile above, so
-        // aim well clear of the surface — capped at the mesh's own peak height so the terrain still
-        // never pokes out past the boulder's own silhouette. A boulder settled in water deep enough
-        // that even its own height can't clear that just won't show a surface wake — correct, not a
-        // bug: a genuinely submerged rock doesn't visibly disturb the surface either.
+
         const emergeTop = waterAt(ob.x, ob.z).eta + 0.35;
         carveBoulderIntoBed(ob.x, ob.z, ob.rad, Math.min(emergeTop, ob.y + ob.vrad));
       }
@@ -1648,24 +1524,13 @@ applyQuality(quality);
         contactSegs(A, B, dt); contactSegs(B, A, dt);
       }
     }
-    // floating height: blended surface reference (surfaceAt) plus a low-pass, so neither the
-    // readback-band edge nor a grounding transition can make one jump
+
     const ky = 1 - Math.exp(-dtReal * OBSTACLES.ySmooth);
     for (const ob of active) {
       ob.fx = 0; ob.fz = 0; ob.tq = 0;
-      // a *settled* boulder (ob.settled, set once its replay finishes — see below) is frozen for
-      // good and skips this entirely: it doesn't track terrainH any more. It used to (same
-      // terrainH+vrad anchor as a still-rolling boulder), which meant the moment
-      // carveBoulderIntoBed raised the bed under it — to make it emergent for the water sim —
-      // terrainH at its own position jumped, and next frame this loop chased that jump straight
-      // up: the ground it just rose because the rock is there, turning around and shoving the rock
-      // up with it. One-way relationship instead: the rock defines a bump in the terrain, the
-      // terrain never moves the rock. It keeps colliding with the kayak regardless (river.obstNear
-      // below only reads x/z/rad, all still perfectly valid on a boulder that no longer moves).
+
       if (ob.kind === 'boulder' && ob.settled) continue;
-      // boulders rest on the terrain (centre one radius above it), not at the water surface like a
-      // buoyant log — anchoring a dense rock's render position to the surface is what read as
-      // "floating" regardless of how grounded the physics underneath it actually was
+
       const target = ob.kind === 'boulder' ? terrainH(ob.x, ob.z) + ob.vrad
         : surfaceAt(ob.x, ob.z) + (ob.grounded ? 0 : OBSTACLES.bob * Math.sin(simTime * OBSTACLES.bobSpeed + ob.bobPh));
       ob.y += (target - ob.y) * ky;
@@ -1675,13 +1540,7 @@ applyQuality(quality);
       Math.hypot(ob.x - kayak.p[0], ob.z - kayak.p[2]) < ob.len / 2 + ob.rad + 4);
   }
   function writeObstacleInstances() {
-    // obstacles had no distance cap of their own — fine while density-spawned debris only ever
-    // exists near the kayak anyway, but a landslide boulder sits at its authored z from the moment
-    // the river loads, often well beyond RENDER.viewAhead at first. Drawn with no cull, it renders
-    // exactly where world-space says it belongs — sitting correctly on the slope — while the
-    // terrain mesh under it isn't drawn out that far yet, so it reads as floating in empty air.
-    // Same [kz-viewBehind, kz+viewAhead] window terrain's own LOD slices use, plus a small margin
-    // (mirrors VEG_SLACK for vegetation) so nothing pops the instant it crosses the terrain edge.
+
     const zk = kayak.p[2], zLo = zk - RENDER.viewBehind - 4, zHi = zk + RENDER.viewAhead + 4;
     const groups = {};
     for (const ob of river.obstacles || []) {
@@ -1729,13 +1588,9 @@ applyQuality(quality);
               if (fadeT >= fadeTime) it.alive = false;
             } else alpha = 1;
           }
-          // the bob-phase collection gate exists so the small scattered floaters don't feel like
-          // they can be grabbed "through" their bob arc — but the rucksack is a large, deliberate
-          // target you're actively chasing down, so it shouldn't have a hidden window where
-          // paddling right up to it still whiffs; always reachable while in range instead
+
           const reachable = isRucksack || !it.floating || Math.sin(bobPhase) <= PICKUPS.reachBob;
-          // a raft/tube ring's lootMod shrinks the reach for anything but the key-item map pickup —
-          // "unlikely to catch much loot with it" is modelled as a much smaller collect window
+
           const lootMod = isMap ? 1 : (runCraft.lootMod ?? 1);
           const collectR = (isMap ? MAP_ITEM.collectRadius : isRucksack ? RUCKSACK.collectRadius : PICKUPS.collectRadius) * lootMod;
           if (it.alive && dist < collectR && reachable) {
@@ -1843,9 +1698,7 @@ applyQuality(quality);
     
 
     runLoot = { paddles: 0, coins: 0, coinValue: 0, snacks: 0, bandaids: 0, medikits: 0, books: 0, raftFound: false, helmetFound: false };
-    // simTime restarts at 0 below, so any leftover "…Until" timestamp from the previous attempt
-    // would otherwise read as still-active for a while — snackMsgUntil already had this gap, and
-    // drinkBuffUntil actually changes gameplay, not just a HUD message, so both get zeroed here.
+
     snackMsgUntil = 0; drinkBuffUntil = 0; drinkMsgUntil = 0;
     device.queue.writeBuffer(stateBufs[0], 0, river.state); device.queue.writeBuffer(kBufs[0], 0, river.kArr);
     device.queue.writeBuffer(partBuf, 0, new Float32Array(PARTS.count * 8));
@@ -1890,9 +1743,7 @@ applyQuality(quality);
     } else {
       const { gain, recovered, injury, cap, levelsLost } = applyInjury(profile, river.R.tier);
       if (recovered) {
-        // reaching the injury cap is no longer permadeath: the character and owned gear (crafts,
-        // upgrades, river packs) survive, but a long recovery costs levels, coins and consumables
-        // — see applyInjury. Retry/river menu both still make sense, same as a normal capsize.
+
         msg.innerHTML = `🏥 Badly hurt — time for a long recovery.<br>${(kayak.p[2] - 15).toFixed(0)} m of ${(river.finishZ - 15).toFixed(0)} m
           <br><small style="color:#ff9a80">${levelsLost ? `Lost ${levelsLost} level${levelsLost > 1 ? 's' : ''}, ` : ''}every coin, and the whole pack — but the rest is healed up (injury 0/${cap}).</small>
           ${actions}`;
@@ -1919,8 +1770,7 @@ applyQuality(quality);
   // ---------- camera ----------
   const cam = {
     pos: [0, 5, 0], look: [0, 0, 10], dir: [0, 0, 1], right: [1, 0, 0], up: [0, 1, 0],
-    // mobile screens are small and mostly held at arm's length, so the usual desktop framing
-    // leaves the boat/water too tiny to read — pull the rig in to half distance on mobile only
+
     reset() { this.dir = v3.norm(qRotate(kayak.q, [0, 0, 1])); const p = kayak.p; const cs = isMobile ? 0.5 : 1; this.pos = [p[0], p[1] + 3.5 * cs, p[2] - 8 * cs]; this.look = [p[0], p[1], p[2] + 5]; },
     update(dt) {
       const p = kayak.p, cs = isMobile ? 0.5 : 1;
@@ -1945,13 +1795,7 @@ applyQuality(quality);
       this.look = v3.add(this.look, v3.scale(v3.sub(wantLook, this.look), kp));
     },
   };
-  // per-biome atmosphere (see BIOME_SKY in config.js), with the current river's time-of-day (see
-  // TIME_OF_DAY in config.js) layered on top — recomputed per frame rather than once at load, since
-  // which river/biome/time-of-day is current changes at runtime; falls back to the plain RENDER
-  // defaults with no river loaded yet (menu) or for a biome with no override. A river with no
-  // `timeOfDay` (or 'day') gets TIME_OF_DAY.day, which is defined to reproduce the old hardcoded
-  // sky colours and leave sunDir/fogColor/fogMul untouched — so this is a no-op for every river
-  // that doesn't opt in, Meadow Run and Willow Bend included.
+
   function currentSky() {
     const biome = (river && BIOME_SKY[river.R.biome]) || { sunDir: RENDER.sunDir, fogColor: RENDER.fogColor, fogMul: 1 };
     const tod = TIME_OF_DAY[(river && river.R.timeOfDay) || 'day'] || TIME_OF_DAY.day;
@@ -2111,19 +1955,14 @@ applyQuality(quality);
   function frame(now) {
     requestAnimationFrame(frame);
     const dtRaw = (now - lastT) / 1000; lastT = now;
-    // the fps readout is deliberately based on the raw, unclamped delta — clamping it here (as the
-    // physics step below must, to keep one huge step from blowing up the sim) would silently floor
-    // a real stall at whatever the clamp is and hide exactly the slowdown this counter is for.
+
     if (dtRaw > 0) fps += (1 / dtRaw - fps) * 0.1;
     if (!river || gameState === 'menu' || warmingUp) return;
     const dtReal = Math.min(0.05, Math.max(0, dtRaw));
-    // … (existing comment block) …
     physAccum = Math.min(physAccum + dtReal * TIME_SCALE, SIM.dt * MAX_PHYS_TICKS);
     frameTicks = Math.min(Math.floor(physAccum / SIM.dt), MAX_PHYS_TICKS);
     for (let s = 0; s < frameTicks; s++) {
       simTime += SIM.dt;
-      // checked live, not hoisted: a tick can end the run (capsize/finish), after which no further
-      // kayak.step may run this frame
       if (gameState === 'run') { runTime += SIM.dt; kayak.step(SIM.dt); }
     }
     physAccum -= frameTicks * SIM.dt;

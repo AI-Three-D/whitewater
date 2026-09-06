@@ -243,14 +243,14 @@ export const RIVERS = [
 
     constrictions: 1, valleyH: 10, valleyScale: 60, seed: 12, len: 230,
     waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,   // crystal clear
-    pack: 'easyPack1',
+    pack: 'easyPack',
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 } },
 
   { name: 'Sandy Riffle', cls: 'Class II · easy', tier: 'easy', slope: 0.0019, manning: 0.032, halfW: 12, widthVar: 0.38, art: 'img/Sandy.png',
     meander: [[16, 165], [7, 64]], depth: 1.5, rocks: 14, rockR: [0.8, 2.0], emergent: 0.35, ledges: [],
     constrictions: 1, valleyH: 9, valleyScale: 65, seed: 14, len: 300,
     biome: 'desert', waterTint: [0.15, 0.12, 0.06], waterClarity: 0.6,
-    pack: 'easyPack1',
+    pack: 'easyPack',
     landBridges: [{ z: 120, width: 10, widthVar: 0.25, height: 4, roughness: 1.2, pillars: [
       { along: 0.3, across: -0.7, radius: 1.1, irregular: 1.4, flare: 0.8, flareFrom: 0.45 },
       { along: 0.32, across: 0.75, radius: 0.8, sizeAcross: 0.6, irregular: 1.8, flare: 1.2, flareFrom: 0.7 },
@@ -264,16 +264,8 @@ export const RIVERS = [
       meander: [[14, 150], [8, 70]], depth: 1.4, rocks: 20, rockR: [1.0, 2.4], emergent: 0.4, ledges: [],
       constrictions: 1, valleyH: 8, valleyScale: 90, seed: 13, len: 260,
       biome: 'canyon', waterTint: [0.16, 0.10, 0.04], waterClarity: 0.35,   // muddy
-      pack: 'easyPack1',
+      pack: 'easyPack',
       lanes: { count: 3, amp: 0.1, wander: 3, seedOffset: 35 } },    
-  { name: 'Pine Hollow', cls: 'Class II · easy', tier: 'easy', slope: 0.0027, manning: 0.031, halfW: 10, widthVar: 0.26, art:'img/Pine.png',
-    meander: [[19, 175], [6, 58]], depth: 1.6, rocks: 11, rockR: [0.8, 1.9], emergent: 0.3,  
-    constrictions: 0, valleyH: 11, valleyScale: 68, seed: 16, len: 320,
-    waterTint: [0.03, 0.16, 0.09], waterClarity: 1.3,
-    ledges: [[150, 0.2]],
-  obstacles: { log: { medium: 8, large: 2} },
-    pack: 'easyPack2',
-    lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 42 } },
   // ---------- medium ----------
   { name: 'Kopje Run', cls: 'Class III · medium', tier: 'medium', slope: 0.009, manning: 0.035, halfW: 8, widthVar: 0.35,
     meander: [[22, 140], [7, 55]], depth: 1.1, rocks: 26, rockR: [0.9, 2.6], emergent: 0.5,
@@ -282,53 +274,29 @@ export const RIVERS = [
     timeOfDay: 'dawn',
     landBridges: [{ z: 120, width: 8, widthVar: 0.3, height: 3.5, pillars: 1 }],
     boulderIslands: [{ z: 200, len: 8, widthFrac: 0.55 }],
+    pack: 'mediumPack',
     lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 32 } },
+  { name: 'Pine Hollow', cls: 'Class III · medium', tier: 'medium', slope: 0.0027, manning: 0.031, halfW: 10, widthVar: 0.26, art:'img/Pine.png',
+    meander: [[19, 175], [6, 58]], depth: 1.6, rocks: 11, rockR: [0.8, 1.9], emergent: 0.3,
+    constrictions: 0, valleyH: 11, valleyScale: 68, seed: 16, len: 320,
+    waterTint: [0.03, 0.16, 0.09], waterClarity: 1.3,
+    ledges: [[150, 0.2]],
+  obstacles: { log: { medium: 8, large: 2} },
+    pack: 'mediumPack',
+    lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 42 } },
   { name: 'Boulder garden', cls: 'Class III · medium', tier: 'medium', slope: 0.004, manning: 0.034, halfW: 7, widthVar: 0.4,
     meander: [[20, 120], [6, 50]], depth: 1.0, rocks: 165, rockR: [0.9, 2.4], emergent: 0.45,
     ledges: [], constrictions: 0, valleyH: 24, valleyScale: 48, seed: 24, len: 240,
     biome: 'deciduous', waterTint: [0.03, 0.14, 0.05], waterClarity: 1.1,   // leafy green, dappled, enclosed hills
     timeOfDay: 'misty',
     lanes: { count: 2, amp: 0.18, wander: 3, seedOffset: 36 } },
-  { name: 'Split Rock', cls: 'Class III · medium', tier: 'medium', slope: 0.014, manning: 0.036, halfW: 9, widthVar: 0.3,
-    meander: [[18, 160], [9, 62]], depth: 1.6, rocks: 60, rockR: [1.0, 2.8], emergent: 0.55,
-    ledges: [[200, 0.6], [360, 0.7]], constrictions: 2, valleyH: 8, valleyScale: 95, seed: 25, len: 410,
-    biome: 'desert', waterTint: [0.14, 0.11, 0.05], waterClarity: 0.5, extraKind: 'diamond',   // murky sandy, flat desert basin
-    timeOfDay: 'dusk',
-    forks: [{ startZ: 150, mergeZ: 200, splitLen: 25, mergeLen: 25, separation: 22, widthScale: 0.7, shares: [0.6, 0.4] }],
-    boulderIslands: [{ z: 300, len: 9, widthFrac: 0.6, bias: 0.2 }],
-    pack: 'mediumPack1',
-    lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 37 } },
   { name: 'Rocky Narrows', cls: 'Class III · medium', tier: 'medium', slope: 0.013, manning: 0.035, halfW: 7.5, widthVar: 0.35,
     meander: [[19, 135], [7, 52]], depth: 1.5, rocks: 60, rockR: [0.9, 2.5], emergent: 0.5,
     ledges: [[110, 0.6], [240, 0.7], [360, 0.6]], constrictions: 3, valleyH: 20, valleyScale: 55, seed: 26, len: 400,
     biome: 'canyon', waterTint: [0.14, 0.10, 0.05], waterClarity: 0.6,
     timeOfDay: 'misty',
-    pack: 'mediumPack1',
+    pack: 'mediumPack',
     lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 43 } },
-  { name: 'Silver Rapids', cls: 'Class III · medium', tier: 'medium', slope: 0.0135, manning: 0.034, halfW: 8, widthVar: 0.3,
-    meander: [[21, 125], [7, 48]], depth: 1.5, rocks: 58, rockR: [0.9, 2.4], emergent: 0.45,
-    ledges: [[90, 0.5], [200, 0.6], [330, 0.7]], constrictions: 2, valleyH: 16, valleyScale: 60, seed: 27, len: 380,
-    biome: 'autumn', waterTint: [0.06, 0.13, 0.08], waterClarity: 1.4,   // fall foliage, golden-hour water
-    timeOfDay: 'dusk',
-    builtBridges: [{ z: 250, material: 'concrete', width: 9, height: 5, thickness: 1.2, color: [0.95, 0.95, 0.92], pylons: [
-      { along: 0.28, across: -0.2, sizeAlong: 1.4, sizeAcross: 3.0 },
-      { along: 0.72, across: 0.2, sizeAlong: 1.4, sizeAcross: 3.0 },
-    ] }],
-    pack: 'mediumPack2',
-    lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 44 } },
-  { name: 'Frozen Chute', cls: 'Class III · medium', tier: 'medium', slope: 0.0145, manning: 0.036, halfW: 7, widthVar: 0.4,
-    meander: [[17, 115], [8, 45]], depth: 1.6, rocks: 65, rockR: [1.0, 2.6], emergent: 0.55,
-    ledges: [[130, 0.7], [260, 0.8], [350, 0.6]], constrictions: 3, valleyH: 26, valleyScale: 45, seed: 28, len: 420,
-    biome: 'icy', waterTint: [0.07, 0.16, 0.23], waterClarity: 2.0,
-    timeOfDay: 'misty',
-    pack: 'mediumPack2',
-    lanes: { count: 3, amp: 0.18, wander: 3, seedOffset: 45 } },
-  // wide, dead-straight (meander amplitude 0) and deep on purpose — a dedicated showcase for
-  // landslide boulders (see LANDSLIDE in config.js): wide enough that a bank-triggered boulder has
-  // a real distance to roll, deep enough mid-channel that it reliably clears LANDSLIDE.deepWater
-  // and settles as a permanent underwater rock instead of rattling around in water too shallow for
-  // that. No `pack` — left free so it's immediately available rather than gated behind currency
-  // for what's primarily a feature showcase.
   { name: 'Scree Bends', cls: 'Class III · medium', tier: 'medium', slope: 0.002, manning: 0.033, halfW: 17, widthVar: 0.15,
     meander: [[20, 150], [6, 55]], depth: 2.3, rocks: 3, rockR: [0.9, 2.2], emergent: 0.4, ledges: [],
     constrictions: 0, valleyH: 34, valleyScale: 50, seed: 99, len: 380,
@@ -360,7 +328,7 @@ export const RIVERS = [
     forks: [{ startZ: 190, mergeZ: 230, splitLen: 20, mergeLen: 20, separation: 18, widthScale: 0.7, shares: [0.45, 0.55] }],
     boulderIslands: [{ z: 330, len: 12, widthFrac: 0.7, bias: 0.1 }],
     waterfalls: [{ z: 370, drop: 5.0, len: 6 }],
-    pack: 'hardPack1',
+    pack: 'hardPack',
     lanes: { count: 3, amp: 0.22, wander: 4, seedOffset: 39 } },
   { name: 'Widowmaker', cls: 'Class IV · hard', tier: 'hard', slope: 0.029, manning: 0.04, halfW: 5.5, widthVar: 0.4,
     meander: [[23, 115], [8, 42]], depth: 1.4, rocks: 105, rockR: [0.9, 2.7], emergent: 0.55,
@@ -368,23 +336,16 @@ export const RIVERS = [
     biome: 'canyon', waterTint: [0.13, 0.09, 0.05], waterClarity: 0.55,
     timeOfDay: 'night',
     waterfalls: [{ z: 400, drop: 3.5, len: 5 }],
-    pack: 'hardPack1',
+    pack: 'hardPack',
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 46 } },
-  { name: 'Ice Fang', cls: 'Class IV · hard', tier: 'hard', slope: 0.031, manning: 0.04, halfW: 5.5, widthVar: 0.38,
-    meander: [[25, 108], [8, 44]], depth: 1.4, rocks: 112, rockR: [0.9, 2.8], emergent: 0.55,
-    ledges: [[120, 0.9], [220, 1.0], [320, 1.1], [410, 0.9]], constrictions: 4, valleyH: 40, valleyScale: 56, seed: 41, len: 465,
-    biome: 'icy', waterTint: [0.08, 0.18, 0.26], waterClarity: 2.4,
-    timeOfDay: 'dawn',
-    waterfalls: [{ z: 350, drop: 4.0, len: 5 }],
-    pack: 'hardPack2',
-    lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 47 } },
+
   { name: 'Last Rites', cls: 'Class IV · hard', tier: 'hard', slope: 0.033, manning: 0.041, halfW: 5, widthVar: 0.42,
     meander: [[27, 102], [9, 40]], depth: 1.5, rocks: 125, rockR: [1.0, 2.9], emergent: 0.6,
     ledges: [[130, 1.0], [250, 1.1], [380, 1.0]], constrictions: 5, valleyH: 44, valleyScale: 56, seed: 42, len: 470,
     biome: 'volcanic', waterTint: [0.10, 0.05, 0.03], waterClarity: 0.4,   // dark, ash-choked water through a smoky hellscape
     timeOfDay: 'night',
     waterfalls: [{ z: 300, drop: 4.5, len: 5 }],
-    pack: 'hardPack2',
+    pack: 'hardPack',
     lanes: { count: 3, amp: 0.22, wander: 4, seedOffset: 48 } },
 ];
 
@@ -411,17 +372,15 @@ export const RIVERS_HIDDEN = [
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 93 } },
 ];
 
-// each tier has 6 regular rivers (plus its one hidden/map-locked one): the first 2 listed in
-// RIVERS for that tier are free, the other 4 are split into two purchasable packs of 2 (see each
-// RIVERS entry's `pack` field — a river with no `pack` is one of the free two). Bought once, like
-// a craft — see profile.riverPacks / ownsPack/canBuyPack/buyPack in progression.js.
+// each tier has 5 regular rivers (plus its one hidden/map-locked one, in RIVERS_HIDDEN): the first
+// 2 listed in RIVERS for that tier are free, the other 3 are gated behind that tier's single
+// purchasable pack (see each RIVERS entry's `pack` field — a river with no `pack` is one of the
+// free two). Bought once, like a craft — see profile.riverPacks / ownsPack/canBuyPack/buyPack in
+// progression.js.
 export const RIVER_PACKS = {
-  easyPack1: { tier: 'easy', label: 'Pack I', price: 10 },
-  easyPack2: { tier: 'easy', label: 'Pack II', price: 16 },
-  mediumPack1: { tier: 'medium', label: 'Pack I', price: 18 },
-  mediumPack2: { tier: 'medium', label: 'Pack II', price: 26 },
-  hardPack1: { tier: 'hard', label: 'Pack I', price: 28 },
-  hardPack2: { tier: 'hard', label: 'Pack II', price: 38 },
+  easyPack: { tier: 'easy', label: 'Pack', price: 10 },
+  mediumPack: { tier: 'medium', label: 'Pack', price: 20 },
+  hardPack: { tier: 'hard', label: 'Pack', price: 40 },
 };
 
 // tier-to-tier scale factor — everything (finish xp, pickup counts) grows by this ratio
@@ -745,12 +704,9 @@ export const STORE_LISTING = [
   { type: 'upgrade', id: 'paddle' },
   { type: 'craft', id: 'slalom' },
   { type: 'craft', id: 'tubering' },
-  { type: 'pack', id: 'easyPack1' },
-  { type: 'pack', id: 'easyPack2' },
-  { type: 'pack', id: 'mediumPack1' },
-  { type: 'pack', id: 'mediumPack2' },
-  { type: 'pack', id: 'hardPack1' },
-  { type: 'pack', id: 'hardPack2' },
+  { type: 'pack', id: 'easyPack' },
+  { type: 'pack', id: 'mediumPack' },
+  { type: 'pack', id: 'hardPack' },
 ];
 
 // ---------- injury ----------
