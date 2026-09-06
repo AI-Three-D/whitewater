@@ -1,7 +1,7 @@
 // Boat physics. step() gathers forces from a handful of single-purpose helpers via a per-tick
 // context `c` (orientation helpers, accumulated force/torque) and returns the run outcome
 // instead of ending the run itself, so physics never touches menus or the profile.
-import { KAYAK, SIM, STAMINA, SKILL, MOBILE, OBSTACLES, UPGRADES, ITEMS } from './config.js';
+import { KAYAK, SIM, STAMINA, SKILL, MOBILE, OBSTACLES, UPGRADES, ITEMS } from './config/index.js';
 import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec, clamp } from './math.js';
 import { ownsUpgrade } from './progression.js';
 import { S } from './state.js';

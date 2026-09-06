@@ -1,4 +1,4 @@
-import { GRID, SIM, PUTIN, RIVER_SIDE_MARGIN, LAND_BRIDGE, BUILT_BRIDGE, BRIDGE_MATERIALS } from './config.js';
+import { GRID, SIM, PUTIN, RIVER_SIDE_MARGIN, LAND_BRIDGE, BUILT_BRIDGE, BRIDGE_MATERIALS } from './config/index.js';
 import { mulberry32, vnoise2, fbm2, clamp, smoothstep, softClamp } from './math.js';
 
 function thermalErode(b, mask, W, L, iters, talus, rate) {

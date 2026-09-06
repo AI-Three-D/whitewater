@@ -1,6 +1,6 @@
 // Out-of-run screens: main menu (character select, top bar, boat picker, river carousels),
 // level-up, store and character sheet. Pure DOM; game actions are injected via initUi().
-import { QUALITY_LEVELS, TIERS, RIVERS, RIVERS_HIDDEN, RIVER_PACKS, CHARACTERS, CRAFTS, ITEMS, UPGRADES, TRAINING, STORE_LISTING, OBSTACLES } from './config.js';
+import { QUALITY_LEVELS, TIERS, RIVERS, RIVERS_HIDDEN, RIVER_PACKS, CHARACTERS, CRAFTS, ITEMS, UPGRADES, TRAINING, STORE_LISTING, OBSTACLES } from './config/index.js';
 import { clamp } from './math.js';
 import { newProfile, clearProfile, saveProfile, character, canRaise, anyRaisable, spendPoint, discardPending, pointsForLevel,
   itemCount, canBuyItem, canBuyCraft, buyItem, buyCraft, selectCraft, ownsUpgrade, canBuyUpgrade, buyUpgrade, canHeal, healInjury,

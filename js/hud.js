@@ -1,5 +1,5 @@
 // In-run HUD: loot counters, transient messages, stamina bar, balance marker, debug readout.
-import { KAYAK, SIM, STAMINA, ITEMS, COLLECTIBLES } from './config.js';
+import { KAYAK, SIM, STAMINA, ITEMS, COLLECTIBLES } from './config/index.js';
 import { clamp } from './math.js';
 import { character, itemCount } from './progression.js';
 import { S } from './state.js';

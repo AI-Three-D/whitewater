@@ -1,6 +1,6 @@
 // The one shared, mutable game state. Anything that used to be a `let` in the old main()
 // closure lives here so modules can be split without threading 40 parameters around.
-import { KAYAK, CRAFTS } from './config.js';
+import { KAYAK, CRAFTS } from './config/index.js';
 
 export const TIME_SCALE = 2;
 // hard cap on ticks replayed in one frame — after a big stall (tab backgrounded, a long GC

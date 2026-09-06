@@ -1,5 +1,5 @@
 // Run lifecycle (start / warm-up / end screens) and the in-run player actions.
-import { PARTS, ITEMS, STAMINA } from './config.js';
+import { PARTS, ITEMS, STAMINA } from './config/index.js';
 import { clamp } from './math.js';
 import { generateRiver } from './river.js';
 import { craftOf, itemCount, useItem, awardRun, applyInjury, ownsUpgrade, pointsForLevel } from './progression.js';
