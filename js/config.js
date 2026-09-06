@@ -9,13 +9,6 @@ export const SIM = {
 };
 
 export const RENDER = { sunDir: [0.35, 0.55, 0.75], fogColor: [0.72, 0.80, 0.90], fogDensity: 0.0024 };
-// per-biome atmosphere: RENDER above is the fallback for a biome with no `sky` override. sunDir
-// shifts the light's angle (a low grazing direction reads as golden hour, a high one as midday);
-// fogColor tints the horizon/haze/distance fog, which is what actually gives each river its mood
-// since the terrain/water shaders don't otherwise know about time of day; fogMul scales the
-// current quality tier's fogDensity (already 0.0024–0.0040 across high/medium/low) so a biome can
-// be hazier or clearer at any detail setting without hardcoding an absolute density. Read live
-// each frame in writeCam() (main.js) off the current river's biome — see BIOME_SKY below.
 export const BIOME_SKY = {
   alpine:     { sunDir: [0.35, 0.55, 0.75], fogColor: [0.72, 0.80, 0.90], fogMul: 1.0 },
   canyon:     { sunDir: [0.55, 0.35, 0.65], fogColor: [0.80, 0.72, 0.60], fogMul: 0.9 },
@@ -38,50 +31,18 @@ export const VEG = { caps: { tree: 900, bush: 700, rock: 500, grass: 3500, bould
 
 export const BIOME_IDS = { alpine: 0, canyon: 1, desert: 2, deciduous: 3, icy: 4, barren: 5, rainforest: 6, savannah: 7, glacier: 8, volcanic: 9, autumn: 10 };
 
-// time-of-day: layered on TOP of a river's biome atmosphere (BIOME_SKY above), not a replacement
-// for it — a river opts in with `timeOfDay: 'dawn'|'dusk'|'night'` (see RIVERS below); omitting it
-// defaults to 'day', which is defined to exactly reproduce the original look (identity sunDir
-// override, [1,1,1] fog tint, ×1 fog/exposure, the same sky colours that used to be hardcoded in
-// the sky shader) — so no river changes appearance just because this system exists.
-// - sunDir: fully replaces the biome's sun angle (time of day governs the sun's position, not
-//   biome), null for 'day' meaning "keep the biome's own sunDir" unchanged.
-// - skyHorizon/skyZenith: the sky gradient's colours — previously hardcoded in shaders.js, now
-//   driven from here so night can actually go dark instead of every biome sharing one fixed blue.
-// - fogTint multiplies the biome's own fogColor (so a smoky volcanic haze still reads as smoky at
-//   dusk, just warmed, rather than losing its identity to a flat preset colour) and fogMul further
-//   scales the biome's own fogMul.
-// - exposure dims the whole lit scene (terrain/water/props — see C.env.y in the shaders) so night
-//   actually reads as dark rather than just differently tinted at daytime brightness; skyColor()
-//   sprinkles in stars as exposure drops, so lower exposure = more visible stars, no separate knob.
-// fogTint isn't just a hue nudge: this game's fog is thick enough at typical view distances that
-// it dominates a large share of the visible frame (see applyFog in shaders.js), so if fogTint
-// stays close to [1,1,1] the fog blend alone keeps mid-to-far terrain reading near daytime
-// brightness no matter how dark `exposure` makes nearby lit surfaces — night in particular needs
-// fogTint pulled down aggressively, roughly matching exposure's own darkening, or the two fight
-// each other and the far half of the frame gives the mood away as still-basically-day.
 export const TIME_OF_DAY = {
   day:   { sunDir: null, skyHorizon: [0.70, 0.80, 0.92], skyZenith: [0.20, 0.42, 0.80], fogTint: [1.00, 1.00, 1.00], fogMul: 1.00, exposure: 1.00 },
   dawn:  { sunDir: [0.85, 0.16, 0.30], skyHorizon: [0.96, 0.64, 0.48], skyZenith: [0.24, 0.32, 0.58], fogTint: [1.15, 0.78, 0.58], fogMul: 1.15, exposure: 0.75 },
   dusk:  { sunDir: [-0.82, 0.14, 0.42], skyHorizon: [0.85, 0.38, 0.28], skyZenith: [0.16, 0.13, 0.34], fogTint: [1.20, 0.72, 0.62], fogMul: 1.20, exposure: 0.62 },
   night: { sunDir: [0.30, -0.30, 0.60], skyHorizon: [0.05, 0.07, 0.15], skyZenith: [0.01, 0.015, 0.05], fogTint: [0.14, 0.16, 0.30], fogMul: 1.35, exposure: 0.16 },
-  // overcast: still full daylight brightness (unlike dawn/dusk/night, which all also darken the
-  // scene), but desaturated all the way to the zenith instead of day's saturated blue, and by far
-  // the thickest fog of any preset — this is the one that's actually about *fog amount*, not mood:
-  // a valley-fog, low-visibility mountain vista rather than a lit-differently one
+
   misty: { sunDir: [0.40, 0.45, 0.72], skyHorizon: [0.80, 0.82, 0.84], skyZenith: [0.55, 0.58, 0.63], fogTint: [0.95, 0.97, 1.00], fogMul: 2.0, exposure: 0.85 },
 };
 
-// each biome maps the 5 abstract placement "roles" (tree/bush/rock/grass/boulder) to a concrete
-// prop mesh (see buildVegetationMeshes in meshes.js), and gives each of the 3 terrain contexts
-// (steep ground, right at the water's edge, open ground) a weighted mix of roles to place —
-// weights don't need to sum to 1; whatever's left over is "place nothing here". This is what
-// actually varies which props show up and how densely, not just their tint.
 const DEFAULT_PROPS = { tree: 'tree', bush: 'bush', rock: 'rock', grass: 'grass', boulder: 'boulder' };
 export const BIOMES = {
   alpine: {
-    // a role can name one mesh or a pool of several (see push() in main.js) — most entries below
-    // repeat the plain mesh 2-3x against one variant so the variant reads as an occasional accent
-    // rather than showing up in half of every patch
     props: { ...DEFAULT_PROPS, rock: ['rock', 'rock', 'rockSlab'], grass: ['grass', 'grass', 'flowerTuft'] },
     mix: { steep: { rock: 0.25 }, bank: { grass: 0.55, bush: 0.25, rock: 0.20 }, open: { tree: 0.36, bush: 0.19, rock: 0.09, grass: 0.36 } },
     vegTint: { tree: [1, 1, 1], bush: [1, 1, 1], rock: [1, 1, 1], grass: [1, 1, 1], boulder: [1, 1, 1] },
@@ -109,8 +70,6 @@ export const BIOMES = {
     vegDensity: { tree: 1.8, bush: 1.6, rock: 0.7, grass: 1.3, boulder: 0.3 },
   },
   // icy alpine: mostly bare rock, snow and boulders, a few snow-dusted conifers near the treeline
-  // — plus the odd gaunt withered one that didn't make it, and a stray ice formation mixed in with
-  // the plain rock
   icy: {
     props: { ...DEFAULT_PROPS, tree: ['treeSnowy', 'treeSnowy', 'treeWithered'], rock: ['rock', 'rock', 'iceFormation'] },
     mix: { steep: { rock: 0.25, boulder: 0.35 }, bank: { grass: 0.15, rock: 0.35, boulder: 0.15 }, open: { tree: 0.05, rock: 0.30, boulder: 0.22, grass: 0.08, bush: 0.03 } },
@@ -422,12 +381,7 @@ export const COLLECTIBLES = {
   paddle: { mesh: 'paddle', type: 'xp', value: 1, color: [0.95, 0.82, 0.1] },
   coin: { mesh: 'coin', type: 'currency', value: 1, color: [1.0, 0.86, 0.3] },
   diamond: { mesh: 'diamond', type: 'currency', value: 5, color: [0.65, 0.92, 1.0] },
-  // opening one doesn't give a fixed reward — on pickup a kind is rolled from `roll` (weights
-  // need not sum to 1; a roll past the end just falls through to the last entry). 'special' is a
-  // second-stage roll across SPECIAL_ITEMS (equal chance each); the resolution and payoff for
-  // every kind lives in main.js's rucksack-opening code, not here, since half the kinds (coin,
-  // snack, bandaid, medikit) just reuse another table's entry and the rest (empty, book, raft,
-  // helmet) have no other pickup to borrow from.
+
   rucksack: { mesh: 'rucksack', type: 'random', roll: [
     { kind: 'empty', weight: 0.2 },
     { kind: 'coin', weight: 0.3 },
@@ -455,51 +409,18 @@ export const MAP_ITEM = {
 };
 export const RUCKSACK = {
   count: 10, spinSpeed: 0.5, scale: 2, hover: 0.12, fadeTime: 99,   // fadeTime = 10x the base PICKUPS.fadeTime
-  collectRadius: 2.2,   // bigger than the default PICKUPS.collectRadius (1.6) to match its size
+  collectRadius: 2.2,  
   spawnInterval: 6, spawnBehindMin: 12, spawnBehindMax: 28,
-  // half of all spawns (see spawnRucksacks) place downstream of the kayak instead of behind it —
-  // far enough out that it's beyond render distance at every quality tier (RENDER.viewAhead tops
-  // out at 170 m on high) plus fog, so nothing pops into view. It's not boosted like the
-  // behind-spawns (already moving away downstream at the current's own pace), so catching one
-  // takes real paddling rather than just holding a line and waiting for the current to deliver it.
+
   aheadFrac: 0.5, spawnAheadMin: 190, spawnAheadMax: 260,
-  // 4.5x/8m wasn't enough to actually pass a paddling player — a lazy stretch of river can be
-  // only ~1.3 m/s, so even a big multiplier stays slower than a paddling kayak's cruise speed.
-  // spawnBoostMin is an absolute floor (m/s) on top of the multiplier so the launch is always
-  // fast in absolute terms too, not just relative to whatever the local current happens to be.
-  spawnBoost: 3, spawnBoostMin: 2,   // downstream speed at launch = max(local current × 9, 7 m/s)
-  spawnBoostDist: 42,  // …held at that boosted target for about this many metres of actual
-                        // travel (not seconds — a fast river and a slow one hold it the same
-                        // distance) before tapering back to normal floating speed via the drag
-                        // relaxation below
-  baseFactor: 1.7,   // even its "settled" baseline speed (after the boost tapers off, or once
-                      // nudged free of a stuck spot) is this many times the raw local current —
-                      // a light bag genuinely does drift a bit faster than the bulk flow, and it
-                      // keeps the rucksack from exactly pacing an idle kayak forever
+
+
+  spawnBoost: 3, spawnBoostMin: 2,   
+  spawnBoostDist: 42, 
+  baseFactor: 1.7, 
   drag: 2.2, checkInterval: 4, stuckDist: 0.6, nudgeSpeed: 0.8,
 };
-// ---------- floating obstacles: drifting logs and ice ----------
-// A size class decides how an obstacle behaves against the kayak; a kind (log / ice) decides what
-// it looks like, how big it is and what it weighs. Any river can carry any subset of kinds and
-// classes — see RIVERS[].obstacles.
-//   medium — a fraction of a rock's contact stiffness plus some upward lift, so a paddler rides
-//            over it or shoves it aside with a noticeable bump instead of being stopped.
-//   large  — full KAYAK.collK stiffness, i.e. exactly as solid as the bed: a real wall.
-//
-// Spawning is live, like the rucksacks, not pre-placed. As the kayak makes downstream progress
-// each configured kind/class accrues `per100m` spawns per 100 m travelled; each one is dropped
-// into the channel `spawnAhead` metres downstream of the boat — the default lower bound sits past
-// RENDER.viewAhead (170 m on high) plus fog, so nothing is ever seen popping into existence — and
-// the current then carries it back toward the paddler. Once the boat has left one `despawnBehind`
-// metres upstream (or it has drifted past the take-out) it retires: it sinks `sinkDepth` metres
-// while fading out over `sinkTime` seconds, then its slot in the quota is freed.
-//
-// Physics: a floating capsule sampled at `samples` points along its length. Each sample is
-// dragged toward the locally simulated water velocity, with far more drag across the axis than
-// along it — in a sheared river that asymmetry is a real torque, which is what swings a trunk
-// round until it points downstream and makes one pinned on a boulder pivot about the contact.
-// Where the depth drops below its draft it grounds: pushed downhill by the bed slope, heavily
-// damped, so logs beach on bars and jam on emergent rocks. Obstacles also collide with each other.
+
 export const OBSTACLES = {
   enabled: true,
   maxActive: 40,                 // hard cap on obstacles existing at once (a river's `max` overrides)
@@ -521,10 +442,7 @@ export const OBSTACLES = {
     medium: { hitK: 0.16, lift: 0.45, samples: 4 },
     large:  { hitK: 1.0,  lift: 0.05, samples: 6 },
   },
-  // Each class lists mesh variants (built in metres, see buildObstacleMeshes) and the length
-  // range instances are drawn from. An instance picks a variant and a length, and is scaled
-  // uniformly to that length — thickness, draft and mass (density × the variant's volume × scale³)
-  // all follow, so shape variation comes from the variants and the scale, never from stretching.
+
   kinds: {
     log: { label: 'driftwood', density: 650, roll: true,
       medium: { meshes: ['logMedium', 'logMediumB'], len: [3.5, 6.0] },
@@ -539,16 +457,8 @@ export const LANDSLIDE = {
  
   bankOffset: [2, 16],     
   assumedSpeed: 3.2, leadTime: 1.5, minTriggerZ: 15, maxTriggerZ: 90, nearTriggerZ: 14, nearChance: 0.4,
-  // wave impulse injected into the water sim on water entry, scaled by how fast the boulder is
-  // actually moving when it gets there (see injectSplash) — splashHeight/splashRadius are the
-  // reference size at splashRefSpeed, scaled by clamp(speed/splashRefSpeed, splashMinScale,
-  // splashMaxScale) so a boulder that barely trickled in doesn't throw the same wave as one that
-  // built up real speed on a long run down. A short trickle-in and a long fast run should not look
-  // the same, which a single fixed splash size could never capture.
   splashRefSpeed: 6, splashRadius: 1.5, splashHeight: 0.34, splashMinScale: 0.35, splashMaxScale: 1.6,
-  // particle bursts (see spawnBurst in main.js — the same one pickups use, same count/life, just a
-  // different colour and trigger) — one splash burst on water entry, and a throttled dust puff
-  // roughly every dustInterval seconds while still visibly rolling on dry ground beforehand
+
   splashCol: [0.85, 0.92, 0.98], dustCol: [0.5, 0.4, 0.27], dustInterval: 0.22,
   deepWater: 0.9,          // [m] water depth beyond which a boulder stops rolling and settles —
 
@@ -560,31 +470,10 @@ export const LANDSLIDE = {
   large:  { meshes: ['boulderLarge'],  len: [2.6, 4.8], density: 2700, hitK: 2.6, lift: 0.02, samples: 4 },
 };
 
-//   pillars    either a count (0 … maxPillars auto-spread columns — trimmed with a warning if the
-//              channel is too narrow), or an array of per-pillar specs for hand-placed "caves":
-//                { along, across, radius, sizeAlong, sizeAcross, yaw, irregular,
-//                  baseFlare, waist, flare, flareFrom, flareCurve, lean, twist }
-//              along      0 … 1 position across the river (0 = left water's edge, 1 = right);
-//                         -0.2 … 1.2 allowed so a column can stand right at the bank
-//              across     -1 … 1 position along the river as a fraction of the local deck
-//                         half-width (0 = under the centreline; ±1 = at the deck's edge)
-//              radius     [m] mid-height radius; null = automatic from the column's height
-//              sizeAlong / sizeAcross   stretch of that radius along / across the bridge — so
-//                         sizeAcross ≈ width/(2·radius) spans the whole deck, 0.4 is a slender fin
-//              yaw        [deg] rotation of the ellipse about vertical
-//              irregular  0 … 3 how lumpy/off-round the column is (0 = clean ellipse)
-//              baseFlare  extra radius at the bed (talus foot), as a multiplier delta
-//              waist      narrowing at mid-height (0 = straight)
-//              flare      how much the column widens into the arch; flareFrom 0 … 1 height fraction
-//                         where that widening starts; flareCurve its exponent (>1 = late, abrupt)
-//              Several pillars may share an `along` as long as their `across` differ — overlap is
-//              only warned about (console), never rejected: placing them well is the designer's job.
 
 export const LAND_BRIDGE = {
   width: 6, widthVar: 0.3, height: 3, pillars: 1, thickness: 1.3, rise: 0.5, roughness: 1, wander: 1, flare: 0.8,
-  minExt: 4, maxExt: 22,       // [m] how far the deck is anchored into each bank (walks out until the
-                               // bank reaches deck level, within these bounds; the abutment terrain is
-                               // then shaped to meet it exactly)
+  minExt: 4, maxExt: 22,    
   maxPillars: 8, minHeight: 1.5,
   propDensity: 0.3, treeScale: 0.4, rockScale: 1.6, grassScale: 1.2,
   pillar: { along: 0.5, across: 0, radius: null, sizeAlong: 1, sizeAcross: 1.15, yaw: 0, irregular: 1,
@@ -713,10 +602,6 @@ export const STORE_LISTING = [
 ];
 
 // ---------- injury ----------
-// injury is a persistent, cross-run wound count (see profile.injury): a capsize on a given tier
-// adds that many points, minus any owned reduction (life vest always, better helmet on medium/hard
-// only — see applyInjury in progression.js). Reaching profile.health (the trainable trait above)
-// is fatal — see the `dead` flag applyInjury returns.
 export const INJURY = { perTier: { easy: 1, medium: 2, hard: 4 } };
 
 export const STAMINA = {
@@ -737,11 +622,7 @@ export const SKILL = {
 };
 
 export const PUTIN = 30;   // length of the calm put-in pool [m]
-// how close a channel's bank is allowed to ease in toward the world's left/right edge (GRID.W*dx),
-// not the put-in/take-out ends — generateRiver() sizes this against each river's own widest point
-// (base half-width, its meander, and any pond widening) so a wide river gets pushed toward the
-// centerline sooner than a narrow one, and softClamp (math.js) eases it in smoothly instead of
-// snapping the centerline flat against a hard bound.
+
 export const RIVER_SIDE_MARGIN = 4;   // [m]
 
 // ---------- mobile build ----------
