@@ -246,7 +246,7 @@ export const RIVERS = [
     pack: 'easyPack1',
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 } },
 
-  { name: 'Sandy Riffle', cls: 'Class II · easy', tier: 'easy', slope: 0.0019, manning: 0.032, halfW: 12, widthVar: 0.38,
+  { name: 'Sandy Riffle', cls: 'Class II · easy', tier: 'easy', slope: 0.0019, manning: 0.032, halfW: 12, widthVar: 0.38, art: 'img/Sandy.png',
     meander: [[16, 165], [7, 64]], depth: 1.5, rocks: 14, rockR: [0.8, 2.0], emergent: 0.35, ledges: [],
     constrictions: 1, valleyH: 9, valleyScale: 65, seed: 14, len: 300,
     biome: 'desert', waterTint: [0.15, 0.12, 0.06], waterClarity: 0.6,
@@ -737,6 +737,7 @@ export const STORE_LISTING = [
   { type: 'item', id: 'snack' },
   { type: 'item', id: 'bandaid' },
   { type: 'item', id: 'medikit' },
+  { type: 'item', id: 'energyDrink' },
   { type: 'training', id: 'basic' },
   { type: 'training', id: 'intensive' },
   { type: 'upgrade', id: 'sponsor' },
