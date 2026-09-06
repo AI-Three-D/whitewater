@@ -1,7 +1,7 @@
 // CPU-side reads of the world: bilinear terrain height/normal, water state from the band that is
 // read back from the GPU each frame (with a 1-D fallback outside it), and the channel-spot helper
 // shared by every placement routine.
-import { SIM } from './config.js';
+import { SIM } from './config/index.js';
 import { nearestChan } from './river.js';
 import { v3, clamp, smoothstep } from './math.js';
 import { S } from './state.js';

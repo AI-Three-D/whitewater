@@ -1,6 +1,6 @@
 // Raw input state: keyboard flags and the two touch paddle pads. No game logic beyond the
 // "only queue strokes mid-run" guard; main.js does the key → action wiring.
-import { MOBILE } from './config.js';
+import { MOBILE } from './config/index.js';
 import { $ } from './platform.js';
 import { S } from './state.js';
 

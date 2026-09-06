@@ -1,7 +1,7 @@
 // WebGPU resource ownership: device, fixed-size buffers, pipelines, bind groups and uploaded
 // meshes. No game behaviour lives here. Usage flags are only referenced inside functions so that
 // a browser without WebGPU fails at initGpu() with a readable message, not at module load.
-import { PARTS } from './config.js';
+import { PARTS } from './config/index.js';
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW, WGSL_BRIDGE } from './shaders.js';
 import { buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh, buildObstacleMeshes } from './meshes.js';
 import { W, L, N, Q } from './quality.js';

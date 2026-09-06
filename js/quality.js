@@ -2,7 +2,7 @@
 // grid dimensions *after* that mutation. Every module that sizes anything by the grid imports
 // W/L/dx from here, never from config.js: ES modules evaluate their dependencies first, so this
 // guarantees the tier has been applied before any buffer is allocated.
-import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS } from './config.js';
+import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS } from './config/index.js';
 
 const QKEY = 'whitewater.quality';
 

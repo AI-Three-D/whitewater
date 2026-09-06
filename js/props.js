@@ -1,6 +1,6 @@
 // Static scenery: vegetation/rock/grass instancing (sorted by Z so the draw window is one
 // contiguous run), finish poles, and the per-river bridge meshes.
-import { VEG, BIOMES, RENDER } from './config.js';
+import { VEG, BIOMES, RENDER } from './config/index.js';
 import { mat4TRS, mulberry32, clamp } from './math.js';
 import { nearestChan } from './river.js';
 import { buildLandBridgeMesh, buildBuiltBridgeMesh } from './meshes.js';

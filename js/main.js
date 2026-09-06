@@ -1,6 +1,6 @@
 // Entry point: boot sequence, key/button wiring and the per-frame loop. Game logic lives in the
 // modules this file calls — it should read as a table of contents.
-import { SIM, RIVERS, RIVERS_HIDDEN } from './config.js';
+import { SIM, RIVERS, RIVERS_HIDDEN , validateConfig} from './config/index.js';
 import { clamp } from './math.js';
 import { validateRiverConfig } from './river.js';
 import { loadProfile } from './progression.js';
@@ -141,8 +141,8 @@ async function main() {
     showErr(t);
     $('menu').style.display = 'none';
   };
-  // level-config sanity (land bridges vs floating obstacles etc.) — see validateRiverConfig
   try {
+    validateConfig();
     for (const R of [...RIVERS, ...RIVERS_HIDDEN]) validateRiverConfig(R);
   } catch (e) {
     return fail('Level configuration error:\n' + e.message);

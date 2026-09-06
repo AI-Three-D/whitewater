@@ -1,7 +1,7 @@
 // Landslide boulders: a trajectory is baked once at placement (deterministic per spot) and
 // replayed when the paddler comes within trigger distance; on arrival in the water it splashes
 // the sim and is carved into the bed so the river flows around it for the rest of the run.
-import { LANDSLIDE } from './config.js';
+import { LANDSLIDE } from './config/index.js';
 import { clamp, mulberry32 } from './math.js';
 import { S } from './state.js';
 import { gpu, ensureInstBuf } from './gpu.js';

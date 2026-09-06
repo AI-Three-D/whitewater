@@ -1,6 +1,6 @@
 // Collectibles: seeded paddle/coin(/diamond) placement, the live-spawned drifting rucksacks, the
 // once-per-tier hidden map, and per-frame fade/collection.
-import { PICKUPS, RUCKSACK, MAP_ITEM, COLLECTIBLES, SPECIAL_ITEMS, ITEMS } from './config.js';
+import { PICKUPS, RUCKSACK, MAP_ITEM, COLLECTIBLES, SPECIAL_ITEMS, ITEMS } from './config/index.js';
 import { clamp, mulberry32, mat4TRS } from './math.js';
 import { nearestChan } from './river.js';
 import { unlockHidden } from './progression.js';

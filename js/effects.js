@@ -1,5 +1,5 @@
 // Small spark bursts (pickup collected, landslide dust/splash). CPU-simulated, one instance each.
-import { PICKUPS } from './config.js';
+import { PICKUPS } from './config/index.js';
 import { mat4TRS, clamp } from './math.js';
 import { gpu, SPARK_MAX } from './gpu.js';
 

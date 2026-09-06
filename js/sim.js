@@ -1,5 +1,5 @@
 // Driving the GPU water and particle simulation: uniform packing, dispatch, warm-up.
-import { SIM, PARTS, RENDER } from './config.js';
+import { SIM, PARTS, RENDER } from './config/index.js';
 import { v3, qRotate, clamp } from './math.js';
 import { S } from './state.js';
 import { gpu } from './gpu.js';

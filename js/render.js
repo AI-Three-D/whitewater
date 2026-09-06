@@ -1,6 +1,6 @@
 // Everything that draws: chase camera, camera/sky uniforms, terrain LOD slices, the paddler's
 // pose, and the render pass itself.
-import { RENDER, SIM, KAYAK, BIOME_SKY, TIME_OF_DAY, BIOME_IDS, PARTS } from './config.js';
+import { RENDER, SIM, KAYAK, BIOME_SKY, TIME_OF_DAY, BIOME_IDS, PARTS } from './config/index.js';
 import { v3, qMul, qRotate, qAxisAngle, mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, mat4Compose, mat4Transform, clamp } from './math.js';
 import { MeshBuilder, addCylinder } from './meshes.js';
 import { S } from './state.js';

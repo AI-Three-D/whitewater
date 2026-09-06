@@ -1,6 +1,6 @@
 // Browser/device plumbing with no game logic: DOM lookup, the error overlay, mobile detection,
 // the tilt sensor and fullscreen. Safe to import from anywhere.
-import { MOBILE } from './config.js';
+import { MOBILE } from './config/index.js';
 import { clamp } from './math.js';
 
 const DEG = Math.PI / 180;
