@@ -23,7 +23,7 @@ export const QUALITY = {
       // window only hold the one-time load warm-up state (no live turbulence/foam) until the moving
       // window reaches them, so a view range that outruns compute reads as dead, frozen water.
       lod: { near: 60, mid: 110 },
-      viewAhead: 150, viewBehind: 25, computeAhead: 180, computeBehind: 45, fogDensity: 0.0028,
+      viewAhead: 150, viewBehind: 25, computeAhead: 120, computeBehind: 45, fogDensity: 0.0028,
     },
     low: {
       grid: { W: 216, L: 864, dx: 128 / 216 },
