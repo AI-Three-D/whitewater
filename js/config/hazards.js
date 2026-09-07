@@ -18,6 +18,10 @@ export const OBSTACLES = {
     vmax: 8, wmax: 2.5,            // sanity clamps [m/s], [rad/s]
     hullR: 0.34,                   // kayak hull radius used by the contact test [m]
     bob: 0.04, bobSpeed: 1.6,      // gentle vertical bob while afloat
+    // a log resting with its centreline AT the surface reads as half-submerged and disappears into
+    // the water's noise from any distance; riding this much higher (as a fraction of its radius)
+    // keeps most of it above the surface while still letting chaotic water dunk it now and then
+    freeboard: 0.15,
     ySmooth: 4,                    // [1/s] low-pass on the floating height (see surfaceAt in sampling.js)
     // size classes: how hard a hit is (hitK), how much it lifts the boat, how many axis samples
     classes: {

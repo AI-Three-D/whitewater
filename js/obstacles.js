@@ -228,7 +228,8 @@ function settleHeights(active, dtReal) {
     if (ob.kind === 'boulder' && ob.settled) continue;
     const target = ob.kind === 'boulder'
       ? terrainH(ob.x, ob.z) + ob.vrad
-      : surfaceAt(ob.x, ob.z) + (ob.grounded ? 0 : OBSTACLES.bob * Math.sin(S.simTime * OBSTACLES.bobSpeed + ob.bobPh));
+      : surfaceAt(ob.x, ob.z) + (ob.grounded ? 0 : ob.rad * OBSTACLES.freeboard
+          + OBSTACLES.bob * Math.sin(S.simTime * OBSTACLES.bobSpeed + ob.bobPh));
     ob.y += (target - ob.y) * ky;
   }
 }

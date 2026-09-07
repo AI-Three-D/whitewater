@@ -31,7 +31,7 @@ export const QUALITY = {
       veg: { caps: { tree: 100, bush: 80, rock: 80, grass: 500, boulder: 15 }, attempts: 12000 },
       dprCap: 0.75, warmupSteps: 300, macCormack: 1, turbA: 0.6, simpleShading: false, substeps: 2,
       lod: { near: 40, mid: 80 },
-      viewAhead: 120, viewBehind: 20, computeAhead: 140, computeBehind: 35, fogDensity: 0.0040,
+      viewAhead: 120, viewBehind: 20, computeAhead: 50, computeBehind: 10, fogDensity: 0.0040,
     },
   };
   export const QUALITY_LEVELS = ['high', 'medium', 'low'];
