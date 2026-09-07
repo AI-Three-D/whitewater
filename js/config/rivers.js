@@ -99,7 +99,7 @@ export const RIVERS = [
 
   // ---------- medium ----------
   river('medium', {
-    name: 'Boulder garden',
+    name: 'Boulder garden', art: 'img/Boulder.png',
     slope: 0.004, manning: 0.034, depth: 1.0, len: 240, seed: 24,
     halfW: 7, widthVar: 0.4, meander: [[20, 120], [6, 50]], constrictions: 0, valleyH: 24, valleyScale: 48,
     rocks: 165, rockR: [0.9, 2.4], emergent: 0.45,
@@ -107,7 +107,7 @@ export const RIVERS = [
     lanes: { count: 2, amp: 0.18, wander: 3, seedOffset: 36 },
   }),
   river('medium', {
-    name: 'Kopje Run', pack: 'mediumPack',
+    name: 'Kopje Run', art: 'img/Kopje.png', pack: 'mediumPack',
     slope: 0.009, manning: 0.035, depth: 1.1, len: 300, seed: 23,
     halfW: 8, widthVar: 0.35, meander: [[22, 140], [7, 55]], constrictions: 2, valleyH: 9, valleyScale: 95,
     rocks: 26, rockR: [0.9, 2.6], emergent: 0.5, ledges: [[300, 0.6]],

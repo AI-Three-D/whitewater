@@ -75,7 +75,7 @@ function renderCharSelect() {
   for (const [id, c] of Object.entries(CHARACTERS)) {
     const d = document.createElement('div');
     d.className = 'chr';
-    d.innerHTML = `${artSlot('chr-portrait', c.name + ' art')}
+    d.innerHTML = `${artSlot('chr-portrait', c.name + ' art', c.art)}
       <h3>${c.name}</h3><small>${c.title}</small><p>${c.desc}</p>
       <small>skill ${c.start.skill}/${c.caps.skill}</small>${pips(c.start.skill, c.caps.skill)}
       <small>stamina ${c.start.stamina}/${c.caps.stamina}</small>${pips(c.start.stamina, c.caps.stamina)}
@@ -90,7 +90,7 @@ function renderCharSelect() {
 
 function renderTopbar() {
   const prof = S.profile, c = character(prof), xp = xpBar(prof), tb = $('topbar');
-  tb.innerHTML = `${artSlot('topbar-portrait', 'portrait')}
+  tb.innerHTML = `${artSlot('topbar-portrait', 'portrait', c.art)}
     <div class="topbar-info">
       <div><b style="color:#ffe08a">${c.name}</b> ${c.title} · level <b>${prof.level}</b>
         · <b style="color:#ffd35c">${prof.coins || 0}</b> ${prof.coins === 1 ? 'coin' : 'coins'}</div>
@@ -426,7 +426,7 @@ export function showCharSheet() {
   const injuryNote = prof.injury >= prof.health ? ' — one more fall means a long recovery' : '';
   el.style.display = 'flex';
   el.innerHTML = `<div class="charsheet-card">
-      ${artSlot('charsheet-portrait', c.name + ' art')}
+      ${artSlot('charsheet-portrait', c.name + ' art', c.art)}
       <div class="charsheet-info">
         <h2>${c.name} <small>${c.title}</small></h2>
         <p>${c.desc}</p>

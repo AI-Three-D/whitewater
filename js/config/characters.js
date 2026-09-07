@@ -2,7 +2,7 @@
 
 export const CHARACTERS = {
     ronja: {
-      name: 'Ronja', title: 'the Technician',
+      name: 'Ronja', title: 'the Technician', art: 'img/character_sheet_ronja.png',
       desc: 'Grew up slalom racing. Reads water like a book and has hips of steel — but she tires quickly.',
       caps: { skill: 10, stamina: 6, health: 20 }, start: { skill: 1, stamina: 0, health: 10 }, talent: 'skill',
     },
