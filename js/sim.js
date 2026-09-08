@@ -18,6 +18,7 @@ export function writeSimUniforms(time, inQ, jOffset = 0) {
   f.set([SIM.kDecay, SIM.macCormack, SIM.kGen, SIM.foamGen], 16);
   f[20] = jOffset;
   f.set(vx ? [vx.x, vx.z, vx.strength, vx.radius] : [0, 0, 0, 0], 21);
+  f.set([SIM.maxRise, SIM.maxFall], 25);
   gpu.device.queue.writeBuffer(gpu.simUBuf, 0, ab);
 }
 

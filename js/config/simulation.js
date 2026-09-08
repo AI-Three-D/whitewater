@@ -47,6 +47,11 @@ export const QUALITY = {
     g: 9.81,
     hmin: 0.02,             // [m] below this a cell counts as dry
     umax: 12.0,             // [m/s] velocity clamp
+    // per-substep depth-change rate cap [m/s] — see height() in shaders.js. Nothing upstream
+    // limited how fast a cell could *fill* (only draining was CFL-limited), so a steep drop could
+    // dump a huge flux into one cell in a single step and spike its depth unphysically; this bounds
+    // that to something no faster than a real hydraulic jump, well above any ordinary wave/rapid
+    maxRise: 3.0, maxFall: 3.0,
     turbA: HIGH.turbA,      // stochastic forcing amplitude [m/s²] (1.5 = too much backflow)
     turbL: 3.0,             // turbulence length scale
     turbT: 0.8,             // turbulence time scale

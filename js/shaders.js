@@ -36,7 +36,7 @@ struct SimU {
   turbA: f32, turbL: f32, turbT: f32, foamDecay: f32,
   kDecay: f32, macCormack: f32, kGen: f32, foamGen: f32,
   jOffset: f32, vortexX: f32, vortexZ: f32, vortexStrength: f32,   // jOffset: first row of this dispatch's moving compute window
-  vortexRadius: f32, p2: f32, p3: f32, p4: f32,    // vortexRadius <= 0 → no vortex this river
+  vortexRadius: f32, maxRise: f32, maxFall: f32, p4: f32,   // vortexRadius <= 0 → no vortex this river
 };
 @group(0) @binding(0) var<uniform> P: SimU;
 @group(0) @binding(1) var<storage, read> B: array<f32>;
@@ -144,7 +144,14 @@ fn height(@builtin(global_invocation_id) gid: vec3u) {
   let FR = select(uR * hR * outScale(i+1, j), uR * h * sc, uR > 0.0);
   let FB = select(vB * h * sc, vB * hB * outScale(i, j-1), vB > 0.0);
   let FT = select(vT * hT * outScale(i, j+1), vT * h * sc, vT > 0.0);
-  SO[id] = vec4f(max(0.0, h - P.dt / P.dx * (FR - FL + FT - FB)), s.y, s.z, s.w);
+  let hRaw = max(0.0, h - P.dt / P.dx * (FR - FL + FT - FB));
+  // rate-limit how fast depth can change in one substep — outScale above already caps how much a
+  // cell can drain, but nothing capped how much it can fill. Right below a steep drop, a cell can
+  // take in a huge flux in one step with no matching limit, producing an unphysical one-frame
+  // depth spike (the water surface — and anything riding it — popping instead of rising/falling).
+  // Ordinary flow changes depth by well under a metre per second, so this only ever engages there.
+  let hNew = clamp(hRaw, h - P.maxFall * P.dt, h + P.maxRise * P.dt);
+  SO[id] = vec4f(hNew, s.y, s.z, s.w);
   KO[id] = KI[id];
 }
 fn noiseGrad(p: vec2f, t: f32) -> vec2f {
