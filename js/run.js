@@ -173,6 +173,11 @@ function lossMessage() {
 export function endRun(won) {
   if (S.gameState !== 'run') return;
   S.gameState = 'over';
+  // seed free-look from the chase cam's current angle so the switch to orbiting doesn't jump —
+  // it's still roughly "behind the boat", just now draggable (see cam.update in render.js)
+  S.freeCam.yaw = Math.atan2(-cam.dir[0], -cam.dir[2]);
+  S.freeCam.pitch = 0.28;
+  S.freeCam.dist = 9;
   const msg = $('msg');
   msg.style.display = 'flex';
   msg.innerHTML = won ? winMessage() : lossMessage();

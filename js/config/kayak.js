@@ -26,6 +26,10 @@ export const KAYAK = {
   startGrace: 2.5, graceStab: 90,   // extra stability fading out over the first seconds
   // paddle
   paddleFwd: 120, paddleBack: 80, sweepTorque: 85, sweepFwd: 45, strokePeriod: 0.8,
+  // backpaddling fights the current directly, and a human paddle can't out-muscle a real rapid —
+  // full strength below backFadeLo [m/s local flow speed], fading to none by backFadeHi, so a
+  // steep drop's fast water can't be casually stalled out by holding the back stroke through it
+  backFadeLo: 2.5, backFadeHi: 6.0,
   paddleSwingRate: 7,     // rad/s cap on the drawn paddle's yaw — turns any jump in the stroke angle into a short swing
   // terrain/obstacle contact
   collPts: [...buoyPts, [0, -0.14, 0], [0, -0.12, 0.8], [0, -0.12, -0.8]],

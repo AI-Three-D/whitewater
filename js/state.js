@@ -22,6 +22,9 @@ export const S = {
   frameTicks: 2,            // physics ticks run this frame (kayak.step divides obstacle reactions by it)
   fps: 60,
   camMode: 0,
+  // free-look orbit used once a run ends (gameState 'over') so a capsize/finish next to a big
+  // drop can actually be looked at — see cam.update in render.js and initFreeLook in controls.js
+  freeCam: { yaw: 0, pitch: 0.28, dist: 9 },
   dbgMode: 0,
   debugUnlockAll: false,    // dev: show every river as unlocked regardless of pack ownership
   debugNoCapsize: false,    // dev: kayak.step ignores roll/pitch capsize (KeyG / mGod)

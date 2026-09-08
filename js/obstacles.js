@@ -4,7 +4,7 @@
 import { OBSTACLES, RENDER } from './config/index.js';
 import { clamp, mulberry32, qMul, qAxisAngle, mat4Compose } from './math.js';
 import { S } from './state.js';
-import { gpu, ensureInstBuf } from './gpu.js';
+import { gpu, ensureInstBuf, ensureScratch } from './gpu.js';
 import { waterAt, terrainH, terrainN, surfaceAt, rowOf } from './sampling.js';
 import { kayak } from './kayak.js';
 import { triggerLandslides, replayLandslides } from './landslides.js';
@@ -258,13 +258,13 @@ export function writeObstacleInstances() {
   }
   river.obstDraw = [];
   for (const [name, list] of Object.entries(groups)) {
-    const data = new Float32Array(list.length * 20);
+    const data = ensureScratch('obst', name, list.length * 20);
     list.forEach((ob, n) => {
       const q = qMul(qAxisAngle([0, 1, 0], ob.yaw), qAxisAngle([0, 0, 1], ob.roll));
       data.set(mat4Compose([ob.x, ob.y, ob.z], q, [ob.sc, ob.sc, ob.sc]), n * 20);
       data.set([ob.tint[0], ob.tint[1], ob.tint[2], ob.alpha], n * 20 + 16);
     });
-    gpu.device.queue.writeBuffer(gpu.obstInstBufs[name], 0, data);
+    gpu.device.queue.writeBuffer(gpu.obstInstBufs[name], 0, data, 0, list.length * 20);
     river.obstDraw.push({ name, count: list.length });
   }
 }

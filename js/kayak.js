@@ -250,7 +250,11 @@ export const kayak = {
     if (input.fwd) {
       addForceAt(v3.add(p, R([this.side * 0.25, 0, 0.3])), v3.scale(fwdH, K.paddleFwd * power * this.env));
     } else if (input.back) {
-      addForceAt(v3.add(p, R([this.side * 0.25, 0, -0.3])), v3.scale(fwdH, -K.paddleBack * power * this.env));
+      // fast local water (a steep drop's chute, a hard pinch) fades this toward zero — see
+      // backFadeLo/Hi in config/kayak.js: a paddle can slow drifting water, not a rapid
+      const flow = waterAt(p[0], p[2]), flowSpeed = Math.hypot(flow.u, flow.v);
+      const backEff = clamp(1 - (flowSpeed - K.backFadeLo) / (K.backFadeHi - K.backFadeLo), 0, 1);
+      addForceAt(v3.add(p, R([this.side * 0.25, 0, -0.3])), v3.scale(fwdH, -K.paddleBack * power * this.env * backEff));
     }
     if (turn === 0) return 0;
     // a pure sweep also nudges the boat forward a little (no torque, so added to F directly)

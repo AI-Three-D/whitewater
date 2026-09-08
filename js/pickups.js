@@ -5,7 +5,7 @@ import { clamp, mulberry32, mat4TRS } from './math.js';
 import { nearestChan } from './river.js';
 import { unlockHidden } from './progression.js';
 import { S } from './state.js';
-import { gpu, ensureInstBuf } from './gpu.js';
+import { gpu, ensureInstBuf, ensureScratch } from './gpu.js';
 import { waterAt, rowOf, randomChannelSpot } from './sampling.js';
 import { kayak } from './kayak.js';
 import { spawnBurst } from './effects.js';
@@ -284,8 +284,8 @@ export function updatePickups() {
   for (const kind of allPickupKinds()) {
     const list = S.river.pickups[kind], buf = pickupInstBufs[kind];
     if (!list || !list.length || !buf) continue;
-    const data = new Float32Array(list.length * 20);
+    const data = ensureScratch('pickup', kind, list.length * 20);
     list.forEach((it, n) => updatePickup(kind, it, data, n));
-    gpu.device.queue.writeBuffer(buf, 0, data);
+    gpu.device.queue.writeBuffer(buf, 0, data, 0, list.length * 20);
   }
 }

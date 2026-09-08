@@ -100,7 +100,9 @@ function renderTopbar() {
     <div class="topbar-btns"><button id="openCharSheet">Character</button><button id="openStoreBtn">Store</button>
       <button id="debugUnlockBtn" style="background:${S.debugUnlockAll ? '#a33' : ''}">${S.debugUnlockAll ? 'Debug: all unlocked' : 'Debug: unlock all rivers'}</button>
       <button id="debugMoneyBtn">Debug: +1000 coins</button>
-      <button id="debugInvBtn">Debug: full inventory</button></div>`;
+      <button id="debugInvBtn">Debug: full inventory</button>
+      <button id="debugMaxBtn">Debug: max skills</button>
+      <button id="debugGearBtn">Debug: all gear</button></div>`;
   $('openCharSheet').onclick = showCharSheet;
   $('openStoreBtn').onclick = showStore;
   $('debugUnlockBtn').onclick = () => {
@@ -115,6 +117,22 @@ function renderTopbar() {
   // dev: top up every consumable to its max stack so testing doesn't need to grind coins first
   $('debugInvBtn').onclick = () => {
     for (const id of Object.keys(ITEMS)) prof.inventory[id] = ITEMS[id].maxStack;
+    saveProfile(prof);
+    renderMenu();
+  };
+  // dev: skill/stamina/health straight to this character's caps — the level/xp/points bookkeeping
+  // is left alone, this is only for testing what maxed-out traits feel like
+  $('debugMaxBtn').onclick = () => {
+    const caps = c.caps;
+    prof.skill = caps.skill; prof.stamina = caps.stamina; prof.health = caps.health;
+    saveProfile(prof);
+    renderMenu();
+  };
+  // dev: own every craft and upgrade — debugInvBtn only covers consumables (ITEMS), this is the
+  // one-time, ownership-based store items (boats, gear) it doesn't touch
+  $('debugGearBtn').onclick = () => {
+    for (const id of Object.keys(CRAFTS)) if (!prof.crafts.includes(id)) prof.crafts.push(id);
+    for (const id of Object.keys(UPGRADES)) if (!prof.upgrades.includes(id)) prof.upgrades.push(id);
     saveProfile(prof);
     renderMenu();
   };

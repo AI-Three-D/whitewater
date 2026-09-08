@@ -327,7 +327,9 @@ struct Cam { vp: mat4x4f, ivp: mat4x4f, camPos: vec4f, sunDir: vec4f, prm: vec4f
              env: vec4f,      // .x = biome id, selecting a terrain/prop palette (see fsTerrain).
                               // .y = exposure: scales every lit surface (terrain/water/props — see
                               // applyExposure below) so time-of-day (config.js TIME_OF_DAY) can make
-                              // night genuinely dark instead of just differently tinted at day brightness
+                              // night genuinely dark instead of just differently tinted at day brightness.
+                              // .z = moon: 0 for every daylight time-of-day, >0 at night — swaps
+                              // skyColor's disc/halo from the sun's look to the moon's (see below)
              skyHorizon: vec4f, skyZenith: vec4f };  // sky gradient colours (.rgb; .a unused) — driven
                               // by time-of-day in writeCam() (main.js), 'day' reproduces the values
                               // that used to be hardcoded here
@@ -344,9 +346,15 @@ fn ci(i: i32, j: i32) -> u32 {
 fn skyColor(d: vec3f) -> vec3f {
   var c = mix(C.skyHorizon.rgb, C.skyZenith.rgb, pow(max(d.y, 0.0), 0.6));
   let sd = max(dot(d, C.sunDir.xyz), 0.0);
-  // the sun disc/glow scales with exposure too — a below-horizon "night" sunDir would otherwise
-  // still paint a bright glowing patch low in an otherwise dark sky, reading as dusk, not night
-  c += vec3f(1.0, 0.92, 0.75) * (pow(sd, 900.0) * 6.0 + pow(sd, 12.0) * 0.25) * C.env.y;
+  let moon = clamp(C.env.z, 0.0, 1.0);
+  // sun disc + its warm atmospheric halo, scaled by exposure so dawn/dusk read dimmer than noon —
+  // fully silenced once 'moon' takes over (night) so the old below-horizon sunDir trick (which hid
+  // the sun by pointing it underground) isn't needed and can't paint a leftover glow back in
+  c += vec3f(1.0, 0.92, 0.75) * (pow(sd, 900.0) * 6.0 + pow(sd, 12.0) * 0.25) * C.env.y * (1.0 - moon);
+  // moon: a small, cool, crisp disc with only a tight sliver of halo — deliberately NOT scaled by
+  // the (very low) night exposure, so it still reads clearly against a properly black sky instead
+  // of getting crushed to nothing along with everything else
+  c += vec3f(0.82, 0.88, 1.0) * (pow(sd, 1400.0) * 3.2 + pow(sd, 300.0) * 0.12) * moon;
   // stars fade in as exposure drops (night) — no separate on/off knob needed. Sparse per-direction
   // points via a coarse hash grid, twinkle-free (cheap: one hash lookup, no noise octaves) since a
   // static point field already reads fine at this scale, and this runs once per sky pixel.

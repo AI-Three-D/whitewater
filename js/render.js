@@ -37,7 +37,23 @@ export const cam = {
     return d;
   },
 
+  // orbit the crash/finish spot on drag input (S.freeCam, driven by controls.js) instead of
+  // chasing the boat — the chase cam can't be steered, so a drop right at the take-out or a
+  // capsize next to a waterfall is otherwise impossible to actually look at afterward
+  updateFree(dt) {
+    const { yaw, pitch, dist } = S.freeCam, anchor = kayak.p;
+    const cp = Math.cos(pitch);
+    const offset = [dist * cp * Math.sin(yaw), dist * Math.sin(pitch) + 1.2, dist * cp * Math.cos(yaw)];
+    const want = v3.add(anchor, offset);
+    want[1] = Math.max(want[1], terrainH(want[0], want[2]) + 1.0);
+    const kp = 1 - Math.exp(-dt * 5);
+    this.pos = v3.add(this.pos, v3.scale(v3.sub(want, this.pos), kp));
+    const wantLook = v3.add(anchor, [0, 1, 0]);
+    this.look = v3.add(this.look, v3.scale(v3.sub(wantLook, this.look), kp));
+  },
+
   update(dt) {
+    if (S.gameState === 'over') return this.updateFree(dt);
     const p = kayak.p, cs = camScale(), far = S.camMode === 2;
     const k = 1 - Math.exp(-dt * (S.camMode === 1 ? 6 : 1.8));
     this.dir = v3.norm(v3.add(this.dir, v3.scale(v3.sub(this.wantedDir(), this.dir), k)));
@@ -68,9 +84,12 @@ export function currentSky() {
     skyHorizon: tod.skyHorizon,
     skyZenith: tod.skyZenith,
     exposure: tod.exposure,
+    moon: tod.moon ?? 0,
   };
 }
 
+const camBuf = new Float32Array(76);   // 304 B — must match the Cam struct in shaders.js; reused
+                                        // every frame by writeCam instead of reallocated
 export function writeCam() {
   const { canvas } = gpu, R = S.river && S.river.R;
   const proj = mat4Perspective(60 * Math.PI / 180, canvas.width / canvas.height, 0.3, 900);
@@ -80,7 +99,7 @@ export function writeCam() {
   cam.up = [view[1], view[5], view[9]];
   const sky = currentSky(), sunDir = v3.norm(sky.sunDir);
   const wt = (R && R.waterTint) || [0.02, 0.10, 0.09];   // the original deep-water colour
-  const f = new Float32Array(76);   // 304 B — must match the Cam struct in shaders.js
+  const f = camBuf;
   f.set(vp, 0);
   f.set(ivp, 16);
   f.set([...cam.pos, 1], 32);
@@ -91,7 +110,7 @@ export function writeCam() {
   f.set([...cam.right, 0], 52);
   f.set([...cam.up, 0], 56);
   f.set([...wt, (R && R.waterClarity) || 1], 60);
-  f.set([BIOME_IDS[(R && R.biome) || 'alpine'] ?? 0, sky.exposure ?? 1, 0, 0], 64);
+  f.set([BIOME_IDS[(R && R.biome) || 'alpine'] ?? 0, sky.exposure ?? 1, sky.moon ?? 0, 0], 64);
   f.set([...sky.skyHorizon, 0], 68);
   f.set([...sky.skyZenith, 0], 72);
   gpu.device.queue.writeBuffer(gpu.camUBuf, 0, f);
@@ -119,8 +138,10 @@ function lodSlices(overlap) {
 }
 
 // ---------- paddler pose ----------
+const kayakInstBuf = new Float32Array(20);   // reused for every part; writeBuffer copies out
+                                              // synchronously so it's safe to overwrite right after
 function writeKayakInst(name, m, tint = [1, 1, 1, 1]) {
-  const d = new Float32Array(20);
+  const d = kayakInstBuf;
   d.set(m, 0);
   d.set(tint, 16);
   gpu.device.queue.writeBuffer(gpu.kayakInst[name], 0, d);

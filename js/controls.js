@@ -3,6 +3,7 @@
 import { MOBILE } from './config/index.js';
 import { $ } from './platform.js';
 import { S } from './state.js';
+import { clamp } from './math.js';
 
 export const input = { fwd: false, back: false, left: false, right: false, leanL: false, leanR: false };
 
@@ -58,4 +59,34 @@ export function initPads() {
     el.addEventListener('pointercancel', release);
     el.addEventListener('contextmenu', e => e.preventDefault());   // no long-press menu
   }
+}
+
+// drag-to-orbit camera for the end-of-run screen (see cam.updateFree in render.js) — only live
+// while gameState is 'over', so it never fights the in-run chase cam or the pads.
+// Listens on `document`, not the canvas: #msg is a full-viewport `position:fixed;inset:0` overlay
+// that sits on top of the canvas whenever a run is over (that's how its buttons receive clicks at
+// all), so a canvas-only listener would never see a pointerdown that starts anywhere over it.
+export function initFreeLook() {
+  let dragging = false, lastX = 0, lastY = 0;
+  document.addEventListener('pointerdown', e => {
+    if (S.gameState !== 'over') return;
+    dragging = true;
+    lastX = e.clientX; lastY = e.clientY;
+  });
+  document.addEventListener('pointermove', e => {
+    if (!dragging || S.gameState !== 'over') return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    const fc = S.freeCam;
+    fc.yaw -= dx * 0.008;
+    fc.pitch = clamp(fc.pitch + dy * 0.006, -0.15, 1.3);
+  });
+  const stop = () => { dragging = false; };
+  document.addEventListener('pointerup', stop);
+  document.addEventListener('pointercancel', stop);
+  document.addEventListener('wheel', e => {
+    if (S.gameState !== 'over') return;
+    e.preventDefault();
+    S.freeCam.dist = clamp(S.freeCam.dist + e.deltaY * 0.01, 3, 30);
+  }, { passive: false });
 }

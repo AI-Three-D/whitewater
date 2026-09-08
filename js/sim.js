@@ -7,9 +7,10 @@ import { waterAt } from './sampling.js';
 import { kayak } from './kayak.js';
 import { W, L, dx } from './quality.js';
 
+const simUAb = new ArrayBuffer(112), simUF = new Float32Array(simUAb), simUU = new Uint32Array(simUAb);
 export function writeSimUniforms(time, inQ, jOffset = 0) {
   const river = S.river, vx = river.R.vortex;
-  const ab = new ArrayBuffer(112), f = new Float32Array(ab), u = new Uint32Array(ab);
+  const ab = simUAb, f = simUF, u = simUU;
   u[0] = W; u[1] = L;
   f.set([dx, SIM.dt, SIM.g, river.R.manning, SIM.hmin, SIM.umax], 2);
   f.set([time, river.inEta, inQ, river.inVelScale], 8);
@@ -65,6 +66,7 @@ export async function runWarmup() {
 }
 
 // spray emitters: ambient, bow wave (speed relative to the water, plus thuds) and the paddle blade
+const partUF = new Float32Array(28);   // reused every frame; writeBuffer copies out synchronously
 export function writeParticleUniforms(dtReal) {
   const k = kayak, t = S.simTime;
   const wB = waterAt(k.p[0], k.p[2]);
@@ -76,7 +78,7 @@ export function writeParticleUniforms(dtReal) {
   const bl = k.blade, wBl = waterAt(bl[0], bl[2]);
   const bladeWet = k.paddling && bl[1] < wBl.eta + 0.05 && wBl.h > 0.1;
   const padProb = bladeWet ? 0.05 * k.env * (k.tired ? 0.5 : 1) : 0;
-  const pu = new Float32Array(28);
+  const pu = partUF;
   pu.set([W, L, dx, dtReal], 0);
   pu.set([t, SIM.hmin, PARTS.kayakShare, PARTS.ambient], 4);
   pu.set([k.p[0], k.p[1], k.p[2], PARTS.ambient], 8);

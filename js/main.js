@@ -7,7 +7,7 @@ import { loadProfile } from './progression.js';
 import { $, showErr, installErrorHandlers, isMobile } from './platform.js';
 import { S, TIME_SCALE, MAX_PHYS_TICKS } from './state.js';
 import { gpu, initGpu, resize } from './gpu.js';
-import { input, KEYMAP, PAD_KEYS, padDown, padUp, initPads } from './controls.js';
+import { input, KEYMAP, PAD_KEYS, padDown, padUp, initPads, initFreeLook } from './controls.js';
 import { kayak } from './kayak.js';
 import { encodeBandCopy, finishBandCopy } from './sampling.js';
 import { computeWindow, inflowQ, writeSimUniforms, writeParticleUniforms, encodeWaterSim, encodeParticleSim } from './sim.js';
@@ -160,6 +160,7 @@ async function main() {
   S.profile = loadProfile();
   bindKeys();
   initPads();
+  initFreeLook();
   bindMobileButtons();
   initUi({ startRun });
   showMenu();

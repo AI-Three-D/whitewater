@@ -38,6 +38,18 @@ export function ensureInstBuf(registry, name, count) {
   return registry[name];
 }
 
+// grow-only Float32Array registry, keyed by name within `pool` — lets per-frame instance writers
+// (obstacles, pickups: rebuilt and reuploaded every frame) reuse one buffer instead of allocating
+// fresh every frame. Callers must pass the live element count to queue.writeBuffer's size argument
+// since the returned array can be longer than what's filled this frame.
+const scratchPools = {};
+export function ensureScratch(pool, name, floats) {
+  const reg = scratchPools[pool] || (scratchPools[pool] = {});
+  const cur = reg[name];
+  if (cur && cur.length >= floats) return cur;
+  return (reg[name] = new Float32Array(floats));
+}
+
 const mapValues = (obj, f) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, f(v)]));
 
 export async function initGpu(canvas) {

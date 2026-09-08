@@ -136,8 +136,21 @@ export function generateRiver(R) {
   const constrLo = 50, constrHi = Math.max(constrLo + 20, finishZ - 30);
   const constr = [];
   for (let k = 0; k < R.constrictions; k++) constr.push({ z: constrLo + rng() * (constrHi - constrLo), s: 0.3 + 0.3 * rng() });
-  const forks = R.forks || [], waterfalls = R.waterfalls || [];
+  const forks = R.forks || [], waterfalls = R.waterfalls || [], bands = R.bands || [];
   const seed = R.seed;
+  // channel-narrowing at a waterfall: unlike elevation (dropAt below), which genuinely sums every
+  // step, width narrowing from several nearby waterfalls must NOT compound — take whichever single
+  // one pinches hardest here, not the product of all of them. Multiplying them (the old behaviour)
+  // made a tight staircase of small drops oscillate the channel width every few metres wherever two
+  // drops' falloffs overlapped, carving a jagged sawtooth bank instead of a smooth one.
+  const pinchAt = (z, wfPool) => {
+    let m = 0;
+    for (const wf of wfPool) {
+      const p = (wf.pinch ?? clamp(wf.drop / 14, 0, 0.3)) * Math.exp(-(((z - wf.z) / ((wf.len ?? 5) * 1.4)) ** 2));
+      if (p > m) m = p;
+    }
+    return m;
+  };
   const mdev = z => { let s = 0; for (const [A, lam, ph] of meander) s += A * Math.sin(6.2832 * z / lam + ph); return s; };
   const dev0 = mdev(0);
   // an optional calm, wide, current-free "pond" partway down the river — same treatment as the
@@ -154,7 +167,7 @@ export function generateRiver(R) {
     const calmPond = R.pond ? smoothstep(pond0 - 15, pond0, z) * (1 - smoothstep(pond1, pond1 + 15, z)) : 0;
     let hw = R.halfW * (1 + R.widthVar * (vnoise2(z * 0.012, 3.7, seed) * 2 - 1));
     for (const k of constr) hw *= 1 - k.s * Math.exp(-(((z - k.z) / 18) ** 2));
-    for (const wf of waterfalls) if (wf.branch == null) hw *= 1 - (wf.pinch ?? clamp(wf.drop / 14, 0, 0.3)) * Math.exp(-(((z - wf.z) / ((wf.len ?? 5) * 1.4)) ** 2));
+    hw *= 1 - pinchAt(z, waterfalls.filter(wf => wf.branch == null));
     // the put-in pool only ever needs to read as "calm", but a pond is a real destination and
     // should be unmistakably a pond, not a wide spot in the river — so it gets its own, much
     // bigger width multiplier on top of the put-in pool's, independently configurable per river
@@ -169,6 +182,28 @@ export function generateRiver(R) {
     const hw = hwAt(z), lo = hw + RIVER_SIDE_MARGIN, hi = Wd - hw - RIVER_SIDE_MARGIN;
     return softClamp(Wd / 2 + smoothstep(PUTIN, PUTIN + 80, z) * (mdev(z) - dev0), lo, hi);
   };
+  // total ledge + waterfall + gradient-band drop already "in effect" by z, counting only the
+  // waterfalls in `wfPool`. Sharing this between base.T and every fork branch (each passing its
+  // own pool: branch-null only for the merged/default channel, branch-null + its own branch id
+  // for a forked one) is what guarantees they all land on the exact same elevation wherever their
+  // z-ranges overlap — most importantly right where a fork's branches rejoin (see channelsAt below).
+  //
+  // R.bands: [{ z0, z1, drop }] — an extra smooth drop spread over [z0, z1], on top of the river's
+  // ordinary slope. A ledge or wfPool waterfall whose z falls inside the band spends part of that
+  // `drop` instead of adding to it on top; whatever's left over is spread evenly across the whole
+  // band. That's what lets two branches spend the same band total completely differently (one big
+  // plunge vs. a staircase of small ledges) and still reach identical elevations at the band's ends.
+  const dropAt = (z, wfPool) => {
+    let d = 0;
+    for (const [zl, dl] of R.ledges) d += dl * smoothstep(zl - 2, zl + 2, z);
+    for (const wf of wfPool) d += wf.drop * smoothstep(wf.z - (wf.len ?? 5) / 2, wf.z + (wf.len ?? 5) / 2, z);
+    for (const bd of bands) {
+      const used = R.ledges.reduce((s, [zl, dl]) => s + (zl >= bd.z0 && zl <= bd.z1 ? dl : 0), 0)
+        + wfPool.reduce((s, wf) => s + (wf.z >= bd.z0 && wf.z <= bd.z1 ? wf.drop : 0), 0);
+      d += Math.max(0, bd.drop - used) * smoothstep(bd.z0, bd.z1, z);
+    }
+    return d;
+  };
   const channelsAt = z => {
     const calmPutin = 1 - smoothstep(PUTIN * 0.35, PUTIN, z);      // 1 in the pool → 0 in the rapid
     const calmPond = R.pond ? smoothstep(pond0 - 15, pond0, z) * (1 - smoothstep(pond1, pond1 + 15, z)) : 0;
@@ -178,10 +213,9 @@ export function generateRiver(R) {
     // the pond flattens the bed's downhill slope through its span, then resumes it afterward from
     // the same elevation as if the pond's length had simply been skipped — no slope discontinuity
     const zEff = R.pond ? z - clamp(z - pond0, 0, pond1 - pond0) : z;
-    let T = -R.slope * Math.max(0, zEff - PUTIN * 0.4)         // flat bed for the first 12 m
+    const T0 = -R.slope * Math.max(0, zEff - PUTIN * 0.4)       // flat bed for the first 12 m
           + 0.12 * (vnoise2(z * 0.05, 9.1, seed + 1) * 2 - 1) * (1 - calm);
-    for (const [zl, d] of R.ledges) T -= d * smoothstep(zl - 2, zl + 2, z);
-    for (const wf of waterfalls) if (wf.branch == null) T -= wf.drop * smoothstep(wf.z - (wf.len ?? 5) / 2, wf.z + (wf.len ?? 5) / 2, z);
+    const T = T0 - dropAt(z, waterfalls.filter(wf => wf.branch == null));
     const D = R.depth * (1 + 0.25 * (vnoise2(z * 0.03, 5.5, seed + 2) * 2 - 1))
             * clamp(Math.pow(R.halfW / hw, 0.4), 0.7, 1.8) * (1 + 0.8 * calm);   // and deeper
     const curv = (centerAt(z + 2) - 2 * c + centerAt(z - 2)) / 4;
@@ -201,11 +235,12 @@ export function generateRiver(R) {
         const off = t * (separation / 2) * side + t * (separation * 0.12) * (vnoise2(z * 0.015, seed + 40 + kk) * 2 - 1);
         const hwFull = base.hw * widthScale * sh[kk] * 2;
         let bhw = base.hw + t * (hwFull - base.hw);
-        let bT = base.T;
-        for (const wf of waterfalls) if (wf.branch === kk) {
-          bT -= wf.drop * smoothstep(wf.z - (wf.len ?? 5) / 2, wf.z + (wf.len ?? 5) / 2, z);
-          bhw *= 1 - (wf.pinch ?? clamp(wf.drop / 14, 0, 0.3)) * Math.exp(-(((z - wf.z) / ((wf.len ?? 5) * 1.4)) ** 2));
-        }
+        // this branch's own elevation: same shared/branch-null waterfalls as base.T, plus whatever
+        // is tagged to this branch specifically — computed from scratch (not "base.T minus this
+        // branch's drop") so it and base.T are both just different views of the same dropAt/bands
+        // machinery, guaranteed to agree wherever a band or branch-null waterfall covers them both
+        const bT = T0 - dropAt(z, waterfalls.filter(wf => wf.branch == null || wf.branch === kk));
+        bhw *= 1 - pinchAt(z, waterfalls.filter(wf => wf.branch == null || wf.branch === kk));
         bhw = Math.max(bhw, 2);
         const bD = Math.max(base.D + t * base.D * (sh[kk] - 0.5) * 0.6, 0.4);
         // softClamp, not clamp: eases the branch back toward its sibling as it nears the world
