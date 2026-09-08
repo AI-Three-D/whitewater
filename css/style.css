@@ -43,7 +43,7 @@ kbd{background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;border:1p
 #quality button:hover{background:rgba(255,255,255,.2)}
 #quality button.on{background:#ffe08a;color:#1a1e12;border-color:#ffe08a;font-weight:700}
 
-#charsel{display:flex;gap:22px;margin:14px 0}
+#charsel{display:flex;flex-wrap:wrap;justify-content:center;gap:22px;margin:14px 0}
 .chr{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:12px;padding:18px 22px;width:260px;cursor:pointer;transition:.15s}
 .chr:hover{background:rgba(255,255,255,.18);transform:translateY(-3px)}
 .chr h3{margin:0 0 4px}.chr small{color:#bde}.chr p{font-size:13px;color:#cde;margin:8px 0;text-align:left}
@@ -57,7 +57,7 @@ kbd{background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;border:1p
   border:1px dashed rgba(255,255,255,.35);border-radius:9px;display:flex;align-items:center;justify-content:center;
   color:rgba(255,255,255,.45);font-size:11px;text-transform:uppercase;letter-spacing:1.5px;flex-shrink:0}
 #menuHero{width:min(680px,90vw);height:100px;margin-bottom:8px}
-.chr-portrait{width:100%;height:100px;margin-bottom:10px}
+.chr-portrait{width:100%;height:170px;margin-bottom:10px;background-position:center 15%!important}
 .riv-thumb{width:100%;height:56px;margin-bottom:8px}
 .store-banner{width:min(600px,88vw);height:84px;margin-bottom:4px}
 .opt-icon{width:52px;height:52px;margin:0 auto 10px}

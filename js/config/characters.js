@@ -7,7 +7,7 @@ export const CHARACTERS = {
       caps: { skill: 10, stamina: 6, health: 20 }, start: { skill: 1, stamina: 0, health: 10 }, talent: 'skill',
     },
     bram: {
-      name: 'Bram', title: 'the Engine',
+      name: 'Bram', title: 'the Engine', art: 'img/character_sheet_bram.png',
       desc: 'Ex-rower. Can paddle all day without slowing down, but the boat still surprises him now and then.',
       caps: { skill: 6, stamina: 10, health: 20 }, start: { skill: 0, stamina: 1, health: 10 }, talent: 'stamina',
     },

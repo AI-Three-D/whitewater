@@ -71,7 +71,7 @@ function renderQuality() {
 
 function renderCharSelect() {
   const cs = $('charsel');
-  cs.innerHTML = '<p style="width:100%;margin:0 0 6px">Choose your paddler</p>';
+  cs.innerHTML = '<p style="width:100%;margin:0 0 6px;text-align:center">Choose your paddler</p>';
   for (const [id, c] of Object.entries(CHARACTERS)) {
     const d = document.createElement('div');
     d.className = 'chr';
