@@ -197,26 +197,21 @@ export const RIVERS = [
 
 // one per tier, shown as "???" until the tier's map item has been found
 export const RIVERS_HIDDEN = [
-  // waterfall test ground. The fork's two branches spend the SAME 100–150 m gradient band
-  // completely differently (one big plunge vs. a staircase) and are guaranteed by the band
-  // mechanism (see dropAt in river.js) to land on identical elevation where they rejoin — no more
-  // manual "make both totals add up to 8" bookkeeping, and the merged channel past the fork now
-  // correctly inherits the drop too (it used to snap back up to the undropped baseline there).
   secret('easy', {
-    name: 'Silver Cache',
-    slope: 0.0014, manning: 0.032, depth: 1.6, len: 300, seed: 91,
+    name: 'Silver Falls',
+    slope: 0.0014, manning: 0.032, depth: 1.2, len: 300, seed: 91,
     halfW: 9, widthVar: 0.12, meander: [[6, 240]], constrictions: 0, valleyH: 26, valleyScale: 55,
     rocks: 0, emergent: 0.2,
     //ledges: [[65, 0.4], [82, 0.5]],
-    bands: [{ z0: 100, z1: 180, drop: 11 }],   // must match the fork's span (startZ/mergeZ) and both branches' actual totals
-    forks: [{ startZ: 100, mergeZ: 180, islandHeight: 10.0, splitLen: 30, mergeLen: 25, separation: 30, widthScale: 0.9, shares: [0.5, 0.5] }],
+    bands: [{ z0: 100, z1: 150, drop: 11 }],   // must match the fork's span (startZ/mergeZ) and both branches' actual totals
+    forks: [{ startZ: 100, mergeZ: 160, islandHeight: 10.0, splitLen: 30, mergeLen: 25, separation: 14, widthScale: 0.7, shares: [0.5, 0.5] }],
     waterfalls: [
-      { z: 110, drop: 11, len: 8, branch: 1, pinch: 0.55 },                    // branch 1: one big plunge — spends the whole band
-      { z: 145, drop: 1.0, len: 4, branch: 0 },
+      { z: 110, drop: 8, len: 8, branch: 1, pinch: 0.55 },                    // branch 1: one big plunge — spends the whole band
+   /*   { z: 145, drop: 1.0, len: 4, branch: 0 },
       { z: 155, drop: 0.5, len: 4, branch: 0 },
       { z: 165, drop: 1.0, len: 4, branch: 0 }, 
       { z: 175, drop: 1.0, len: 4, branch: 0 },  // branch 0: staircase — same total, spread out
-
+*/
 
     ],
     biome: 'icy', waterTint: [0.05, 0.14, 0.22], waterClarity: 1.0,

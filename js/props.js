@@ -1,6 +1,6 @@
 // Static scenery: vegetation/rock/grass instancing (sorted by Z so the draw window is one
 // contiguous run), finish poles, and the per-river bridge meshes.
-import { VEG, BIOMES, RENDER } from './config/index.js';
+import { VEG, BIOMES, RENDER, LANDSLIDE } from './config/index.js';
 import { mat4TRS, mulberry32, clamp } from './math.js';
 import { nearestChan } from './river.js';
 import { buildLandBridgeMesh, buildBuiltBridgeMesh } from './meshes.js';
@@ -109,7 +109,7 @@ function placeBridgeProps(rng, biome, push) {
 }
 
 function placeOpenGround(rng, biome, push) {
-  const river = S.river;
+  const river = S.river, zone = river.R.landslideZone;
   for (let n = 0; n < VEG.attempts; n++) {
     const x = rng() * W * dx, z = rng() * L * dx;
     const row = nearestChan(river.rows[rowOf(z)], x);
@@ -123,7 +123,13 @@ function placeOpenGround(rng, biome, push) {
     const nrm = terrainN(x, z), m = (ad - 1) * row.hw, r = rng();
     const mixTable = nrm[1] < 0.72 ? biome.mix.steep : m < 3 ? biome.mix.bank : biome.mix.open;
     const role = pickRole(mixTable, r);
-    if (role) push(role, x, z);
+    if (!role) continue;
+    // keep the landslide corridor free of static rock/boulder props: a rolling landslide boulder
+    // only reacts to the terrain heightfield (see bakeBoulderTrajectory in landslides.js), not to
+    // other scenery, so a static rock sitting in its path would just get rolled straight through it
+    if ((role === 'rock' || role === 'boulder') && zone && z >= zone.from && z <= zone.to
+      && m <= LANDSLIDE.bankOffset[1] + 3) continue;
+    push(role, x, z);
   }
 }
 

@@ -358,10 +358,12 @@ fn skyColor(d: vec3f) -> vec3f {
   // fully silenced once 'moon' takes over (night) so the old below-horizon sunDir trick (which hid
   // the sun by pointing it underground) isn't needed and can't paint a leftover glow back in
   c += vec3f(1.0, 0.92, 0.75) * (pow(sd, 900.0) * 6.0 + pow(sd, 12.0) * 0.25) * C.env.y * (1.0 - moon);
-  // moon: a small, cool, crisp disc with only a tight sliver of halo — deliberately NOT scaled by
-  // the (very low) night exposure, so it still reads clearly against a properly black sky instead
-  // of getting crushed to nothing along with everything else
-  c += vec3f(0.82, 0.88, 1.0) * (pow(sd, 1400.0) * 3.2 + pow(sd, 300.0) * 0.12) * moon;
+  // moon: a cool disc with a soft, fairly wide halo — deliberately NOT scaled by the (very low)
+  // night exposure, so it still reads clearly against a properly black sky. The halo is wide on
+  // purpose: the chase camera can't look around, so a tight glow only ever visible when the moon's
+  // fixed sky position happens to be dead ahead was effectively invisible in normal play — this
+  // way a soft glow is noticeable well off to the side too, not just the crisp disc dead-on
+  c += vec3f(0.82, 0.88, 1.0) * (pow(sd, 800.0) * 3.5 + pow(sd, 40.0) * 0.35) * moon;
   // stars fade in as exposure drops (night) — no separate on/off knob needed. Sparse per-direction
   // points via a coarse hash grid, twinkle-free (cheap: one hash lookup, no noise octaves) since a
   // static point field already reads fine at this scale, and this runs once per sky pixel.
@@ -656,10 +658,18 @@ fn etaN(i: i32, j: i32, eta0: f32, hmin: f32) -> f32 {
     let shallowT = mix(vec3f(0.32, 0.28, 0.21) * 0.8, C.water.rgb * 1.8, 0.45);
     let body = mix(C.water.rgb, shallowT, absorb);
     let spec = pow(max(dot(R, C.sunDir.xyz), 0.0), 180.0) * 1.2;
-    col = mix(body, sky, F) + spec * vec3f(1.0, 0.95, 0.85);
+    col = mix(body, sky, F);
     let foamCol = vec3f(0.92, 0.95, 0.97) * (0.8 + 0.4 * max(dot(n, C.sunDir.xyz), 0.0));
     col = mix(col, foamCol, smoothstep(0.1, 0.55, fa));
-    col = applyFog(applyExposure(col), length(in.wp - C.camPos.xyz));
+    // the specular glint is a direct reflection of the sun/moon disc, not ambient light — it
+    // shouldn't get fully crushed by night's very low exposure along with everything else (that's
+    // what was making a moon's reflection invisible on calm water), so it's added after exposure
+    // with only a floor applied (not the raw, uncapped brightness a sunny-day glint gets) and
+    // cooled toward the moon's own colour instead of the sun's warm tint, then still fogged like
+    // everything else
+    let moonLit1 = clamp(C.env.z, 0.0, 1.0);
+    let specTint1 = mix(vec3f(1.0, 0.95, 0.85), vec3f(0.80, 0.88, 1.0), moonLit1);
+    col = applyFog(applyExposure(col) + spec * specTint1 * max(C.env.y, 0.35), length(in.wp - C.camPos.xyz));
     // real transparency now, not just the internal bed-colour mixing above: shallow water lets
     // more of the actual terrain underneath show through, deep water goes opaque — and clarity
     // (the same knob "murky vs crystal clear" uses for colour) controls how fast that happens,
@@ -690,12 +700,17 @@ fn etaN(i: i32, j: i32, eta0: f32, hmin: f32) -> f32 {
     var body = mix(C.water.rgb, bedColT * 0.8, absorb);
     body += C.water.rgb * (1.0 - absorb.g) * 0.3;
     let spec = pow(max(dot(R, C.sunDir.xyz), 0.0), 180.0) * 1.5;
-    col = mix(body, sky, F) + spec * vec3f(1.0, 0.95, 0.85);
+    col = mix(body, sky, F);
     let pat = mix(noise2(uvA * 2.2), noise2(uvB * 2.2), blend) * 0.6 + 0.4 * mix(noise2(uvA * 6.0), noise2(uvB * 6.0), blend);
     let mask = smoothstep(0.62 - 0.55 * fa, 0.72 - 0.55 * fa, pat) * smoothstep(0.0, 0.15, fa);
     let foamCol = vec3f(0.92, 0.95, 0.97) * (0.8 + 0.4 * max(dot(n, C.sunDir.xyz), 0.0));
     col = mix(col, foamCol, mask);
-    col = applyFog(applyExposure(col), length(in.wp - C.camPos.xyz));
+    // see the high-detail branch: the specular glint is added after exposure (with a floor, not
+    // full raw brightness) and cooled toward the moon's colour at night, so it isn't crushed but
+    // also doesn't blow out warm and bright against a dark scene
+    let moonLit2 = clamp(C.env.z, 0.0, 1.0);
+    let specTint2 = mix(vec3f(1.0, 0.95, 0.85), vec3f(0.80, 0.88, 1.0), moonLit2);
+    col = applyFog(applyExposure(col) + spec * specTint2 * max(C.env.y, 0.35), length(in.wp - C.camPos.xyz));
     // real transparency now, not just the internal bed-colour mixing above: shallow water lets
     // more of the actual terrain underneath show through, deep water goes opaque — and clarity
     // (the same knob "murky vs crystal clear" uses for colour) controls how fast that happens,
