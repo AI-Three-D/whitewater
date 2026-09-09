@@ -126,12 +126,18 @@ export const RIVERS = [
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 42 },
   }),
   river('medium', {
-    name: 'Rocky Narrows', pack: 'mediumPack',
-    slope: 0.013, manning: 0.035, depth: 1.5, len: 400, seed: 26,
-    halfW: 7.5, widthVar: 0.35, meander: [[19, 135], [7, 52]], constrictions: 3, valleyH: 20, valleyScale: 55,
-    rocks: 60, rockR: [0.9, 2.5], emergent: 0.5, ledges: [[110, 0.6], [240, 0.7], [360, 0.6]],
-    biome: 'canyon', timeOfDay: 'misty', waterTint: [0.14, 0.10, 0.05], waterClarity: 0.6,
-    lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 43 },
+    name: 'Silver Falls',
+    slope: 0.0014, manning: 0.032, depth: 1.7, len: 300, seed: 91,
+    halfW: 9, widthVar: 0.12, meander: [[6, 240]], constrictions: 0, valleyH: 26, valleyScale: 55,
+    rocks: 0, emergent: 0.2,
+    //ledges: [[65, 0.4], [82, 0.5]],
+    bands: [{ z0: 100, z1: 150, drop: 11 }],   // must match the fork's span (startZ/mergeZ) and both branches' actual totals
+    forks: [{ startZ: 100, mergeZ: 160, islandHeight: 10.0, splitLen: 30, mergeLen: 25, separation: 24, widthScale: 0.7, shares: [0.5, 0.5] }],
+    waterfalls: [
+      { z: 110, drop: 8, len: 8, branch: 1, pinch: 0.55 },                    // branch 1: one big plunge — spends the whole band
+    ],
+    biome: 'icy', waterTint: [0.05, 0.14, 0.22], waterClarity: 1.0,
+    lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 91 },
   }),
   river('medium', {
     name: 'Scree Bends', pack: 'mediumPack',
@@ -198,24 +204,12 @@ export const RIVERS = [
 // one per tier, shown as "???" until the tier's map item has been found
 export const RIVERS_HIDDEN = [
   secret('easy', {
-    name: 'Silver Falls',
-    slope: 0.0014, manning: 0.032, depth: 1.2, len: 300, seed: 91,
-    halfW: 9, widthVar: 0.12, meander: [[6, 240]], constrictions: 0, valleyH: 26, valleyScale: 55,
-    rocks: 0, emergent: 0.2,
-    //ledges: [[65, 0.4], [82, 0.5]],
-    bands: [{ z0: 100, z1: 150, drop: 11 }],   // must match the fork's span (startZ/mergeZ) and both branches' actual totals
-    forks: [{ startZ: 100, mergeZ: 160, islandHeight: 10.0, splitLen: 30, mergeLen: 25, separation: 14, widthScale: 0.7, shares: [0.5, 0.5] }],
-    waterfalls: [
-      { z: 110, drop: 8, len: 8, branch: 1, pinch: 0.55 },                    // branch 1: one big plunge — spends the whole band
-   /*   { z: 145, drop: 1.0, len: 4, branch: 0 },
-      { z: 155, drop: 0.5, len: 4, branch: 0 },
-      { z: 165, drop: 1.0, len: 4, branch: 0 }, 
-      { z: 175, drop: 1.0, len: 4, branch: 0 },  // branch 0: staircase — same total, spread out
-*/
-
-    ],
-    biome: 'icy', waterTint: [0.05, 0.14, 0.22], waterClarity: 1.0,
-    lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 91 },
+    name: 'Rocky Narrows',
+    slope: 0.013, manning: 0.035, depth: 1.5, len: 400, seed: 26,
+    halfW: 7.5, widthVar: 0.35, meander: [[19, 135], [7, 52]], constrictions: 3, valleyH: 20, valleyScale: 55,
+    rocks: 60, rockR: [0.9, 2.5], emergent: 0.5, ledges: [[110, 0.6], [240, 0.7], [360, 0.6]],
+    biome: 'canyon', timeOfDay: 'misty', waterTint: [0.14, 0.10, 0.05], waterClarity: 0.6,
+    lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 43 },
   }),
   secret('medium', {
     name: 'Emerald Hollow',
