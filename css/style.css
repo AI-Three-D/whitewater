@@ -23,7 +23,10 @@ canvas{display:block;width:100vw;height:100vh}
 .riv{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:10px;padding:16px 20px;width:210px;cursor:pointer;transition:.15s}
 .riv:hover{background:rgba(255,255,255,.18);transform:translateY(-3px)}
 .riv h3{margin:0 0 6px}.riv small{color:#bde}
-#msg{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,.45);font-size:28px;text-align:center;text-shadow:0 2px 6px #000}
+/* z-index: #msg sits before #menu in the DOM (and neither used to need a z-index — every other
+   use of #msg hid #menu first), so without this #menu paints over it and swallows its clicks
+   whenever it's shown with #menu still up, as confirmStart in run.js now does */
+#msg{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,.45);font-size:28px;text-align:center;text-shadow:0 2px 6px #000;z-index:5}
 #msg small{font-size:16px;margin-top:10px;color:#dde}
 #dbg{position:fixed;right:12px;top:10px;font:12px/1.4 monospace;white-space:pre;text-shadow:0 1px 2px #000;display:none}
 #ver{position:fixed;right:6px;bottom:4px;font:11px/1 monospace;color:rgba(255,255,255,.55);text-shadow:0 1px 2px #000;z-index:50;pointer-events:none}

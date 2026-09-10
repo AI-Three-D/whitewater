@@ -19,7 +19,7 @@ import { hud } from './hud.js';
 import { initUi, showMenu, hideStore, hideCharSheet, showHowTo, hideHowTo, isOpen } from './ui.js';
 import { startRun, confirmStart, endRun, retryRun, eatSnack, drinkEnergy, cycleCamera, toggleDbg, toggleNoCapsize, togglePause } from './run.js';
 
-const BUILD = 'build 34';
+const BUILD = 'build 35';
 
 installErrorHandlers();
 {

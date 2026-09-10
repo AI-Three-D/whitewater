@@ -228,19 +228,13 @@ export function generateRiver(R) {
     const zEff = R.pond ? z - clamp(z - pond0, 0, pond1 - pond0) : z;
     const T0 = -R.slope * Math.max(0, zEff - PUTIN * 0.4)       // flat bed for the first 12 m
           + 0.12 * (vnoise2(z * 0.05, 9.1, seed + 1) * 2 - 1) * (1 - calm);
+    // depth noise feeds into eta (= T + waterFrac·D) below, same as T0's noise just above — damped
+    // by `calm` for the same reason: a calm pool/pond's water is meant to be still, and full-strength
+    // noise there leaves the initial surface not quite level, which the first physics tick then has
+    // to relax away as a small, real wave.
     const D = R.depth * (1 + 0.25 * (vnoise2(z * 0.03, 5.5, seed + 2) * 2 - 1) * (1 - calm))
             * clamp(Math.pow(R.halfW / hw, 0.4), 0.7, 1.8) * (1 + 0.8 * calm);   // and deeper
-    // eta (= T + waterFrac·D, the "resting" water surface) must depend only on real terrain shape —
-    // the slope and any ledges/waterfalls — never on how deep the channel happens to render at a
-    // given z. D above scales with `calm` (ponds/put-ins read deeper) *and* with channel width (a
-    // wider stretch reads shallower for the same volume, via the R.halfW/hw ratio) — either one
-    // varying eta by itself leaves the initial water surface not actually level, so the first
-    // physics tick has to relax that as a real wave: a pulse of "extra" water surging forward,
-    // in the direction of any residual slope, out of wherever the surface started out higher.
-    // Deriving T from the target eta instead of the other way around makes eta immune to every
-    // source of D variation at once, not just whichever one happened to introduce it.
-    const etaTarget = T0 - dropAt(z, waterfalls.filter(wf => wf.branch == null));
-    const T = etaTarget - SIM.waterFrac * D;
+    const T = T0 - dropAt(z, waterfalls.filter(wf => wf.branch == null));
     const curv = (centerAt(z + 2) - 2 * c + centerAt(z - 2)) / 4;
     const d0 = -clamp(8 * curv, -0.35, 0.35);
     const base = { c, hw, T, D, d0, eta: T + SIM.waterFrac * D, side: 0, t: 0, calm };
