@@ -4,13 +4,13 @@ import { QUALITY_LEVELS, TIERS, RIVERS, RIVERS_HIDDEN, RIVER_PACKS, CHARACTERS, 
 import { clamp } from './math.js';
 import { newProfile, clearProfile, saveProfile, character, canRaise, anyRaisable, spendPoint, discardPending, pointsForLevel,
   itemCount, canBuyItem, canBuyCraft, buyItem, buyCraft, selectCraft, ownsUpgrade, canBuyUpgrade, buyUpgrade, canHeal, healInjury,
-  ownsPack, canBuyPack, buyPack, riverUnlocked, canBuyTraining, buyTraining } from './progression.js';
+  ownsPack, canBuyPack, buyPack, riverUnlocked, canBuyTraining, buyTraining, isSecretSpent } from './progression.js';
 import { S } from './state.js';
 import { $ } from './platform.js';
 import { quality, saveQuality } from './quality.js';
 import { pad } from './controls.js';
 
-const handlers = { startRun: null };
+const handlers = { startRun: null, confirmStart: null };
 export function initUi(h) {
   Object.assign(handlers, h);
   addEventListener('resize', layoutCarousels);
@@ -171,7 +171,8 @@ function riverFeatures(R) {
 
 function riverCard(R, { unlocked, hidden }) {
   const d = document.createElement('div');
-  d.className = unlocked ? 'riv' : 'riv locked';
+  const spent = unlocked && isSecretSpent(S.profile, R);
+  d.className = unlocked && !spent ? 'riv' : 'riv locked';
   if (!unlocked) {
     d.innerHTML = hidden
       ? `${artSlot('riv-thumb', '?')}<h3>???</h3><small>find the hidden map on this tier to unlock</small>`
@@ -180,10 +181,17 @@ function riverCard(R, { unlocked, hidden }) {
     return d;
   }
   const best = S.profile.best[R.name];
+  if (spent) {
+    d.innerHTML = `${artSlot('riv-thumb', R.name + ' art', R.art)}
+      <h3>${R.name}</h3><small>⏳ one shot spent — this secret is gone for good${best ? ` · finished in ${best.toFixed(1)} s` : ''}</small>`;
+    return d;
+  }
   d.innerHTML = `${artSlot('riv-thumb', R.name + ' art', hidden ? undefined : R.art)}
-    <h3>${R.name}</h3><small>gradient ${(R.slope * 100).toFixed(1)} % · ${R.rocks} boulders · ${R.ledges.length} ledges${hidden ? '' : riverFeatures(R)}</small>
+    <h3>${R.name}</h3><small>gradient ${(R.slope * 100).toFixed(1)} % · ${R.rocks} boulders · ${R.ledges.length} ledges${hidden ? '' : riverFeatures(R)}${R.timeLimit ? ` · ${R.timeLimit}s clock` : ''}</small>
     ${best ? `<br><span class="best">best ${best.toFixed(1)} s</span>` : ''}`;
-  d.onclick = () => handlers.startRun(R);
+  // a timed river warns up front, on this screen, instead of after a load the player would then
+  // have to sit through again if they back out — see confirmStart in run.js
+  d.onclick = () => (R.timeLimit ? handlers.confirmStart(R) : handlers.startRun(R));
   return d;
 }
 
@@ -422,6 +430,93 @@ export function showStore() {
 
 export function hideStore() {
   hide('store');
+}
+
+// ---------- how to play ----------
+// static reference, not data-driven like the store — collapsible <details> sections so it stays
+// skimmable instead of one wall of text. "basics" starts open, same idea as storeOpen above.
+const howtoOpen = new Set(['basics']);
+const HOWTO_SECTIONS = [
+  { id: 'basics', icon: '🚣', title: 'The basics', html: `
+    <p>Paddle from the put-in to the take-out without capsizing. Every river ends in a finish line
+    (the HUD shows your distance to it); reach it and the run banks its xp, coins and any loot you
+    picked up along the way. Rivers come in three classes — <b>Class II (easy)</b>,
+    <b>Class III (medium)</b> and <b>Class IV (hard)</b> — each tier harder and faster than the last.</p>
+    <p>The first stretch of every river is a calm put-in pool — get your bearings before the current
+    picks up.</p>` },
+  { id: 'controls', icon: '🎮', title: 'Controls', html: `
+    <div class="desktop-only">
+      <p><kbd>↑</kbd> paddle &nbsp; <kbd>↓</kbd> brake &nbsp; <kbd>←</kbd><kbd>→</kbd> sweep turns &nbsp; <kbd>A</kbd><kbd>D</kbd> lean</p>
+      <p><kbd>E</kbd> eat a snack &nbsp; <kbd>Q</kbd> drink an energy booster &nbsp; <kbd>C</kbd> cycle camera</p>
+      <p><kbd>R</kbd> restart the run &nbsp; <kbd>P</kbd> pause &nbsp; <kbd>Esc</kbd> river menu &nbsp; <kbd>F1</kbd> debug view &nbsp; <kbd>G</kbd> no-capsize (debug)</p>
+    </div>
+    <p>The ⏸️ button (top corner, shown while a run is in progress) pauses too — handy on a touch
+    screen or if the keyboard's out of reach.</p>
+    <div class="mobile-only">
+      <p>The boat is <b>unstable</b> — <b>tilt the phone</b> to lean and keep it upright, small
+      corrections all the way down. Tap the round <b>left</b> / <b>right</b> buttons to paddle on
+      that side: alternate them to go straight, repeat one side to turn, hold to keep paddling.</p>
+      <p>The small round buttons top-right cover camera, debug, snacks, energy and river menu.</p>
+    </div>` },
+  { id: 'water', icon: '🌊', title: 'Reading the water', html: `
+    <ul>
+      <li><b>Balance</b> — lean into your strokes; roll or pitch too far and you capsize. Watch the
+      balance gauge, not just the water.</li>
+      <li><b>Boulders</b> — some sit proud of the surface (easy to spot), others are just barely
+      submerged. A square hit stops you dead and can flip you.</li>
+      <li><b>Ledges &amp; waterfalls</b> — a sudden drop in the riverbed. Keep your speed up and stay
+      square to the current on the way over, or you'll land sideways.</li>
+      <li><b>Constrictions &amp; forks</b> — the channel narrows and speeds up, or splits into two
+      and rejoins downstream — pick a line early.</li>
+      <li><b>Stamina</b> — paddling drains it; run low and your strokes weaken. A snack tops it up,
+      an energy booster buffs it for a while — both are things you find on the water or buy in the store.</li>
+    </ul>` },
+  { id: 'progress', icon: '🧗', title: 'Character development', html: `
+    <p>Paddles collected and finishing a run both earn <b>xp</b>; enough xp levels you up, which
+    grows your paddler's <b>skill</b>, <b>stamina</b> and <b>health</b> caps automatically.</p>
+    <p>Capsizing adds <b>injury</b>. It doesn't clear on its own — if it ever reaches your health cap
+    you're out for a long recovery: you lose a couple of levels, every coin, and your whole pack, but
+    injury resets to 0. Three clean finishes in a row (no capsize) heal a little injury back instead.</p>
+    <p>Spend coins in the <b>Store</b> on boats, upgrades, consumables and training — or just get
+    lucky with a rucksack (see Loot below).</p>` },
+  { id: 'loot', icon: '💰', title: 'Loot & economy', html: `
+    <p><b>Paddles</b> are xp, <b>coins</b> are currency — both scattered along the river, both fade
+    a few seconds after you get close so grab them on the way past. <b>Rucksacks</b> drift down the
+    river too and pay out something random when caught: a snack, a bandaid, or rarer finds like a
+    diamond, a skill-boosting book, an inflatable raft, or a better helmet.</p>
+    <p><b>Loot only banks if you finish the run</b> — capsize, or run out the clock on a secret river,
+    and it's gone.</p>` },
+  { id: 'secret', icon: '🗺️', title: 'Secret rivers', html: `
+    <p>Each tier hides one extra river behind a <b>map item</b> that rides on one of that tier's
+    regular rivers — you won't know which until you find it. Once collected, the secret river is
+    unlocked for good.</p>
+    <p>But the secret run itself is <b>one shot</b>: the moment you launch it, it's spent —
+    finish, capsize or run out the clock and it won't come back. Picking one gives you a heads-up
+    with the time limit right there on the river list before anything loads; the clock (shown
+    top-centre once you're in) only starts once you press Start. In exchange, secret rivers are stacked
+    with far more loot than a normal run — worth planning your line before you hit go.</p>` },
+];
+
+function howtoSection(s) {
+  return `<details class="cat" data-cat="${s.id}" ${howtoOpen.has(s.id) ? 'open' : ''}>
+    <summary>${s.icon} ${s.title}</summary>
+    <div class="shelf">${s.html}</div></details>`;
+}
+
+export function showHowTo() {
+  const el = $('howto');
+  el.style.display = 'flex';
+  el.innerHTML = `<h2>How to play</h2>
+    <div class="cats">${HOWTO_SECTIONS.map(howtoSection).join('')}</div>
+    <button id="howtoClose">Close</button>`;
+  for (const d of el.querySelectorAll('details.cat')) {
+    d.addEventListener('toggle', () => { if (d.open) howtoOpen.add(d.dataset.cat); else howtoOpen.delete(d.dataset.cat); });
+  }
+  $('howtoClose').onclick = hideHowTo;
+}
+
+export function hideHowTo() {
+  hide('howto');
 }
 
 // ---------- character sheet ----------

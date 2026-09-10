@@ -26,6 +26,7 @@ export function loadProfile() {
       if (typeof p.coins !== 'number') p.coins = 0;   // upgrade older saves
       if (!p.mapCarrier) p.mapCarrier = pickCarriers();
       if (!p.unlockedHidden) p.unlockedHidden = freshUnlocks();
+      if (!p.secretDone) p.secretDone = {};
       if (!p.inventory) p.inventory = {};
       if (!p.crafts) p.crafts = ['classic'];
       if (!p.craft || !CRAFTS[p.craft]) p.craft = 'classic';
@@ -52,13 +53,18 @@ export function newProfile(charId) {
   const c = CHARACTERS[charId];
   const p = { charId, level: 0, points: 0, pending: 0, coins: 0, skill: c.start.skill, stamina: c.start.stamina,
     health: c.start.health, injury: 0, runs: 0, best: {}, cleanStreak: 0, levelHistory: [],
-    mapCarrier: pickCarriers(), unlockedHidden: freshUnlocks(),
+    mapCarrier: pickCarriers(), unlockedHidden: freshUnlocks(), secretDone: {},
     inventory: {}, crafts: ['classic'], craft: 'classic', upgrades: [], riverPacks: [] };
   saveProfile(p);
   return p;
 }
 /** Called when the tier's map item is collected. Permanent — the hidden river stays unlocked. */
 export function unlockHidden(p, tier) { p.unlockedHidden[tier] = true; saveProfile(p); }
+
+/** A `singleAttempt` river (currently just the secrets) is spent forever once its one launch has
+ *  happened — win, capsize or time out, it doesn't matter (see markSecretSpent in startRun). */
+export const isSecretSpent = (p, R) => !!(R.singleAttempt && p.secretDone[R.name]);
+export function markSecretSpent(p, R) { if (R.singleAttempt) { p.secretDone[R.name] = true; saveProfile(p); } }
 
 export const character = p => CHARACTERS[p.charId];
 export const canRaise = (p, trait) => p[trait] < character(p).caps[trait];

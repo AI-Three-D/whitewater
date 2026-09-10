@@ -27,13 +27,15 @@ export const cam = {
     this.look = [p[0], p[1], p[2] + 5];
   },
 
-  // camMode 0: follow heading (biased downstream when the boat points back up), 1: fixed
-  // downstream, 2: high and far
+  // camMode 0: follow heading (biased downstream when the boat points back up, but only where
+  // there's actual current to justify it — a dead-flat pond/lake has no "downstream" to keep
+  // watch on, so the bias there just fights the player for no reason), 1: fixed downstream,
+  // 2: high and far
   wantedDir() {
     if (S.camMode === 1) return [0, 0, 1];
     const f = qRotate(kayak.q, [0, 0, 1]);
     let d = v3.norm([f[0], 0, f[2]]);
-    if (S.camMode === 0 && v3.dot(d, [0, 0, 1]) < -0.2) d = v3.norm(v3.add(d, [0, 0, 1.3]));
+    if (S.camMode === 0 && S.river.R.slope > 0 && v3.dot(d, [0, 0, 1]) < -0.2) d = v3.norm(v3.add(d, [0, 0, 1.3]));
     return d;
   },
 

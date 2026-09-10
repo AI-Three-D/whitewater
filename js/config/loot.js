@@ -15,6 +15,10 @@ export const PICKUPS = {
   bobAmp: 0.45,             // metres of vertical travel for the floating ones
   bobSpeed: 0.5,            // rad/s
   reachBob: -0.3,           // floating ones are only reachable while sin(bob phase) is below this
+  // "evasive" coins (R.evasiveCoinCount) — a much bigger, faster bob than the regular float above,
+  // see the `it.evasive` branch in updatePickup. Spends most of the ~3.5s cycle well overhead.
+  evasiveBobAmp: 3,         // metres above water at the top of the cycle (0 at the bottom)
+  evasiveBobSpeed: 1.8,     // rad/s — ≈3.5s period
   collectRadius: 1.6,       // metres (xz) from the paddler needed to pick one up
   proximityRadius: 14,      // metres — passing this close starts the fade-out clock
   fadeTime: 9.9,            // seconds from "seen up close" to gone — a brief harvesting window
@@ -24,7 +28,9 @@ export const PICKUPS = {
 
 // `type` picks which loot tally a pickup feeds: 'xp' → runLoot.paddles, 'currency' →
 // runLoot.coins (scaled by `value`), 'random' → a weighted roll (see rollRucksack in pickups.js).
-// A river can add one extra kind on top of the default paddle/coin via RIVERS[].extraKind.
+// A river can add one extra kind on top of the default paddle/coin via RIVERS[].extraKind — at
+// the usual per-river scatter count, or its own much smaller one via RIVERS[].extraCount (a rare
+// item like a diamond wants a handful, not two dozen).
 export const COLLECTIBLES = {
   paddle:  { mesh: 'paddle',  type: 'xp',       value: 1, color: [0.95, 0.82, 0.1] },
   coin:    { mesh: 'coin',    type: 'currency', value: 1, color: [1.0, 0.86, 0.3] },
@@ -61,6 +67,8 @@ export const RUCKSACK = {
   count: 10,                         // slots reserved per river (max alive + collected at once)
   spinSpeed: 0.5, scale: 2, hover: 0.12,
   fadeTime: 99,                      // 10x PICKUPS.fadeTime — they linger
+  finishFadeTime: 3,                 // but not once past the take-out — nothing left to grab them,
+                                      // so they'd otherwise just idle at the z-clamp and pile up
   collectRadius: 2.2,
   // spawning: every spawnInterval seconds, either well ahead or just behind the boat …
   spawnInterval: 6,

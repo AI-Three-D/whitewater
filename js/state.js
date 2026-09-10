@@ -17,6 +17,7 @@ export const S = {
   profile: null,            // null → character selection
   gameState: 'menu',        // 'menu' | 'run' | 'over'
   warmingUp: false,
+  paused: false,            // 'run' only — see togglePause in run.js; frame() freezes outright
   simTime: 0,
   runTime: 0,
   frameTicks: 2,            // physics ticks run this frame (kayak.step divides obstacle reactions by it)

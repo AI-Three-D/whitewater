@@ -2,7 +2,7 @@
 import { PARTS, ITEMS, STAMINA } from './config/index.js';
 import { clamp } from './math.js';
 import { generateRiver } from './river.js';
-import { craftOf, itemCount, useItem, awardRun, applyInjury, ownsUpgrade, pointsForLevel } from './progression.js';
+import { craftOf, itemCount, useItem, awardRun, applyInjury, ownsUpgrade, pointsForLevel, isSecretSpent, markSecretSpent } from './progression.js';
 import { S, resetRunCounters } from './state.js';
 import { $, isMobile, gyro, enterFullscreen } from './platform.js';
 import { gpu, fillTerrainIndex } from './gpu.js';
@@ -30,6 +30,26 @@ export function toggleDbg() {
 export function toggleNoCapsize() {
   S.debugNoCapsize = !S.debugNoCapsize;
   $('mGod').classList.toggle('on', S.debugNoCapsize);
+}
+
+// P key and the pause button share this. Only meaningful mid-run — frame() in main.js checks
+// S.paused and skips physics/rendering entirely while it's set, which is what actually freezes
+// the game; this just flips the flag and swaps #msg to a Resume/River-menu prompt over the frozen
+// frame (reusing #msg is safe here: nothing else uses it while gameState is 'run').
+export function togglePause() {
+  if (S.gameState !== 'run') return;
+  S.paused = !S.paused;
+  const msg = $('msg');
+  if (S.paused) {
+    msg.style.display = 'flex';
+    msg.innerHTML = `⏸️ Paused<br>
+      <div class="mbtns"><button id="btnResume">▶ Resume</button><button id="btnPauseMenu">River menu</button></div>
+      <small class="desktop-only">P — resume · Esc — river menu</small>`;
+    $('btnResume').onclick = togglePause;
+    $('btnPauseMenu').onclick = () => { S.paused = false; showMenu(); };
+  } else {
+    msg.style.display = 'none';
+  }
 }
 
 // only mid-run, only if there's one, and not when the bar is already (nearly) full
@@ -78,9 +98,32 @@ function uploadInitialWater() {
   device.queue.writeBuffer(gpu.partBuf, 0, new Float32Array(PARTS.count * 8));
 }
 
+// shown on the river-selection screen for a timed river, before any loading happens — warns the
+// player up front instead of making them sit through a load only to hit a Start gate afterward.
+// Reuses #msg like the pause prompt; safe here since nothing else shows it while gameState is
+// 'menu'. Cancelling just hides the prompt — nothing's been touched yet (markSecretSpent doesn't
+// run until startRun itself does, on Start).
+export function confirmStart(R) {
+  if (!S.profile) return showMenu();
+  if (isSecretSpent(S.profile, R)) return showMenu();
+  const msg = $('msg');
+  msg.style.display = 'flex';
+  msg.innerHTML = `⏱️ ${R.name}<br>
+    <span style="color:#ffe08a">You'll have <b>${R.timeLimit}s</b> to reach the take-out.</span>
+    ${R.singleAttempt ? '<br><small style="color:#ff9a80">One shot — there\'s no retry once you start.</small>' : ''}
+    <div class="mbtns"><button id="btnStart">▶ Start</button><button id="btnCancel">Not yet</button></div>
+    <small class="desktop-only">the clock begins the moment you press Start</small>`;
+  $('btnStart').onclick = () => { msg.style.display = 'none'; startRun(R); };
+  $('btnCancel').onclick = () => { msg.style.display = 'none'; };
+}
+
 export async function startRun(R) {
   if (S.warmingUp) return;
   if (!S.profile) return showMenu();
+  // a single-attempt river (the secrets) is spent the instant it launches — win, capsize or time
+  // out, doesn't matter — so re-render the menu (it'll show the card as spent) instead of starting
+  if (isSecretSpent(S.profile, R)) return showMenu();
+  markSecretSpent(S.profile, R);
   S.runCraft = craftOf(S.profile);
   S.effK = craftKayakParams(S.runCraft, S.profile);
   if (isMobile) {   // both must run inside the tap that brought us here
@@ -111,16 +154,37 @@ export async function startRun(R) {
   document.body.classList.add('inrun');
   S.simTime = 0;
   S.runTime = 0;
+  S.paused = false;
   $('msg').style.display = 'none';
   S.warmingUp = false;
   S.gameState = 'run';
 }
 
 // ---------- end ----------
-const ACTIONS = `<div class="mbtns"><button id="btnRetry">↻ Run again</button><button id="btnMenu">River menu</button></div>
-  <small class="desktop-only">R — run again · Esc — river menu</small>`;
+// a spent single-attempt river drops the retry button entirely (retryRun would just bounce off
+// startRun's isSecretSpent guard anyway) and says so, rather than silently doing nothing on R/click
+const actionsHtml = R => R.singleAttempt
+  ? `<div class="mbtns"><button id="btnMenu">River menu</button></div>
+    <small class="desktop-only">Esc — river menu</small>
+    <br><small style="color:#ff9a80">one shot spent — this secret run is gone for good</small>`
+  : `<div class="mbtns"><button id="btnRetry">↻ Run again</button><button id="btnMenu">River menu</button></div>
+    <small class="desktop-only">R — run again · Esc — river menu</small>`;
 
 const progressLine = () => `${(kayak.p[2] - 15).toFixed(0)} m of ${(S.river.finishZ - 15).toFixed(0)} m`;
+
+// shared between lossMessage and timeoutMessage — neither banks any loot
+const lostLootLine = loot => {
+  const lost = [];
+  if (loot.paddles) lost.push(plural(loot.paddles, 'paddle'));
+  if (loot.coins) lost.push(plural(loot.coins, 'coin'));
+  if (loot.snacks) lost.push(plural(loot.snacks, 'snack'));
+  if (loot.bandaids) lost.push(plural(loot.bandaids, 'bandaid'));
+  if (loot.medikits) lost.push(plural(loot.medikits, 'medikit'));
+  if (loot.books) lost.push('a skill boost');
+  if (loot.raftFound) lost.push('the raft');
+  if (loot.helmetFound) lost.push('the helmet');
+  return lost.length ? `<br><small style="color:#ff9a80">lost ${lost.join(', ')} — loot only banks on a finish</small>` : '';
+};
 
 function winMessage() {
   const prof = S.profile, R = S.river.R;
@@ -142,35 +206,34 @@ function winMessage() {
     ${finds.length ? `<br><small style="color:#9be0ff">found ${finds.join(', ')}</small>` : ''}
     ${ownsUpgrade(prof, 'sponsor') ? `<br><small style="color:#ffd35c">📣 sponsor payout: +${plural(sponsorCoins, 'coin')}</small>` : ''}
     ${healed ? `<br><small style="color:#9f7">3 clean runs in a row — injury recovers by ${healed} (${prof.injury}/${prof.health})</small>` : ''}
-    ${ACTIONS}`;
+    ${actionsHtml(R)}`;
   if (ups || bookBoost) setTimeout(showLevelUp, 900);
   return html;
 }
 
 function lossMessage() {
-  const loot = S.runLoot;
-  const { gain, recovered, injury, cap, levelsLost } = applyInjury(S.profile, S.river.R.tier);
+  const R = S.river.R, loot = S.runLoot;
+  const { gain, recovered, injury, cap, levelsLost } = applyInjury(S.profile, R.tier);
   if (recovered) {
     return `🏥 Badly hurt — time for a long recovery.<br>${progressLine()}
       <br><small style="color:#ff9a80">${levelsLost ? `Lost ${plural(levelsLost, 'level')}, ` : ''}every coin, and the whole pack — but the rest is healed up (injury 0/${cap}).</small>
-      ${ACTIONS}`;
+      ${actionsHtml(R)}`;
   }
-  const lost = [];
-  if (loot.paddles) lost.push(plural(loot.paddles, 'paddle'));
-  if (loot.coins) lost.push(plural(loot.coins, 'coin'));
-  if (loot.snacks) lost.push(plural(loot.snacks, 'snack'));
-  if (loot.bandaids) lost.push(plural(loot.bandaids, 'bandaid'));
-  if (loot.medikits) lost.push(plural(loot.medikits, 'medikit'));
-  if (loot.books) lost.push('a skill boost');
-  if (loot.raftFound) lost.push('the raft');
-  if (loot.helmetFound) lost.push('the helmet');
   return `🌊 Capsized! You're swimming.<br>${progressLine()}
     <br><small style="color:#ff9a80">+${gain} injury (${injury}/${cap})</small>
-    ${lost.length ? `<br><small style="color:#ff9a80">lost ${lost.join(', ')} — loot only banks on a finish</small>` : ''}
-    ${ACTIONS}`;
+    ${lostLootLine(loot)}
+    ${actionsHtml(R)}`;
 }
 
-export function endRun(won) {
+// no capsize, no injury — the clock just ran out. Loot still doesn't bank (see lostLootLine).
+function timeoutMessage() {
+  const R = S.river.R;
+  return `⏱️ Time's up!<br>${progressLine()}
+    ${lostLootLine(S.runLoot)}
+    ${actionsHtml(R)}`;
+}
+
+export function endRun(outcome) {
   if (S.gameState !== 'run') return;
   S.gameState = 'over';
   // seed free-look from the chase cam's current angle so the switch to orbiting doesn't jump —
@@ -180,7 +243,7 @@ export function endRun(won) {
   S.freeCam.dist = 9;
   const msg = $('msg');
   msg.style.display = 'flex';
-  msg.innerHTML = won ? winMessage() : lossMessage();
-  $('btnRetry').onclick = retryRun;
+  msg.innerHTML = outcome === 'finished' ? winMessage() : outcome === 'timeout' ? timeoutMessage() : lossMessage();
+  if ($('btnRetry')) $('btnRetry').onclick = retryRun;   // absent on a spent single-attempt river
   $('btnMenu').onclick = () => showMenu();
 }

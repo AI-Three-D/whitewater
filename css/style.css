@@ -2,6 +2,14 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:syste
 canvas{display:block;width:100vw;height:100vh}
 #hud{position:fixed;left:14px;top:12px;font-size:15px;text-shadow:0 1px 3px #000;pointer-events:none;line-height:1.45}
 #hud b{font-weight:600;color:#ffe08a}
+/* single-attempt rivers' countdown — front and centre so the player doesn't have to keep
+   glancing at the corner HUD; hud.js toggles display and swaps in .urgent under 15s */
+#clock{position:fixed;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);display:none;
+  font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;color:#ffe08a;
+  text-shadow:0 2px 8px #000,0 0 20px rgba(0,0,0,.6);pointer-events:none;letter-spacing:.5px}
+#clock::after{content:'s';font-size:20px;font-weight:600;margin-left:3px;opacity:.85}
+#clock.urgent{color:#ff5a4d;animation:clockPulse .6s ease-in-out infinite}
+@keyframes clockPulse{0%,100%{transform:translateX(-50%) scale(1)}50%{transform:translateX(-50%) scale(1.12)}}
 #gauge{position:fixed;left:50%;bottom:26px;width:320px;height:16px;margin-left:-160px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.5);border-radius:9px}
 #gauge .z{position:absolute;left:50%;top:-6px;width:2px;height:28px;background:#fff;margin-left:-1px}
 #gauge .l,#gauge .r{position:absolute;top:0;height:100%;width:18%;background:rgba(255,60,40,.45)}
@@ -11,7 +19,6 @@ canvas{display:block;width:100vw;height:100vh}
 #menu{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 30%,rgba(20,60,90,.92),rgba(3,10,18,.97));display:flex;flex-direction:column;align-items:center;justify-content:flex-start;overflow-y:auto;padding:40px 20px 60px;box-sizing:border-box}
 
 #menu h1{font-size:46px;letter-spacing:4px;margin:0 0 6px}
-#menu p{max-width:640px;text-align:center;color:#cfe;line-height:1.5}
 .rivers{display:flex;gap:18px;margin:20px 0}
 .riv{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:10px;padding:16px 20px;width:210px;cursor:pointer;transition:.15s}
 .riv:hover{background:rgba(255,255,255,.18);transform:translateY(-3px)}
@@ -135,6 +142,28 @@ kbd{background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;border:1p
 #store .item .art-slot{width:64px;height:64px;font-size:26px;letter-spacing:0;text-transform:none}
 #store .item.owned{opacity:.7}
 
+/* how to play — its own teal palette, distinct from the store's gold and the charsheet's blue */
+.howto-btn{background:rgba(255,255,255,.1);color:#cffbf0;border:1px solid rgba(127,232,201,.5);border-radius:20px;
+  padding:7px 18px;font-size:13px;cursor:pointer;margin-bottom:10px}
+.howto-btn:hover{background:rgba(127,232,201,.18)}
+#howto{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
+  background:radial-gradient(ellipse at 50% 30%,rgba(18,70,64,.93),rgba(3,12,11,.98));text-shadow:0 2px 6px #000}
+#howto h2{font-size:34px;margin:0 0 8px;color:#7fe8c9}
+#howto .cats{display:flex;flex-direction:column;gap:10px;margin:14px 0;width:min(620px,92vw)}
+#howto details{background:rgba(255,255,255,.05);border:1px solid rgba(127,232,201,.3);border-radius:12px;overflow:hidden}
+#howto summary{cursor:pointer;padding:10px 16px;font-weight:600;font-size:17px;list-style:none;display:flex;align-items:center;gap:10px;user-select:none}
+#howto summary::-webkit-details-marker{display:none}
+#howto summary::before{content:'▸';color:#7fe8c9;font-size:14px;transition:transform .15s}
+#howto details[open] summary::before{transform:rotate(90deg)}
+#howto summary:hover{background:rgba(255,255,255,.06)}
+#howto .shelf{padding:0 16px 14px;text-align:left;font-size:14px;color:#cfe;line-height:1.55}
+#howto .shelf p{margin:0 0 10px}
+#howto .shelf ul{margin:0;padding-left:20px}
+#howto .shelf li{margin:0 0 8px}
+#howto .shelf kbd{margin-right:2px}
+#howto button{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:7px;padding:6px 14px;cursor:pointer;font-size:14px}
+#howto button:hover{background:rgba(255,255,255,.28)}
+
 /* boat picker on the main screen */
 #craftbar{display:none;align-items:center;gap:10px;margin:2px 0 8px;flex-wrap:wrap;justify-content:center}
 #craftbar span{font-size:12px;color:#9bc}
@@ -178,6 +207,11 @@ touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highligh
 #mCam{right:calc(60px + env(safe-area-inset-right))}
 #mDbg{right:calc(108px + env(safe-area-inset-right))}
 body.mobile.inrun .pad,body.mobile.inrun .mbtn{display:flex}
+/* pause is the one .mbtn icon that also shows on desktop (no keyboard-hint row exists in-run) —
+   desktop gets the top-right corner to itself; mobile tucks it past the existing icon row */
+#mPause{right:calc(12px + env(safe-area-inset-right))}
+body.mobile #mPause{right:calc(300px + env(safe-area-inset-right))}
+body.inrun #mPause{display:flex}
 body.mobile #dbg{top:calc(56px + env(safe-area-inset-top))}   /* clear the mbtn row instead of sitting under it */
 /* end-of-run buttons (shown everywhere; desktop additionally keeps the key hints) */
 .mbtns{display:flex;gap:14px;margin-top:18px}
@@ -185,7 +219,7 @@ body.mobile #dbg{top:calc(56px + env(safe-area-inset-top))}   /* clear the mbtn 
 .mbtns button:hover{background:rgba(255,255,255,.3)}
 /* phone-sized layout for the menus */
 @media (max-width:900px){
-  #menu{padding:16px 12px 40px}#menu h1{font-size:30px;letter-spacing:2px}#menu p{font-size:14px}
+  #menu{padding:16px 12px 40px}#menu h1{font-size:30px;letter-spacing:2px}
   #menuHero{height:60px}
   #charsel,#lvl .opts{flex-wrap:wrap;justify-content:center}
   #topbar{min-width:0;width:100%;box-sizing:border-box;flex-wrap:wrap}
@@ -197,7 +231,7 @@ body.mobile #dbg{top:calc(56px + env(safe-area-inset-top))}   /* clear the mbtn 
 /* overflow-safe centering for the full-screen sheets: auto margins centre when the content fits
    and collapse to 0 when it overflows, so the top is never pushed out of reach */
    
-   #store,#charsheet,#lvl{justify-content:flex-start;padding:30px 16px 50px;box-sizing:border-box;overflow-y:auto;overflow-x:hidden}
+   #store,#charsheet,#lvl,#howto{justify-content:flex-start;padding:30px 16px 50px;box-sizing:border-box;overflow-y:auto;overflow-x:hidden}
 
-   #store>:first-child,#charsheet>:first-child,#lvl>:first-child{margin-top:auto}
-   #store>:last-child,#charsheet>:last-child,#lvl>:last-child{margin-bottom:auto}
+   #store>:first-child,#charsheet>:first-child,#lvl>:first-child,#howto>:first-child{margin-top:auto}
+   #store>:last-child,#charsheet>:last-child,#lvl>:last-child,#howto>:last-child{margin-bottom:auto}

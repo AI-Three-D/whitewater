@@ -11,6 +11,7 @@
   <canvas id="c"></canvas>
   <div id="ver"></div>
   <div id="hud"></div>
+  <div id="clock"></div>
   <div id="stam"><div id="stamfill"></div><span id="stamtxt"></span></div>
   <div id="loot"><div class="lc" id="pcount">🛶 <b>0</b>/0</div><div class="lc" id="ccount">🪙 <b>0</b>/0</div><div class="lc" id="scount">🥜 <b>0</b></div><div class="lc" id="dcount">⚡ <b>0</b></div></div>
 
@@ -32,29 +33,24 @@
   <div class="mbtn" id="mEat" title="eat a snack">🥜</div>
   <div class="mbtn" id="mDrink" title="drink an energy booster">⚡</div>
   <div class="mbtn" id="mGod" title="debug: no capsize">🛡️</div>
+  <div class="mbtn" id="mPause" title="pause">⏸️</div>
 
   <div id="msg"></div>
   <div id="menu">
     <div class="art-slot" id="menuHero" style="background-image:url('img/Hero.png');background-size:cover;background-position:center" role="img" aria-label="hero art"></div>
+    <button id="howtoBtn" class="howto-btn">📖 How to play</button>
     <h1>WHITEWATER</h1>
-    <p class="desktop-only">Every river tests a different kind of nerve — calm pools give way to rapids, ledges, and the occasional
-       waterfall you won't see coming until it's under you. Read the water, keep your <b>balance</b>, and find out how far downstream your nerve holds.</p>
-    <p class="mobile-only">Shallow-water simulation running live on your GPU. The boat is <b>unstable</b>:
-       <b>tilt the phone</b> to lean and keep it upright — small corrections, all the way down.
-       Tap the round <b>left</b> / <b>right</b> buttons to paddle on that side: alternate them to go straight,
-       repeat a side to turn, hold to keep paddling. Watch your <b>stamina</b>. The first 30 m are a calm pool.
-       Grab the spinning <b>paddles</b> (xp) and <b>coins</b> — they fade soon after you get close, and only bank if you finish.</p>
     <div id="quality"></div>
     <div id="charsel"></div>
 <div id="topbar"></div>
 <div id="craftbar"></div>
 <div id="riverlist"></div>
-    <p class="desktop-only" style="font-size:13px;color:#9bc"><kbd>↑</kbd> paddle &nbsp; <kbd>↓</kbd> brake &nbsp; <kbd>←</kbd><kbd>→</kbd> sweep turns &nbsp;  <kbd>A</kbd><kbd>D</kbd> lean &nbsp; <kbd>E</kbd> eat snack &nbsp; <kbd>Q</kbd> energy booster &nbsp; <kbd>C</kbd>  camera &nbsp; <kbd>F1</kbd> debug &nbsp; <kbd>G</kbd> no-capsize (debug) &nbsp; <kbd>R</kbd> restart &nbsp; <kbd>F</kbd> finish run &nbsp; <kbd>Esc</kbd> menu</p>
   </div>
   <div id="lvl"></div>
   <div id="charsheet"></div>
   <div id="store"></div>
+  <div id="howto"></div>
   <div id="err"></div>
-  <script type="module" src="js/main.js?v=33"></script>
+  <script type="module" src="js/main.js?v=34"></script>
 </body>
 </html>

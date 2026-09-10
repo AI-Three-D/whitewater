@@ -16,10 +16,10 @@ import { updateSparks } from './effects.js';
 import { spawnRucksacks, updateRucksackDrift, updatePickups } from './pickups.js';
 import { updateObstacles, writeObstacleInstances } from './obstacles.js';
 import { hud } from './hud.js';
-import { initUi, showMenu, hideStore, hideCharSheet, isOpen } from './ui.js';
-import { startRun, endRun, retryRun, eatSnack, drinkEnergy, cycleCamera, toggleDbg, toggleNoCapsize } from './run.js';
+import { initUi, showMenu, hideStore, hideCharSheet, showHowTo, hideHowTo, isOpen } from './ui.js';
+import { startRun, confirmStart, endRun, retryRun, eatSnack, drinkEnergy, cycleCamera, toggleDbg, toggleNoCapsize, togglePause } from './run.js';
 
-const BUILD = 'build 33';
+const BUILD = 'build 34';
 
 installErrorHandlers();
 {
@@ -35,11 +35,13 @@ const KEY_ACTIONS = {
   KeyQ: drinkEnergy,
   KeyG: toggleNoCapsize,
   KeyR: retryRun,
+  KeyP: togglePause,
   F1: e => { toggleDbg(); e.preventDefault(); },
-  KeyF: () => { if (S.gameState === 'run') endRun(true); },
+  KeyF: () => { if (S.gameState === 'run') endRun('finished'); },
   Escape: () => {
     if (isOpen('charsheet')) hideCharSheet();
     else if (isOpen('store')) hideStore();
+    else if (isOpen('howto')) hideHowTo();
     else if (!isOpen('lvl')) showMenu();
   },
 };
@@ -74,6 +76,7 @@ function bindMobileButtons() {
   $('mEat').onclick = eatSnack;
   $('mDrink').onclick = drinkEnergy;
   $('mGod').onclick = toggleNoCapsize;
+  $('mPause').onclick = togglePause;
 }
 
 // ---------- frame loop ----------
@@ -89,7 +92,8 @@ function stepPhysics(dtReal) {
     if (S.gameState !== 'run') continue;
     S.runTime += SIM.dt;
     const outcome = kayak.step(SIM.dt);
-    if (outcome) endRun(outcome === 'finished');
+    if (outcome) endRun(outcome);
+    else if (S.river.R.timeLimit && S.runTime >= S.river.R.timeLimit) endRun('timeout');
   }
   physAccum -= S.frameTicks * SIM.dt;
 }
@@ -120,7 +124,7 @@ function frame(now) {
   const dtRaw = (now - lastT) / 1000;
   lastT = now;
   if (dtRaw > 0) S.fps += (1 / dtRaw - S.fps) * 0.1;
-  if (!S.river || S.gameState === 'menu' || S.warmingUp) return;
+  if (!S.river || S.gameState === 'menu' || S.warmingUp || S.paused) return;
   const dtReal = clamp(dtRaw, 0, 0.05);
 
   stepPhysics(dtReal);
@@ -162,7 +166,8 @@ async function main() {
   initPads();
   initFreeLook();
   bindMobileButtons();
-  initUi({ startRun });
+  $('howtoBtn').onclick = showHowTo;
+  initUi({ startRun, confirmStart });
   showMenu();
   requestAnimationFrame(frame);
 }

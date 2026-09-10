@@ -9,7 +9,7 @@ import { waterAt } from './sampling.js';
 import { W, L, dx } from './quality.js';
 
 const el = {
-  hud: $('hud'), gl: $('gl'), mk: $('mk'), dbg: $('dbg'),
+  hud: $('hud'), gl: $('gl'), mk: $('mk'), dbg: $('dbg'), clock: $('clock'),
   stamFill: $('stamfill'), stamTxt: $('stamtxt'),
   pcount: $('pcount'), ccount: $('ccount'), scount: $('scount'), dcount: $('dcount'),
   mEat: $('mEat'), mDrink: $('mDrink'),
@@ -99,6 +99,17 @@ export function hud() {
     `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${prof.level} · ${S.runCraft.name}${injury}<br>` +
     `speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · ` +
     `time <b>${S.runTime.toFixed(1)}</b> s${transientLines()}`;
+  // a single-attempt river's countdown is the whole point — put it front and centre instead of
+  // making the player glance at the corner, with its own urgency colour/pulse as it runs low
+  const limit = river.R.timeLimit;
+  if (limit) {
+    const timeLeft = Math.max(0, limit - S.runTime), urgent = timeLeft < 15;
+    el.clock.textContent = timeLeft.toFixed(1);
+    el.clock.className = urgent ? 'urgent' : '';
+    el.clock.style.display = 'block';
+  } else if (el.clock.style.display !== 'none') {
+    el.clock.style.display = 'none';
+  }
   el.stamFill.style.width = (100 * kayak.stamina / STAMINA.max) + '%';
   el.stamFill.className = kayak.tired ? 'tired' : '';
   el.stamTxt.textContent = kayak.tired ? 'TIRED — weak strokes' : 'stamina';

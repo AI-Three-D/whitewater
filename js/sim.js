@@ -54,10 +54,25 @@ export function encodeParticleSim(enc) {
   pass.end();
 }
 
-// settle the water before a run starts, in chunks so the queue never gets a huge single submit
+// settle the water before a run starts, in chunks so the queue never gets a huge single submit.
+// startRun writes the sim uniforms once (time 0) before calling this — but the turbulence noise
+// (see shaders.js) is sampled at that same frozen time for every one of these steps unless we keep
+// advancing it here too, so a static forcing pattern gets pumped into the water hundreds of times
+// in a row instead of the decorrelated-per-frame forcing real gameplay uses. That builds up a
+// standing-wave energy real play never would, which then visibly dumps out over the first second
+// or so once time starts moving for real — advancing time each chunk keeps warmup representative.
+//
+// the inflow discharge multiplier is a separate discontinuity: it used to be pinned at a flat 1
+// through warmup, but real gameplay opens at inflowQ(0) ≈ 1.05 (see inflowQ below) and S.simTime
+// resets to 0 the moment the run actually starts — so the water had converged to one inflow rate
+// and then, in a single frame, had to react to a different one arriving from upstream. That step
+// is exactly the small wave front that used to visibly rush in right as a run began. Warming up
+// against the same inflowQ(0) it will open at removes the step entirely — nothing to react to.
 export async function runWarmup() {
   const chunk = 30;
+  const openInQ = inflowQ(0);
   for (let s = 0; s < SIM.warmupSteps; s += chunk) {
+    writeSimUniforms(s * SIM.dt, openInQ);
     const enc = gpu.device.createCommandEncoder();
     const n = Math.min(chunk, SIM.warmupSteps - s);
     for (let k = 0; k < n; k++) encodeSubstep(enc);

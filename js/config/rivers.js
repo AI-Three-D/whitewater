@@ -30,7 +30,10 @@ export const RIVER_SIDE_MARGIN = 4;   // [m]
 // ---- river factory: fills the derivable fields so entries only carry what makes them different ----
 const CLASS_OF_TIER = { easy: 'Class II', medium: 'Class III', hard: 'Class IV' };
 const river = (tier, fields) => ({ tier, cls: `${CLASS_OF_TIER[tier]} · ${tier}`, ledges: [], bands: [], ...fields });
-const secret = (tier, fields) => ({ ...river(tier, fields), cls: `${CLASS_OF_TIER[tier]} · secret`, hidden: true });
+// secrets are a one-shot: found via the tier's hidden map item, spent the moment you launch (see
+// isSecretSpent/markSecretSpent in progression.js), and run against a clock — but they make up for
+// it with a much richer scatter of loot (see lootMult, read by placePickups in pickups.js).
+const secret = (tier, fields) => ({ ...river(tier, fields), cls: `${CLASS_OF_TIER[tier]} · secret`, hidden: true, singleAttempt: true });
 
 // Field groups, in the order used below:
 //   identity    name, art, pack
@@ -41,6 +44,7 @@ const secret = (tier, fields) => ({ ...river(tier, fields), cls: `${CLASS_OF_TIE
 //   features    forks, pond, boulderIslands, waterfalls, landBridges, builtBridges, obstacles,
 //               landslideZone, extraKind, bands [{ z0, z1, drop } …] — see dropAt in river.js
 //   lanes       the channel's lateral wander
+//   secret-only timeLimit [s], lootMult (scatter density multiplier, on top of the tier's usual count)
 
 export const RIVERS = [
   // ---------- easy ----------
@@ -127,7 +131,7 @@ export const RIVERS = [
   }),
   river('medium', {
     name: 'Silver Falls',
-    slope: 0.0014, manning: 0.032, depth: 1.7, len: 300, seed: 91,
+    slope: 0.0014, manning: 0.032, depth: 1.2, len: 200, seed: 91, pack: 'mediumPack',
     halfW: 9, widthVar: 0.12, meander: [[6, 240]], constrictions: 0, valleyH: 26, valleyScale: 55,
     rocks: 0, emergent: 0.2,
     //ledges: [[65, 0.4], [82, 0.5]],
@@ -204,12 +208,16 @@ export const RIVERS = [
 // one per tier, shown as "???" until the tier's map item has been found
 export const RIVERS_HIDDEN = [
   secret('easy', {
-    name: 'Rocky Narrows',
-    slope: 0.013, manning: 0.035, depth: 1.5, len: 400, seed: 26,
-    halfW: 7.5, widthVar: 0.35, meander: [[19, 135], [7, 52]], constrictions: 3, valleyH: 20, valleyScale: 55,
-    rocks: 60, rockR: [0.9, 2.5], emergent: 0.5, ledges: [[110, 0.6], [240, 0.7], [360, 0.6]],
-    biome: 'canyon', timeOfDay: 'misty', waterTint: [0.14, 0.10, 0.05], waterClarity: 0.6,
-    lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 43 },
+    name: 'Lake Serene', art: 'img/Willow.png',
+    slope: 0.0000, manning: 0.031, depth: 2.5, len: 179, seed: 12,
+    halfW: 19, widthVar: 0.3, meander: [[5, 48]], constrictions: 0, valleyH: 10, valleyScale: 60,
+    rocks: 0, emergent: 0.3, halfW: 8,
+    waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,   // crystal clear
+    pond: { z: 240, len: 70, exitTail: 40 },   // a lake this big needs a long, gentle un-narrowing
+    timeLimit: 420, lootMult: 3.75,   // dead water — no current to help you, so the clock is generous
+    extraKind: 'diamond', extraCount: 3,   // a few, each worth several coins — not scattered thick like the rest
+    coinCount: 20, evasiveCoinCount: 20,   // half the coins bob high overhead — easy to paddle under
+    lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 },
   }),
   secret('medium', {
     name: 'Emerald Hollow',
@@ -217,6 +225,7 @@ export const RIVERS_HIDDEN = [
     halfW: 8, widthVar: 0.35, meander: [[20, 130], [7, 52]], constrictions: 3, valleyH: 22, valleyScale: 48,
     rocks: 60, rockR: [0.9, 2.5], emergent: 0.5, ledges: [[160, 0.6], [320, 0.7]],
     biome: 'deciduous', timeOfDay: 'dawn', waterTint: [0.03, 0.15, 0.06], waterClarity: 1.2,
+    timeLimit: 240, lootMult: 3,
     lanes: { count: 3, amp: 0.16, wander: 3, seedOffset: 92 },
   }),
   secret('hard', {
@@ -226,6 +235,7 @@ export const RIVERS_HIDDEN = [
     rocks: 110, rockR: [0.9, 2.8], emergent: 0.55, ledges: [[130, 0.9], [250, 1.1], [380, 1.0]],
     biome: 'barren', timeOfDay: 'night', waterTint: [0.08, 0.08, 0.08], waterClarity: 0.6,
     waterfalls: [{ z: 300, drop: 4.5, len: 5 }],
+    timeLimit: 200, lootMult: 3,
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 93 },
   }),
 ];

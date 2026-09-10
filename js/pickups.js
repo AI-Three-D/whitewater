@@ -60,16 +60,32 @@ const rucksackSlots = () => Array.from({ length: RUCKSACK.count }, () => ({
 
 export function placePickups() {
   const river = S.river;
-  const total = PICKUPS.countForTier(river.R.tier);
+  const total = Math.round(PICKUPS.countForTier(river.R.tier) * (river.R.lootMult ?? 1));
   const floatCount = Math.round(Math.max(0, total - PICKUPS.perTierBase) * PICKUPS.floatFracOfExtra);
+  // coins get their own count, independent of `total` (which still drives paddles) — R.coinCount
+  // overrides it, unset just matches `total` as before
+  const coinTotal = river.R.coinCount ?? total;
+  const coinFloat = Math.round(Math.max(0, coinTotal - PICKUPS.perTierBase) * PICKUPS.floatFracOfExtra);
+  // "evasive" coins (R.evasiveCoinCount) are a separate, much higher-amplitude bob on top of the
+  // regular float — see PICKUPS.evasiveBobAmp/Speed and the `it.evasive` check in updatePickup.
+  // They're 100% floating (floatCount = their own count), tagged after the fact since seededList
+  // has no notion of "evasive", just "floating".
+  const evasiveCount = river.R.evasiveCoinCount ?? 0;
+  const evasiveCoins = seededList(302, evasiveCount, evasiveCount).map(it => ({ ...it, evasive: true }));
   river.pickupKinds = ['paddle', 'coin', 'rucksack', ...(river.R.extraKind ? [river.R.extraKind] : [])];
   river.pickups = {
     paddle: seededList(201, total, floatCount),
-    coin: seededList(301, total, floatCount),
+    coin: [...seededList(301, coinTotal, coinFloat), ...evasiveCoins],
     rucksack: rucksackSlots(),
   };
   river.rucksackSpawnT = 0;
-  if (river.R.extraKind) river.pickups[river.R.extraKind] = seededList(401, total, floatCount);
+  if (river.R.extraKind) {
+    // a rare extra (a handful of diamonds, say) wants its own much smaller count than the
+    // paddle/coin scatter density — R.extraCount overrides it; unset, it just matches `total`
+    const extraTotal = river.R.extraCount ?? total;
+    const extraFloat = Math.round(Math.max(0, extraTotal - PICKUPS.perTierBase) * PICKUPS.floatFracOfExtra);
+    river.pickups[river.R.extraKind] = seededList(401, extraTotal, extraFloat);
+  }
   for (const kind of river.pickupKinds) ensureInstBuf(pickupInstBufs, kind, river.pickups[kind].length);
   ensureInstBuf(pickupInstBufs, 'map', 1);   // at most one map ever, so this allocates once
 }
@@ -242,11 +258,15 @@ function collect(kind, it, y) {
 }
 
 // proximity fade: regular pickups vanish a few seconds after the paddler first gets close;
-// the map is a rare key item and stays fully visible for the whole run
+// the map is a rare key item and stays fully visible for the whole run. A rucksack drifting past
+// the take-out gets the same treatment but on its own, much shorter timer (see RUCKSACK.finishFadeTime)
+// — there's no one left downstream to grab it, so left alone it would just idle at the z-clamp in
+// updateRucksackDrift and pile up with every fresh one that spawns after it.
 function fadeAlpha(kind, it, dist) {
   if (kind === 'map') return 1;
-  const fadeTime = kind === 'rucksack' ? RUCKSACK.fadeTime : PICKUPS.fadeTime;
-  if (it.seenT < 0 && dist < PICKUPS.proximityRadius) it.seenT = S.simTime;
+  const pastFinish = kind === 'rucksack' && it.z >= S.river.finishZ;
+  const fadeTime = pastFinish ? RUCKSACK.finishFadeTime : kind === 'rucksack' ? RUCKSACK.fadeTime : PICKUPS.fadeTime;
+  if (it.seenT < 0 && (pastFinish || dist < PICKUPS.proximityRadius)) it.seenT = S.simTime;
   if (it.seenT < 0) return 1;
   const fadeT = S.simTime - it.seenT;
   if (fadeT >= fadeTime) it.alive = false;
@@ -261,8 +281,14 @@ function updatePickup(kind, it, data, n) {
     return;
   }
   const P = kindParams(kind);
-  const bobPhase = S.simTime * PICKUPS.bobSpeed + it.bobPh;
-  const bob = it.floating ? PICKUPS.bobAmp * Math.sin(bobPhase) : 0;
+  const bobPhase = S.simTime * (it.evasive ? PICKUPS.evasiveBobSpeed : PICKUPS.bobSpeed) + it.bobPh;
+  // an "evasive" coin bobs from water level up to evasiveBobAmp metres in the air (never below —
+  // (1+sin)/2 stays in [0,1]) instead of the small symmetric wobble every other floater gets, so
+  // it's overhead more often than not and easy to paddle right underneath. reachable below still
+  // reads the raw sine phase, so the same "near the bottom of the cycle" gate applies either way.
+  const bob = !it.floating ? 0 : it.evasive
+    ? PICKUPS.evasiveBobAmp * (0.5 + 0.5 * Math.sin(bobPhase))
+    : PICKUPS.bobAmp * Math.sin(bobPhase);
   const y = nearestChan(S.river.rows[rowOf(it.z)], it.x).eta + P.hover + bob;
   const dist = Math.hypot(kayak.p[0] - it.x, kayak.p[2] - it.z);
   let alpha = fadeAlpha(kind, it, dist);

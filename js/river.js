@@ -156,6 +156,19 @@ export function generateRiver(R) {
   // an optional calm, wide, current-free "pond" partway down the river — same treatment as the
   // put-in pool (see `calm` below), just centred elsewhere. R.pond = { z, len } in world metres.
   const pond0 = R.pond ? R.pond.z - R.pond.len / 2 : 0, pond1 = R.pond ? R.pond.z + R.pond.len / 2 : 0;
+  // how long, past the pond, its width and shoreline noise both take to fade back to normal.
+  // hwAt's width narrowing and bedBase's relief-noise suppression (both driven by calmPond below)
+  // used to run on different windows — width closing over a plain 15 m while relief stayed damped
+  // for longer. That let the mask (channelMask, driven by the same width) shrink out from under
+  // relief while the two were out of step, so thermalErode — which treats anywhere inside the mask
+  // as protected and everywhere else as fair game (see its `mask[c] > 0.15` guard above) — met a
+  // fast-moving protected/unprotected boundary and iteratively carved washboard notches right along
+  // it, independent of how much relief noise was actually still getting through. Driving both off
+  // one shared, longer tail keeps that boundary moving gradually instead, so there's nothing sharp
+  // for erosion to grab onto. Only a genuinely large pond (Lake Serene) needs the long tail — an
+  // ordinary river's brief pond (see Willow Bend) stays on the short default so it doesn't drag the
+  // banks out wide for tens of metres after a pond that's barely there.
+  const pondTail = R.pond?.exitTail ?? 15;
   // the channel's half-width at a given z — pulled out so centerAt (below) can size its side margin
   // off the *actual* local width instead of a single worst-case number for the whole river. A static
   // per-river estimate that assumed the put-in pool's widening and the pond's could both be maxed
@@ -164,7 +177,7 @@ export function generateRiver(R) {
   // whole river's meander — not just the one wide spot that actually needed reining in.
   const hwAt = z => {
     const calmPutin = 1 - smoothstep(PUTIN * 0.35, PUTIN, z);
-    const calmPond = R.pond ? smoothstep(pond0 - 15, pond0, z) * (1 - smoothstep(pond1, pond1 + 15, z)) : 0;
+    const calmPond = R.pond ? smoothstep(pond0 - 15, pond0, z) * (1 - smoothstep(pond1, pond1 + pondTail, z)) : 0;
     let hw = R.halfW * (1 + R.widthVar * (vnoise2(z * 0.012, 3.7, seed) * 2 - 1));
     for (const k of constr) hw *= 1 - k.s * Math.exp(-(((z - k.z) / 18) ** 2));
     hw *= 1 - pinchAt(z, waterfalls.filter(wf => wf.branch == null));
@@ -206,7 +219,7 @@ export function generateRiver(R) {
   };
   const channelsAt = z => {
     const calmPutin = 1 - smoothstep(PUTIN * 0.35, PUTIN, z);      // 1 in the pool → 0 in the rapid
-    const calmPond = R.pond ? smoothstep(pond0 - 15, pond0, z) * (1 - smoothstep(pond1, pond1 + 15, z)) : 0;
+    const calmPond = R.pond ? smoothstep(pond0 - 15, pond0, z) * (1 - smoothstep(pond1, pond1 + pondTail, z)) : 0;
     const calm = Math.max(calmPutin, calmPond);
     const c = centerAt(z);
     const hw = hwAt(z);
@@ -215,12 +228,22 @@ export function generateRiver(R) {
     const zEff = R.pond ? z - clamp(z - pond0, 0, pond1 - pond0) : z;
     const T0 = -R.slope * Math.max(0, zEff - PUTIN * 0.4)       // flat bed for the first 12 m
           + 0.12 * (vnoise2(z * 0.05, 9.1, seed + 1) * 2 - 1) * (1 - calm);
-    const T = T0 - dropAt(z, waterfalls.filter(wf => wf.branch == null));
-    const D = R.depth * (1 + 0.25 * (vnoise2(z * 0.03, 5.5, seed + 2) * 2 - 1))
+    const D = R.depth * (1 + 0.25 * (vnoise2(z * 0.03, 5.5, seed + 2) * 2 - 1) * (1 - calm))
             * clamp(Math.pow(R.halfW / hw, 0.4), 0.7, 1.8) * (1 + 0.8 * calm);   // and deeper
+    // eta (= T + waterFrac·D, the "resting" water surface) must depend only on real terrain shape —
+    // the slope and any ledges/waterfalls — never on how deep the channel happens to render at a
+    // given z. D above scales with `calm` (ponds/put-ins read deeper) *and* with channel width (a
+    // wider stretch reads shallower for the same volume, via the R.halfW/hw ratio) — either one
+    // varying eta by itself leaves the initial water surface not actually level, so the first
+    // physics tick has to relax that as a real wave: a pulse of "extra" water surging forward,
+    // in the direction of any residual slope, out of wherever the surface started out higher.
+    // Deriving T from the target eta instead of the other way around makes eta immune to every
+    // source of D variation at once, not just whichever one happened to introduce it.
+    const etaTarget = T0 - dropAt(z, waterfalls.filter(wf => wf.branch == null));
+    const T = etaTarget - SIM.waterFrac * D;
     const curv = (centerAt(z + 2) - 2 * c + centerAt(z - 2)) / 4;
     const d0 = -clamp(8 * curv, -0.35, 0.35);
-    const base = { c, hw, T, D, d0, eta: T + SIM.waterFrac * D, side: 0, t: 0 };
+    const base = { c, hw, T, D, d0, eta: T + SIM.waterFrac * D, side: 0, t: 0, calm };
     for (const fk of forks) {
       const splitLen = fk.splitLen ?? 25, mergeLen = fk.mergeLen ?? 25;
       const t = Math.min(smoothstep(fk.startZ - splitLen, fk.startZ, z), 1 - smoothstep(fk.mergeZ, fk.mergeZ + mergeLen, z));
@@ -246,7 +269,7 @@ export function generateRiver(R) {
         // softClamp, not clamp: eases the branch back toward its sibling as it nears the world
         // edge instead of snapping flat against it (see centerAt above for the same treatment).
         const bc = softClamp(base.c + off, bhw + RIVER_SIDE_MARGIN, Wd - bhw - RIVER_SIDE_MARGIN);
-        return { c: bc, hw: bhw, T: bT, D: bD, d0: base.d0, eta: bT + SIM.waterFrac * bD, side, islandH, islandScale, t };
+        return { c: bc, hw: bhw, T: bT, D: bD, d0: base.d0, eta: bT + SIM.waterFrac * bD, side, islandH, islandScale, t, calm };
       });
       // each branch needs the sibling's centre so "island" shaping is bounded to the actual
       // gap between the two channels — without this it would wrongly keep using the low
@@ -283,8 +306,11 @@ export function generateRiver(R) {
     const wx = x + 14 * (fbm2(x * 0.006, z * 0.006, 2, seed + 11) - 0.5);    // domain warp → ridges
     const wz = z + 14 * (fbm2(x * 0.006 + 5, z * 0.006 + 5, 2, seed + 12) - 0.5);
 
-    const relief = (fbm2(wx * 0.011, wz * 0.011, 5, seed + 3) - 0.5) * Math.min(vH, 14) * 0.8 * smoothstep(0, 25, m)
-                 + (fbm2(x * 0.05, z * 0.05, 3, seed + 4) - 0.5) * 1.4 * smoothstep(0, 5, m);
+    // a calm pool/pond's water sits dead flat, so full-strength relief noise here would dip the
+    // bank below the waterline in places, breaching it into a washboard of little "waterfalls" —
+    // damp it the same way the channel-bed noise already is (see T0 above) rather than just here.
+    const relief = ((fbm2(wx * 0.011, wz * 0.011, 5, seed + 3) - 0.5) * Math.min(vH, 14) * 0.8 * smoothstep(0, 25, m)
+                 + (fbm2(x * 0.05, z * 0.05, 3, seed + 4) - 0.5) * 1.4 * smoothstep(0, 5, m)) * (1 - (chan.calm ?? 0));
     return chan.T + chan.D + bank + valley + relief;
   };
   const bedHeight = (x, z, chans) => { let m = Infinity; for (const chan of chans) m = Math.min(m, bedBase(x, z, chan)); return m; };
