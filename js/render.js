@@ -12,7 +12,7 @@ import { pickupInstBufs, allPickupKinds } from './pickups.js';
 import { sparks } from './effects.js';
 import { W, L, dx, Q } from './quality.js';
 import { viewWindow, isEditing } from './view.js';
-
+import { drawOverlay } from './editorOverlay.js';
 // ---------- camera ----------
 const IDENTITY = mat4Compose([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]);
 const camScale = () => (isMobile ? 0.5 : 1);   // mobile sits closer to the boat
@@ -284,6 +284,7 @@ export function encodeRenderPass(enc) {
   pass.setPipeline(gpu.waterPipe);
   drawSlices(pass, lodSlices(false));
   drawPickups(pass);
+  if (isEditing()) drawOverlay(pass);
   pass.setPipeline(gpu.sprayPipe);
   pass.draw(6, PARTS.count);
   pass.end();

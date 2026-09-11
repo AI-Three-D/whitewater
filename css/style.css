@@ -265,3 +265,31 @@ body.editing #clock,body.editing #dbg{display:none!important}
 .riv .cardbtns button:hover{background:rgba(255,255,255,.28)}
 .riv select{width:100%;margin:6px 0 2px;padding:4px}
 .riv select option{color:#000}
+/* level editor: side panel + mode buttons + overlay-adjacent chrome */
+#editor .ed-modes{display:flex;gap:4px;margin:0 4px}
+#editor .ed-panel{position:fixed;left:0;top:48px;bottom:0;width:302px;overflow-y:auto;pointer-events:auto;
+  background:rgba(5,15,25,.84);border-right:1px solid rgba(127,232,201,.3);padding:8px 8px 40px;box-sizing:border-box;scrollbar-width:thin}
+.ed-panel details.sec{border:1px solid rgba(255,255,255,.15);border-radius:8px;margin:0 0 8px;background:rgba(255,255,255,.04);overflow:hidden}
+.ed-panel summary{cursor:pointer;padding:6px 10px;font-weight:600;font-size:13px;color:#9fe;user-select:none;list-style:none}
+.ed-panel summary::-webkit-details-marker{display:none}
+.ed-panel .ctl{display:flex;align-items:center;gap:6px;padding:2px 8px;font-size:12px}
+.ed-panel .ctl .lab{flex:0 0 106px;color:#cde;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ed-panel .ctl input[type=range]{flex:1;min-width:0;accent-color:#7fe8c9}
+.ed-panel .ctl .val{flex:0 0 52px;text-align:right;color:#ffe08a;font-variant-numeric:tabular-nums}
+.ed-panel .ctl select{flex:1;min-width:0;background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:5px;padding:2px}
+.ed-panel .ctl select option{color:#000}
+.ed-panel .ctl label{color:#cde;cursor:pointer}
+.ed-panel button{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer}
+.ed-panel button.on{background:#7fe8c9;color:#06201a;border-color:#7fe8c9;font-weight:700}
+.ed-panel button:disabled{opacity:.35;cursor:default}
+.ed-panel .addbtn{margin:4px 8px 8px}
+.ed-panel .mhead{justify-content:space-between}
+.ed-panel .featgrid{display:flex;flex-wrap:wrap;gap:5px;padding:4px 8px}
+.ed-panel .featrow{padding:4px 10px;font-size:12px;cursor:pointer;border-top:1px solid rgba(255,255,255,.08)}
+.ed-panel .featrow:hover{background:rgba(255,255,255,.08)}
+.ed-panel .featrow.on{background:rgba(127,232,201,.18)}
+.ed-panel .featparams{padding:2px 0 8px;background:rgba(0,0,0,.25)}
+.ed-panel .featparams .hint{padding:2px 10px;font-size:11px;color:#9bc}
+.ed-panel .featparams .del{margin:4px 10px;border-color:rgba(255,120,90,.7);color:#ffb3a0}
+.ed-panel .note{padding:2px 10px 4px;font-size:11px;color:#9bc}
+#editor .ed-info{left:314px}   /* clear the panel */

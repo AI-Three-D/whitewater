@@ -117,9 +117,12 @@ export function validateRiverConfig(R) {
       throw new Error(`River "${R.name}": ${extents[a][2]} and ${extents[c][2]} overlap — keep their z at least ${need.toFixed(0)} m apart`);
   }
 }
-
-export function generateRiver(R) {
-  const { W, L, dx } = GRID, N = W * L, Lw = L * dx, Wd = W * dx;
+// Channel centreline / width profile for R — extracted from generateRiver so the level editor can
+// preview bank lines and the centreline for an edited config without a full rebuild. It consumes
+// the first draws of R.seed's rng stream (meander phases, constriction placement); generateRiver
+// keeps using the returned rng, so everything downstream (rock placement) stays bit-identical.
+export function channelProfile(R) {
+  const { W, L, dx } = GRID, Lw = L * dx, Wd = W * dx;
   const finishZ = Math.min(R.len ?? (Lw - 25), Lw - 25);
   const rng = mulberry32(R.seed);
   const meander = R.meander.map(([A, lam]) => [A, lam, rng() * 6.2832]);
@@ -127,7 +130,7 @@ export function generateRiver(R) {
   const constrLo = 50, constrHi = Math.max(constrLo + 20, finishZ - 30);
   const constr = [];
   for (let k = 0; k < R.constrictions; k++) constr.push({ z: constrLo + rng() * (constrHi - constrLo), s: 0.3 + 0.3 * rng() });
-  const forks = R.forks || [], waterfalls = R.waterfalls || [], bands = R.bands || [];
+  const waterfalls = R.waterfalls || [];
   const seed = R.seed;
   // width narrowing from nearby waterfalls must not compound — take the single hardest pinch, not the product (multiplying caused a jagged sawtooth bank)
   const pinchAt = (z, wfPool) => {
@@ -158,6 +161,14 @@ export function generateRiver(R) {
     const hw = hwAt(z), lo = hw + RIVER_SIDE_MARGIN, hi = Wd - hw - RIVER_SIDE_MARGIN;
     return softClamp(Wd / 2 + smoothstep(PUTIN, PUTIN + 80, z) * (mdev(z) - dev0), lo, hi);
   };
+  return { rng, finishZ, Wd, pinchAt, pond0, pond1, pondTail, hwAt, centerAt };
+}
+
+export function generateRiver(R) {
+  const { W, L, dx } = GRID, N = W * L, Lw = L * dx, Wd = W * dx;
+  const { rng, finishZ, pinchAt, pond0, pond1, pondTail, hwAt, centerAt } = channelProfile(R);
+  const forks = R.forks || [], waterfalls = R.waterfalls || [], bands = R.bands || [];
+  const seed = R.seed;
   // shared by base.T and every fork branch so their elevations agree exactly where z-ranges overlap (esp. fork merges)
   const dropAt = (z, wfPool) => {
     let d = 0;
