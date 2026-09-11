@@ -263,12 +263,13 @@ function updatePickup(kind, it, data, n) {
     ? PICKUPS.evasiveBobAmp * (0.5 + 0.5 * Math.sin(bobPhase))
     : PICKUPS.bobAmp * Math.sin(bobPhase);
   const y = nearestChan(S.river.rows[rowOf(it.z)], it.x).eta + P.hover + bob;
-  const dist = Math.hypot(kayak.p[0] - it.x, kayak.p[2] - it.z);
-  let alpha = fadeAlpha(kind, it, dist);
 
+  const dist = Math.hypot(kayak.p[0] - it.x, kayak.p[2] - it.z);
+  const editing = S.gameState === 'editor';   // level editor: everything shown, nothing fades or gets collected
+  let alpha = editing ? 1 : fadeAlpha(kind, it, dist);
   const reachable = kind === 'rucksack' || !it.floating || Math.sin(bobPhase) <= PICKUPS.reachBob;
   const lootMod = kind === 'map' ? 1 : (S.runCraft.lootMod ?? 1);
-  if (it.alive && reachable && dist < P.collectRadius * lootMod) {
+  if (!editing && it.alive && reachable && dist < P.collectRadius * lootMod) {
     collect(kind, it, y);
     alpha = 0;
   }

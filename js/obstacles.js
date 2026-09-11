@@ -243,7 +243,8 @@ export function updateObstacles(dtReal) {
 
 export function writeObstacleInstances() {
   const river = S.river;
-  const zk = kayak.p[2], zLo = zk - RENDER.viewBehind - 4, zHi = zk + RENDER.viewAhead + 4;
+  const { zc, back, ahead } = viewWindow(), zLo = zc - back - 4, zHi = zc + ahead + 4;
+  
   const groups = {};
   for (const ob of river.obstacles || []) {
     if (ob.z < zLo || ob.z > zHi) continue;

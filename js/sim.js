@@ -6,6 +6,7 @@ import { gpu } from './gpu.js';
 import { waterAt } from './sampling.js';
 import { kayak } from './kayak.js';
 import { W, L, dx } from './quality.js';
+import { simWindow, isEditing } from './view.js';
 
 const simUAb = new ArrayBuffer(112), simUF = new Float32Array(simUAb), simUU = new Uint32Array(simUAb);
 export function writeSimUniforms(time, inQ, jOffset = 0) {
@@ -24,9 +25,10 @@ export function writeSimUniforms(time, inQ, jOffset = 0) {
 
 export const inflowQ = t => 1 + 0.06 * Math.sin(0.21 * t) + 0.04 * Math.sin(0.53 * t + 1) + 0.025 * Math.sin(1.3 * t + 2);
 
-export function computeWindow(zk) {
-  const cj0 = clamp(Math.floor((zk - RENDER.computeBehind) / dx), 0, L - 1);
-  const cj1 = clamp(Math.ceil((zk + RENDER.computeAhead) / dx), cj0 + 1, L);
+export function computeWindow() {
+  const { zc, back, ahead } = simWindow();
+  const cj0 = clamp(Math.floor((zc - back) / dx), 0, L - 1);
+  const cj1 = clamp(Math.ceil((zc + ahead) / dx), cj0 + 1, L);
   return { cj0, rows: cj1 - cj0 };
 }
 
@@ -69,6 +71,17 @@ export async function runWarmup() {
 // spray emitters: ambient, bow wave (speed relative to the water, plus thuds) and the paddle blade
 const partUF = new Float32Array(28);   // reused every frame; writeBuffer copies out synchronously
 export function writeParticleUniforms(dtReal) {
+  const pu = partUF;
+  // editor: no boat emitters, ambient spray centred a little ahead of the fly camera
+  if (isEditing()) {
+    const fc = S.flyCam;
+    pu.set([W, L, dx, dtReal], 0);
+    pu.set([S.simTime, SIM.hmin, PARTS.kayakShare, PARTS.ambient], 4);
+    pu.set([fc.pos[0] + Math.sin(fc.yaw) * 25, fc.pos[1], fc.pos[2] + Math.cos(fc.yaw) * 25, PARTS.ambient], 8);
+    pu.fill(0, 12);
+    gpu.device.queue.writeBuffer(gpu.partUBuf, 0, pu);
+    return;
+  }
   const k = kayak, t = S.simTime;
   const wB = waterAt(k.p[0], k.p[2]);
   const f = qRotate(k.q, [0, 0, 1]), fwdH = v3.norm([f[0], 0.001, f[2]]);
@@ -79,7 +92,7 @@ export function writeParticleUniforms(dtReal) {
   const bl = k.blade, wBl = waterAt(bl[0], bl[2]);
   const bladeWet = k.paddling && bl[1] < wBl.eta + 0.05 && wBl.h > 0.1;
   const padProb = bladeWet ? 0.05 * k.env * (k.tired ? 0.5 : 1) : 0;
-  const pu = partUF;
+
   pu.set([W, L, dx, dtReal], 0);
   pu.set([t, SIM.hmin, PARTS.kayakShare, PARTS.ambient], 4);
   pu.set([k.p[0], k.p[1], k.p[2], PARTS.ambient], 8);

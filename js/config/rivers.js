@@ -22,7 +22,9 @@ export const RIVER_SIDE_MARGIN = 4;   // [m]
 // river factory: fills the derivable fields so entries only carry what makes them different
 const CLASS_OF_TIER = { easy: 'Class II', medium: 'Class III', hard: 'Class IV' };
 const river = (tier, fields) => ({ tier, cls: `${CLASS_OF_TIER[tier]} · ${tier}`, ledges: [], bands: [], ...fields });
-// secrets: one-shot (spent on launch, see progression.js), timed, richer loot via lootMult
+// the same factory, for custom (level-editor) rivers — see customRivers.js
+export const makeRiver = river;
+
 const secret = (tier, fields) => ({ ...river(tier, fields), cls: `${CLASS_OF_TIER[tier]} · secret`, hidden: true, singleAttempt: true });
 
 // Field groups, in the order used below:
@@ -188,7 +190,7 @@ export const RIVERS = [
     slope: 0.033, manning: 0.041, depth: 1.5, len: 470, seed: 42,
     halfW: 5, widthVar: 0.42, meander: [[27, 102], [9, 40]], constrictions: 5, valleyH: 44, valleyScale: 56,
     rocks: 125, rockR: [1.0, 2.9], emergent: 0.6, ledges: [[130, 1.0], [250, 1.1], [380, 1.0]],
-    biome: 'volcanic', timeOfDay: 'night', waterTint: [0.10, 0.05, 0.03], waterClarity: 0.4,
+    biome: 'volcanic', timeOfDay: 'night', waterTint: [0.10, 0.05, 0.03], waterClarity: 0.4,   // ash-choked water through a smoky hellscape
     waterfalls: [{ z: 300, drop: 4.5, len: 5 }],
     lanes: { count: 3, amp: 0.22, wander: 4, seedOffset: 48 },
   }),
@@ -201,11 +203,11 @@ export const RIVERS_HIDDEN = [
     slope: 0.0000, manning: 0.031, depth: 2.5, len: 179, seed: 12,
     halfW: 19, widthVar: 0.3, meander: [[5, 48]], constrictions: 0, valleyH: 10, valleyScale: 60,
     rocks: 0, emergent: 0.3, halfW: 8,
-    waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,
-    pond: { z: 240, len: 70, exitTail: 40 },
-    timeLimit: 420, lootMult: 3.75,
-    extraKind: 'diamond', extraCount: 3,
-    coinCount: 20, evasiveCoinCount: 20,
+    waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,   // crystal clear
+    pond: { z: 240, len: 70, exitTail: 40 },   // a lake this big needs a long, gentle un-narrowing
+    timeLimit: 420, lootMult: 3.75,   // dead water — no current to help you, so the clock is generous
+    extraKind: 'diamond', extraCount: 3,   // a few, each worth several coins — not scattered thick like the rest
+    coinCount: 20, evasiveCoinCount: 20,   // half the coins bob high overhead — easy to paddle under
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 },
   }),
   secret('medium', {

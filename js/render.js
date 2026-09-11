@@ -11,6 +11,7 @@ import { instBufs, instRange, scenery } from './props.js';
 import { pickupInstBufs, allPickupKinds } from './pickups.js';
 import { sparks } from './effects.js';
 import { W, L, dx, Q } from './quality.js';
+import { viewWindow, isEditing } from './view.js';
 
 // ---------- camera ----------
 const IDENTITY = mat4Compose([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]);
@@ -112,25 +113,32 @@ export function writeCam() {
 }
 
 // ---------- terrain/water LOD ----------
-// `overlap` extends the coarser bands one row back so the terrain has no cracks at the seams
+// Full / half / quarter density bands out from the view centre in both directions (the behind side
+// collapses to full detail in a run, where viewBehind < lod.near). `overlap` extends each coarser
+// band one row into its finer neighbour so the terrain has no cracks at the seams.
 function lodSlices(overlap) {
-  const zk = kayak.p[2], lod = RENDER.lod;
-  const near = Math.min(lod.near, RENDER.viewAhead), mid = Math.min(Math.max(lod.mid, near), RENDER.viewAhead);
-  const up = (j, s) => Math.ceil(j / s) * s;
-  const jB = clamp(Math.floor((zk - RENDER.viewBehind) / dx), 0, L - 2);
-  const jN = clamp(up(Math.ceil((zk + near) / dx), 2), jB + 1, L - 1);
-  const jM = clamp(up(Math.ceil((zk + mid) / dx), 4), jN, L - 1);
-  const jA = clamp(Math.ceil((zk + RENDER.viewAhead) / dx), jM, L - 1);
-  const seams = [jB, jN, jM, jA], out = [];
-  for (let k = 0; k < 3; k++) {
+  const { zc, back, ahead } = viewWindow(), lod = RENDER.lod;
+  const nearA = Math.min(lod.near, ahead), midA = Math.min(Math.max(lod.mid, nearA), ahead);
+  const nearB = Math.min(lod.near, back), midB = Math.min(Math.max(lod.mid, nearB), back);
+  const up = (j, s) => Math.ceil(j / s) * s, down = (j, s) => Math.floor(j / s) * s;
+  const jB = clamp(Math.floor((zc - back) / dx), 0, L - 2);
+  const jMb = midB < back ? clamp(down(Math.floor((zc - midB) / dx), 4), jB, L - 2) : jB;
+  const jNb = nearB < back ? clamp(down(Math.floor((zc - nearB) / dx), 2), jMb, L - 2) : jMb;
+  const jN = clamp(up(Math.ceil((zc + nearA) / dx), 2), jNb + 1, L - 1);
+  const jM = clamp(up(Math.ceil((zc + midA) / dx), 4), jN, L - 1);
+  const jA = clamp(Math.ceil((zc + ahead) / dx), jM, L - 1);
+  // [lod index, first grid row, last grid row, side facing the finer band: -1 start, +1 end, 0 none]
+  const bands = [[0, jNb, jN, 0], [1, jN, jM, -1], [2, jM, jA, -1], [1, jMb, jNb, 1], [2, jB, jMb, 1]];
+  const out = [];
+  for (const [k, j0, j1, seam] of bands) {
+    if (j1 <= j0) continue;
     const lo = gpu.lods[k], s = lo.s;
-    const r0 = clamp(Math.floor(seams[k] / s) - (k && overlap ? 1 : 0), 0, lo.rows - 2);
-    const r1 = clamp(Math.ceil(seams[k + 1] / s), 0, lo.rows - 1);
+    const r0 = clamp(Math.floor(j0 / s) - (overlap && seam < 0 ? 1 : 0), 0, lo.rows - 2);
+    const r1 = clamp(Math.ceil(j1 / s) + (overlap && seam > 0 ? 1 : 0), 0, lo.rows - 1);
     if (r1 > r0) out.push({ buf: lo.buf, first: r0 * lo.rowIdx, count: (r1 - r0) * lo.rowIdx });
   }
   return out;
 }
-
 // ---------- paddler pose ----------
 const kayakInstBuf = new Float32Array(20);   // reused for every part; writeBuffer copies synchronously
 function writeKayakInst(name, m, tint = [1, 1, 1, 1]) {
@@ -200,8 +208,10 @@ const drawInstanced = (pass, mesh, inst, count = 1, first = 0) => {
   pass.draw(mesh.count, count, 0, first);
 };
 
-function drawBridges(pass, zk) {
-  const visible = bm => !(bm.zMax < zk - RENDER.viewBehind || bm.zMin > zk + RENDER.viewAhead);
+
+
+function drawBridges(pass, win) {
+  const visible = bm => !(bm.zMax < win.zc - win.back || bm.zMin > win.zc + win.ahead);
   if (scenery.bridgeGpu.length) {
     pass.setPipeline(gpu.bridgePipe);
     for (const bm of scenery.bridgeGpu) {
@@ -215,12 +225,11 @@ function drawBridges(pass, zk) {
     for (const bm of scenery.builtGpu) if (visible(bm)) drawInstanced(pass, bm, bm.inst);
   }
 }
-
-function drawVegetation(pass, zk) {
+function drawVegetation(pass, win) {
   for (const name of Object.keys(gpu.vegMeshes)) {
     const ib = instBufs[name];
     if (!ib || !ib.count) continue;
-    const [first, n] = instRange(ib, zk);
+    const [first, n] = instRange(ib, win);
     if (n) drawInstanced(pass, gpu.vegMeshes[name], ib.buf, n, first);
   }
 }
@@ -254,7 +263,7 @@ function drawPickups(pass) {
 
 // draw order matters: opaque pass first, then transparent water, pickups/sparks and spray on top
 export function encodeRenderPass(enc) {
-  const zk = kayak.p[2], fog = currentSky().fogColor;
+  const win = viewWindow(), fog = currentSky().fogColor;
   const pass = enc.beginRenderPass({
     colorAttachments: [{
       view: gpu.ctx.getCurrentTexture().createView(),
@@ -267,10 +276,10 @@ export function encodeRenderPass(enc) {
   pass.draw(3);
   pass.setPipeline(gpu.terrainPipe);
   drawSlices(pass, lodSlices(true));
-  drawBridges(pass, zk);
+  drawBridges(pass, win);
   pass.setPipeline(gpu.meshPipe);
-  drawVegetation(pass, zk);   
-  drawKayak(pass);
+  drawVegetation(pass, win);
+  if (!isEditing()) drawKayak(pass);   // the editor has no boat
   drawObstacles(pass);
   pass.setPipeline(gpu.waterPipe);
   drawSlices(pass, lodSlices(false));

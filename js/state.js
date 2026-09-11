@@ -13,7 +13,7 @@ export const newRunLoot = () => ({
 export const S = {
   river: null,
   profile: null,            // null → character selection
-  gameState: 'menu',        // 'menu' | 'run' | 'over'
+  gameState: 'menu',        // 'menu' | 'run' | 'over' | 'editor'
   warmingUp: false,
   paused: false,            // 'run' only — see togglePause in run.js; frame() freezes outright
   simTime: 0,
@@ -22,7 +22,12 @@ export const S = {
   fps: 60,
   camMode: 0,
   // post-run free-look orbit — see cam.update in render.js and initFreeLook in controls.js
+  // post-run free-look orbit — see cam.update in render.js and initFreeLook in controls.js
   freeCam: { yaw: 0, pitch: 0.28, dist: 9 },
+  // level-editor fly camera (editor.js); its z also centres the editor's culling windows (view.js)
+  flyCam: { pos: [0, 10, 0], yaw: 0, pitch: -0.35, speed: 15 },
+
+  
   dbgMode: 0,
   debugUnlockAll: false,    // dev: show every river as unlocked regardless of pack ownership
   debugNoCapsize: false,    // dev: kayak.step ignores roll/pitch capsize (KeyG / mGod)

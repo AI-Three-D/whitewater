@@ -8,8 +8,13 @@ import { S } from './state.js';
 import { $ } from './platform.js';
 import { quality, saveQuality } from './quality.js';
 import { pad } from './controls.js';
+import { validateRiverConfig } from './river.js';
+import { loadCustomRivers, createCustom, deleteCustom, customRiverR, checkCustomR, downloadJson, builtInRivers } from './customRivers.js';
 
-const handlers = { startRun: null, confirmStart: null };
+const handlers = { startRun: null, confirmStart: null, openEditor: null };
+// the one switch for "debug mode": every river unlocked + the custom-river level editor section
+export const isDebugMode = () => S.debugUnlockAll;
+
 export function initUi(h) {
   Object.assign(handlers, h);
   addEventListener('resize', layoutCarousels);
@@ -34,6 +39,8 @@ const artSlot = (cls, label, url) => (url
   ? `<div class="art-slot ${cls}" style="background-image:url('${url}');background-size:cover;background-position:center" role="img" aria-label="${label}"></div>`
   : `<div class="art-slot ${cls}">${label}</div>`);
 
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 const swatch = c => `<i class="swatch" style="background:rgb(${c.map(v => Math.round(v * 255)).join(',')})"></i>`;
 
 const xpBar = prof => {
@@ -44,9 +51,10 @@ const xpBar = prof => {
 // ---------- menu ----------
 export function showMenu() {
   S.gameState = 'menu';
-  document.body.classList.remove('inrun');
+  document.body.classList.remove('inrun', 'editing');
   pad.queue.length = 0;
   show('menu');
+  hide('editor');
   hide('msg');
   hide('stam');
   hide('loot');
@@ -96,11 +104,14 @@ function renderTopbar() {
       <small style="color:#9bc">${prof.points} / ${xp.need} xp to next level · ${plural(prof.runs, 'run')}</small>
     </div>
     <div class="topbar-btns"><button id="openCharSheet">Character</button><button id="openStoreBtn">Store</button>
-      <button id="debugUnlockBtn" style="background:${S.debugUnlockAll ? '#a33' : ''}">${S.debugUnlockAll ? 'Debug: all unlocked' : 'Debug: unlock all rivers'}</button>
+      <button id="debugUnlockBtn" title="unlocks every river and shows the custom-river level editor" style="background:${S.debugUnlockAll ? '#a33' : ''}">${S.debugUnlockAll ? 'Debug mode: ON' : 'Debug mode: off'}</button>
+
       <button id="debugMoneyBtn">Debug: +1000 coins</button>
       <button id="debugInvBtn">Debug: full inventory</button>
       <button id="debugMaxBtn">Debug: max skills</button>
-      <button id="debugGearBtn">Debug: all gear</button></div>`;
+      <button id="debugGearBtn">Debug: all gear</button>
+      
+      </div>`;
   $('openCharSheet').onclick = showCharSheet;
   $('openStoreBtn').onclick = showStore;
   $('debugUnlockBtn').onclick = () => {
@@ -210,8 +221,79 @@ function renderRiverList() {
     }
     rl.appendChild(makeCarousel(row));
   }
+  if (isDebugMode()) renderCustomSection(rl);
   layoutCarousels();
 }
+// ---------- custom rivers (debug: level editor) ----------
+function testCustom(entry) {
+  // test runs never count as one-shot secrets, whatever the config says
+  const R = { ...customRiverR(entry), hidden: false, singleAttempt: false };
+  try {
+    checkCustomR(R);
+    validateRiverConfig(R);
+  } catch (e) {
+    alert('This river can\'t be started:\n' + e.message);
+    return;
+  }
+  if (R.timeLimit) handlers.confirmStart(R); else handlers.startRun(R);
+}
+function customCard(entry) {
+  const R = customRiverR(entry), d = document.createElement('div');
+  const tierLabel = (TIERS.find(t => t.id === R.tier) || {}).label || R.tier;
+  const num = (v, f) => (typeof v === 'number' ? f(v) : '?');
+  d.className = 'riv custom';
+  d.innerHTML = `<h3>${esc(R.name)}</h3>
+    <small>${esc(tierLabel)} · gradient ${num(R.slope, v => (v * 100).toFixed(1))} % · ${num(R.len, v => v.toFixed(0))} m${riverFeatures(R)}</small>
+    <br><small class="edited">edited ${new Date(entry.updated).toLocaleString()}</small>
+    <div class="cardbtns">
+      <button data-act="edit" title="open in the level editor">✏️ Edit</button>
+      <button data-act="play" title="paddle it as a normal run">▶ Test</button>
+      <button data-act="export" title="download the config as JSON">⬇ JSON</button>
+      <button data-act="delete" title="delete this custom river">🗑</button>
+    </div>`;
+  const actions = {
+    edit: () => handlers.openEditor(entry.id),
+    play: () => testCustom(entry),
+    export: () => downloadJson(entry),
+    delete: () => {
+      if (!confirm(`Delete custom river "${R.name}"? This can't be undone.`)) return;
+      deleteCustom(entry.id);
+      renderMenu();
+    },
+  };
+  d.onclick = actions.edit;
+  for (const b of d.querySelectorAll('button[data-act]')) {
+    b.onclick = e => { e.stopPropagation(); actions[b.dataset.act](); };
+  }
+  return d;
+}
+function newCustomCard() {
+  const d = document.createElement('div');
+  d.className = 'riv custom new';
+  const opts = builtInRivers().map(r =>
+    `<option value="${esc(r.name)}">${esc(r.name)} · ${r.tier}${r.hidden ? ' · secret' : ''}</option>`).join('');
+  d.innerHTML = `<h3>＋ New river</h3><small>start from</small>
+    <select><option value="">blank template</option>${opts}</select>
+    <div class="cardbtns"><button data-act="create">Create &amp; edit</button></div>`;
+  d.querySelector('button').onclick = () => {
+    const entry = createCustom(d.querySelector('select').value);
+    handlers.openEditor(entry.id);
+  };
+  return d;
+}
+function renderCustomSection(rl) {
+  const list = loadCustomRivers().sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const h = document.createElement('div');
+  h.className = 'tier custom-tier';
+  h.textContent = `Custom rivers · level editor (debug) · ${plural(list.length, 'river')}`;
+  rl.appendChild(h);
+  const row = document.createElement('div');
+  row.className = 'rivers';
+  for (const entry of list) row.appendChild(customCard(entry));
+  row.appendChild(newCustomCard());
+  rl.appendChild(makeCarousel(row));
+}
+
 
 export function renderMenu() {
   renderQuality();

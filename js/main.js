@@ -1,5 +1,5 @@
 // Entry point: boot sequence, key/button wiring and the per-frame loop.
-import { SIM, RIVERS, RIVERS_HIDDEN , validateConfig} from './config/index.js';
+import { SIM, RIVERS, RIVERS_HIDDEN, validateConfig } from './config/index.js';
 import { clamp } from './math.js';
 import { validateRiverConfig } from './river.js';
 import { loadProfile } from './progression.js';
@@ -10,6 +10,7 @@ import { input, KEYMAP, PAD_KEYS, padDown, padUp, initPads, initFreeLook } from 
 import { kayak } from './kayak.js';
 import { encodeBandCopy, finishBandCopy } from './sampling.js';
 import { computeWindow, inflowQ, writeSimUniforms, writeParticleUniforms, encodeWaterSim, encodeParticleSim } from './sim.js';
+import { simWindow } from './view.js';
 import { cam, writeCam, updateKayakInstances, encodeRenderPass } from './render.js';
 import { updateSparks } from './effects.js';
 import { spawnRucksacks, updateRucksackDrift, updatePickups } from './pickups.js';
@@ -17,16 +18,14 @@ import { updateObstacles, writeObstacleInstances } from './obstacles.js';
 import { hud } from './hud.js';
 import { initUi, showMenu, hideStore, hideCharSheet, showHowTo, hideHowTo, isOpen } from './ui.js';
 import { startRun, confirmStart, endRun, retryRun, eatSnack, drinkEnergy, cycleCamera, toggleDbg, toggleNoCapsize, togglePause } from './run.js';
-
-const BUILD = 'build 35';
-
+import { initEditor, openEditor, editorUpdate } from './editor.js';
+const BUILD = 'build 36';
 installErrorHandlers();
 {
   const v = $('ver');
   if (v) v.textContent = BUILD;
 }
 document.body.classList.add(isMobile ? 'mobile' : 'desktop');
-
 // ---------- input wiring ----------
 const KEY_ACTIONS = {
   KeyC: cycleCamera,
@@ -44,9 +43,9 @@ const KEY_ACTIONS = {
     else if (!isOpen('lvl')) showMenu();
   },
 };
-
 function bindKeys() {
   addEventListener('keydown', e => {
+    if (S.gameState === 'editor') return;   // the level editor binds its own keys (editor.js)
     if (isMobile && PAD_KEYS[e.code]) {
       if (!e.repeat) for (const s of PAD_KEYS[e.code]) padDown(s);
       e.preventDefault();
@@ -67,7 +66,6 @@ function bindKeys() {
     if (KEYMAP[e.code]) input[KEYMAP[e.code]] = false;
   });
 }
-
 function bindMobileButtons() {
   $('mExit').onclick = () => { if (S.gameState !== 'menu' && !isOpen('lvl')) showMenu(); };
   $('mCam').onclick = cycleCamera;
@@ -77,11 +75,9 @@ function bindMobileButtons() {
   $('mGod').onclick = toggleNoCapsize;
   $('mPause').onclick = togglePause;
 }
-
 // ---------- frame loop ----------
 let lastT = performance.now();
 let physAccum = 0;   // real seconds of physics owed, carried frame to frame
-
 // fixed-step physics with an accumulator, capped so a stall can't snowball
 function stepPhysics(dtReal) {
   physAccum = Math.min(physAccum + dtReal * TIME_SCALE, SIM.dt * MAX_PHYS_TICKS);
@@ -96,36 +92,40 @@ function stepPhysics(dtReal) {
   }
   physAccum -= S.frameTicks * SIM.dt;
 }
-
 function updateWorld(dtReal) {
   spawnRucksacks(dtReal);
   updateRucksackDrift(dtReal);
   updatePickups();
   updateObstacles(dtReal);
 }
-
-function renderFrame(dtReal) {
+// simulate = false (editor paused): draw the current water state as-is — no sim/particle dispatch, no readback
+function renderFrame(dtReal, simulate = true) {
   const { device } = gpu;
-  const { cj0, rows } = computeWindow(kayak.p[2]);
-  writeSimUniforms(S.simTime, inflowQ(S.simTime), cj0);
-  writeParticleUniforms(dtReal);
   const enc = device.createCommandEncoder();
-  encodeWaterSim(enc, rows);
-  encodeParticleSim(enc);
-  const bandReq = encodeBandCopy(enc, kayak.p[2]);
+  let bandReq = null;
+  if (simulate) {
+    const { cj0, rows } = computeWindow();
+    writeSimUniforms(S.simTime, inflowQ(S.simTime), cj0);
+    writeParticleUniforms(dtReal);
+    encodeWaterSim(enc, rows);
+    encodeParticleSim(enc);
+    bandReq = encodeBandCopy(enc, simWindow().zc);
+  }
   encodeRenderPass(enc);
   device.queue.submit([enc.finish()]);
   finishBandCopy(bandReq);
 }
-
 function frame(now) {
   requestAnimationFrame(frame);
   const dtRaw = (now - lastT) / 1000;
   lastT = now;
   if (dtRaw > 0) S.fps += (1 / dtRaw - S.fps) * 0.1;
-  if (!S.river || S.gameState === 'menu' || S.warmingUp || S.paused) return;
   const dtReal = clamp(dtRaw, 0, 0.05);
-
+  if (S.gameState === 'editor') {
+    if (S.river) renderFrame(dtReal, editorUpdate(dtReal));
+    return;
+  }
+  if (!S.river || S.gameState === 'menu' || S.warmingUp || S.paused) return;
   stepPhysics(dtReal);
   if (!S.river) return;   // permadeath tore the run down mid-tick: leave the last frame on screen
   if (S.gameState === 'run') updateWorld(dtReal);
@@ -137,7 +137,6 @@ function frame(now) {
   renderFrame(dtReal);
   hud();
 }
-
 // ---------- boot ----------
 async function main() {
   const fail = t => {
@@ -159,16 +158,15 @@ async function main() {
   gpu.device.lost.then(i => fail('WebGPU device lost: ' + i.message));
   resize();
   addEventListener('resize', resize);
-
   S.profile = loadProfile();
   bindKeys();
   initPads();
   initFreeLook();
+  initEditor();
   bindMobileButtons();
   $('howtoBtn').onclick = showHowTo;
-  initUi({ startRun, confirmStart });
+  initUi({ startRun, confirmStart, openEditor });
   showMenu();
   requestAnimationFrame(frame);
 }
-
 main().catch(e => showErr('Error: ' + (e.stack || e)));

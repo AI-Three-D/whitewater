@@ -75,7 +75,7 @@ export function retryRun() {
 
 // ---------- start ----------
 // only called when the river changes — restarts are instant
-function loadRiver(R) {
+export function loadRiver(R) {
   const river = generateRiver(R);
   S.river = river;
   fillTerrainIndex(river.b);
@@ -86,7 +86,7 @@ function loadRiver(R) {
   buildBridgeScenery();
 }
 
-function uploadInitialWater() {
+export function uploadInitialWater() {
   const { device } = gpu, river = S.river;
   device.queue.writeBuffer(gpu.stateBufs[0], 0, river.state);
   device.queue.writeBuffer(gpu.kBufs[0], 0, river.kArr);

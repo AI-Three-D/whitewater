@@ -37,9 +37,9 @@ function lowerBound(zs, v) {
 }
 
 // [first, count] of instances standing on terrain drawn this frame (same window as render.lodSlices)
-export function instRange(ib, zk) {
-  const first = lowerBound(ib.zs, zk - RENDER.viewBehind);
-  const end = lowerBound(ib.zs, zk + RENDER.viewAhead - 0.5);
+export function instRange(ib, win) {
+  const first = lowerBound(ib.zs, win.zc - win.back);
+  const end = lowerBound(ib.zs, win.zc + win.ahead - 0.5);
   return [first, end - first];
 }
 
