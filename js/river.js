@@ -606,11 +606,25 @@ export function generateRiver(R) {
   const state = new Float32Array(N * 4), kArr = new Float32Array(N);
   for (let j = 0; j < L; j++) {
     const chans = rows[j];
+    // per-row discharge-matched velocity (same trick as inVelScale above, just redone per row)
+    // instead of one velocity implied by the river's *average* slope everywhere: any row whose
+    // cross-section departs from that average — a narrower or wider spot, a bend, a boulder —
+    // otherwise starts with the wrong flux, and that mismatch is exactly what launches the small
+    // "tidal wave" seen rushing downstream right at the start of a run (worst on bendy rivers like
+    // Willow Bend). Matching Q row by row makes the initial condition mass-consistent along the
+    // whole channel, so warm-up only has to settle local momentum effects, not a built-in flux error.
+    let rowSum53 = 0;
+    for (let i = 0; i < W; i++) {
+      const x = (i + 0.5) * dx, eta = nearestChan(chans, x).eta;
+      const h = eta - b[j * W + i];
+      if (h >= 0.05) rowSum53 += Math.pow(h, 5 / 3) * dx;
+    }
+    const rowVelScale = Q / Math.max(rowSum53, 1e-3);
     for (let i = 0; i < W; i++) {
       const id = j * W + i, x = (i + 0.5) * dx, eta = nearestChan(chans, x).eta;
       let h = eta - b[id]; if (h < 0.05) h = 0;
       state[id * 4] = h;
-      state[id * 4 + 2] = h > 0 ? Math.min(0.8 * Math.pow(h, 0.6667) * Math.sqrt(R.slope) / R.manning, 4) : 0;
+      state[id * 4 + 2] = h > 0 ? Math.min(rowVelScale * Math.pow(h, 0.6667), 4) : 0;
     }
   }
   // one list: natural and built bridges share the descriptor interface, `built` tells them apart

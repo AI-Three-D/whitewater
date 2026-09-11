@@ -57,9 +57,12 @@ export function encodeParticleSim(enc) {
 
 export async function runWarmup() {
   const chunk = 30;
-  const openInQ = inflowQ(0);
+  // hold inflow at the same neutral discharge (multiplier 1) the initial condition was built
+  // against — inflowQ(0) is already off by a few percent from that baseline, and forcing the
+  // boundary to a slightly different Q than the interior was initialized for is one more thing
+  // warm-up has to iron out before settling, on top of local bends/pinches
   for (let s = 0; s < SIM.warmupSteps; s += chunk) {
-    writeSimUniforms(s * SIM.dt, openInQ);
+    writeSimUniforms(s * SIM.dt, 1);
     const enc = gpu.device.createCommandEncoder();
     const n = Math.min(chunk, SIM.warmupSteps - s);
     for (let k = 0; k < n; k++) encodeSubstep(enc);
