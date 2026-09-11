@@ -1,6 +1,5 @@
-// Landslide boulders: a trajectory is baked once at placement (deterministic per spot) and
-// replayed when the paddler comes within trigger distance; on arrival in the water it splashes
-// the sim and is carved into the bed so the river flows around it for the rest of the run.
+// Landslide boulders: a trajectory is baked once at placement and replayed when the paddler comes
+// within trigger distance; on arrival in the water it splashes the sim and is carved into the bed.
 import { LANDSLIDE } from './config/index.js';
 import { clamp, mulberry32 } from './math.js';
 import { S } from './state.js';
@@ -11,8 +10,7 @@ import { spawnBurst } from './effects.js';
 import { W, L, dx } from './quality.js';
 
 const TWO_PI = 2 * Math.PI;
-// trajectory rows: t, x, y, z, yaw, roll, speed — speed is carried so the splash at the water
-// crossing can scale with how fast the boulder actually got there
+// trajectory rows: t, x, y, z, yaw, roll, speed
 const STRIDE = 7;
 
 function bakeBoulderTrajectory(x0, z0, vrad, seed, downBias) {
@@ -25,7 +23,7 @@ function bakeBoulderTrajectory(x0, z0, vrad, seed, downBias) {
     const wob = (rng() - 0.5) * LANDSLIDE.rollWobble;   // perpendicular to the downhill direction
     const ax = dirx * LANDSLIDE.rollAccel * slope - dirz * wob;
     const az = dirz * LANDSLIDE.rollAccel * slope + dirx * wob + downBias;
-    const fric = LANDSLIDE.rollFric * (0.6 + 0.4 * slope);   // less friction the steeper it is
+    const fric = LANDSLIDE.rollFric * (0.6 + 0.4 * slope);
     vx += (ax - fric * vx) * fdt;
     vz += (az - fric * vz) * fdt;
     const sp = Math.hypot(vx, vz);
@@ -76,9 +74,7 @@ export function placeLandslides() {
     const g = 0.85 + 0.25 * Math.random(), vrad = V.vrad * sc;
     const downBias = Math.random() * LANDSLIDE.downstreamBias;
     const { traj, dur, endedWet } = bakeBoulderTrajectory(x, z, vrad, river.seed + 800 + spotIdx, downBias);
-    // timed against this boulder's own fall duration by default (see LANDSLIDE.assumedSpeed) so
-    // it can be watched coming down rather than always finishing before the player gets there;
-    // nearChance skips that for a close-range surprise instead
+    // trigger timed against the boulder's own fall duration so it can be watched coming down; nearChance gives a close-range surprise instead
     const triggerDist = Math.random() < LANDSLIDE.nearChance
       ? LANDSLIDE.nearTriggerZ
       : clamp(LANDSLIDE.assumedSpeed * (dur + LANDSLIDE.leadTime), LANDSLIDE.minTriggerZ, LANDSLIDE.maxTriggerZ);

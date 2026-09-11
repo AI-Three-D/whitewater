@@ -1,5 +1,4 @@
-// Collectibles: seeded paddle/coin(/diamond) placement, the live-spawned drifting rucksacks, the
-// once-per-tier hidden map, and per-frame fade/collection.
+// Collectibles: seeded paddle/coin(/diamond) placement, drifting rucksacks, the hidden map, and per-frame fade/collection.
 import { PICKUPS, RUCKSACK, MAP_ITEM, COLLECTIBLES, SPECIAL_ITEMS, ITEMS } from './config/index.js';
 import { clamp, mulberry32, mat4TRS } from './math.js';
 import { nearestChan } from './river.js';
@@ -15,10 +14,8 @@ import { W, dx } from './quality.js';
 const TWO_PI = 2 * Math.PI;
 export const pickupInstBufs = {};   // kind → instance buffer (grow-only)
 
-// every kind that gets updated/drawn, in draw order
 export const allPickupKinds = () => [...S.river.pickupKinds, 'map'];
 
-// per-kind tuning tables; the plain scattered pickups share PICKUPS
 const kindParams = kind => (kind === 'map' ? MAP_ITEM : kind === 'rucksack' ? RUCKSACK : PICKUPS);
 const kindScale = kind => {
   if (kind === 'map') return MAP_ITEM.scale;
@@ -40,7 +37,7 @@ function seededList(seedOff, total, floatCount) {
     const { x, z } = randomChannelSpot(rng, zOf);
     list.push(newPickup(x, z, rng));
   }
-  // exactly floatCount of them float (bob out of reach part of the time), chosen by a shuffle
+  // exactly floatCount of them float, chosen by a shuffle
   const flags = Array.from({ length: total }, (_, i) => i < floatCount);
   for (let i = flags.length - 1; i > 0; i--) {
     const j = Math.floor(flagRng() * (i + 1));
@@ -50,8 +47,7 @@ function seededList(seedOff, total, floatCount) {
   return list;
 }
 
-// rucksacks aren't pre-placed — they spawn live as the run goes (see spawnRucksacks). This just
-// reserves RUCKSACK.count inactive slots so the instance buffer never needs resizing.
+// reserves RUCKSACK.count inactive slots so the instance buffer never needs resizing; spawnRucksacks activates them live
 const rucksackSlots = () => Array.from({ length: RUCKSACK.count }, () => ({
   x: 0, z: 0, vx: 0, vz: 0, boostDist: 0, floating: true,
   spinPh: Math.random() * TWO_PI, bobPh: Math.random() * TWO_PI,
@@ -62,14 +58,9 @@ export function placePickups() {
   const river = S.river;
   const total = Math.round(PICKUPS.countForTier(river.R.tier) * (river.R.lootMult ?? 1));
   const floatCount = Math.round(Math.max(0, total - PICKUPS.perTierBase) * PICKUPS.floatFracOfExtra);
-  // coins get their own count, independent of `total` (which still drives paddles) — R.coinCount
-  // overrides it, unset just matches `total` as before
-  const coinTotal = river.R.coinCount ?? total;
+  const coinTotal = river.R.coinCount ?? total;   // independent of `total`, which still drives paddles
   const coinFloat = Math.round(Math.max(0, coinTotal - PICKUPS.perTierBase) * PICKUPS.floatFracOfExtra);
-  // "evasive" coins (R.evasiveCoinCount) are a separate, much higher-amplitude bob on top of the
-  // regular float — see PICKUPS.evasiveBobAmp/Speed and the `it.evasive` check in updatePickup.
-  // They're 100% floating (floatCount = their own count), tagged after the fact since seededList
-  // has no notion of "evasive", just "floating".
+  // evasive coins are 100% floating and tagged after the fact — seededList has no notion of "evasive", just "floating"
   const evasiveCount = river.R.evasiveCoinCount ?? 0;
   const evasiveCoins = seededList(302, evasiveCount, evasiveCount).map(it => ({ ...it, evasive: true }));
   river.pickupKinds = ['paddle', 'coin', 'rucksack', ...(river.R.extraKind ? [river.R.extraKind] : [])];
@@ -80,9 +71,7 @@ export function placePickups() {
   };
   river.rucksackSpawnT = 0;
   if (river.R.extraKind) {
-    // a rare extra (a handful of diamonds, say) wants its own much smaller count than the
-    // paddle/coin scatter density — R.extraCount overrides it; unset, it just matches `total`
-    const extraTotal = river.R.extraCount ?? total;
+    const extraTotal = river.R.extraCount ?? total;   // unset, matches `total`
     const extraFloat = Math.round(Math.max(0, extraTotal - PICKUPS.perTierBase) * PICKUPS.floatFracOfExtra);
     river.pickups[river.R.extraKind] = seededList(401, extraTotal, extraFloat);
   }
@@ -90,8 +79,6 @@ export function placePickups() {
   ensureInstBuf(pickupInstBufs, 'map', 1);   // at most one map ever, so this allocates once
 }
 
-// every attempt: revive the scattered pickups, deactivate every rucksack slot (the spawner will
-// place fresh ones relative to wherever the kayak starts)
 export function resetPickupsForAttempt() {
   const river = S.river;
   for (const kind of river.pickupKinds) {
@@ -102,7 +89,6 @@ export function resetPickupsForAttempt() {
   river.rucksackSpawnT = 0;
 }
 
-// the hidden map rides on one non-hidden river per tier until that tier's secret is unlocked
 export function placeMapItem() {
   const river = S.river, prof = S.profile, tier = river.R.tier;
   const isCarrier = !river.R.hidden && prof.mapCarrier[tier] === river.R.name && !prof.unlockedHidden[tier];
@@ -139,19 +125,16 @@ export function spawnRucksacks(dtReal) {
   });
 }
 
-// target velocity for a drifting rucksack: the current, boosted right after a behind-spawn, or
-// nudged back to mid-channel when it's found itself stuck
 function rucksackTarget(it, w, dtReal) {
   let targU = w.u * RUCKSACK.baseFactor, targV = w.v * RUCKSACK.baseFactor;
   if (it.boostDist > 0) {
-    // held at the boosted target for a distance, not a duration — a fast stretch and a slow
-    // one both get the same few extra metres of "shooting past the player" before tapering
+    // held for a distance, not a duration — fast and slow stretches get the same overshoot before tapering
     it.boostDist -= Math.abs(it.vz) * dtReal;
     targV = Math.sign(w.v || 1) * Math.max(Math.abs(w.v) * RUCKSACK.spawnBoost, RUCKSACK.spawnBoostMin);
   } else if (it.nudging) {
     const chan = nearestChan(S.river.rows[rowOf(it.z)], it.x);
     targU += clamp(chan.c - it.x, -RUCKSACK.nudgeSpeed, RUCKSACK.nudgeSpeed);
-    targV += RUCKSACK.nudgeSpeed * 0.5;   // plus a little push back downstream
+    targV += RUCKSACK.nudgeSpeed * 0.5;
   }
   return [targU, targV];
 }
@@ -180,7 +163,6 @@ export function updateRucksackDrift(dtReal) {
   for (const it of list) {
     if (!it.alive) continue;
     const w = waterAt(it.x, it.z);
-    // stuck detection: barely moved since the last check → nudge
     it.checkT += dtReal;
     if (it.checkT >= RUCKSACK.checkInterval) {
       it.nudging = Math.hypot(it.x - it.checkX, it.z - it.checkZ) < RUCKSACK.stuckDist;
@@ -189,7 +171,6 @@ export function updateRucksackDrift(dtReal) {
       it.checkZ = it.z;
     }
     const [targU, targV] = rucksackTarget(it, w, dtReal);
-    // real inertia, like everything else afloat here — it visibly spins up as the current catches it
     it.vx += (targU - it.vx) * k;
     it.vz += (targV - it.vz) * k;
     it.x = clamp(it.x + it.vx * dtReal, 1, W * dx - 1);
@@ -257,11 +238,7 @@ function collect(kind, it, y) {
   popLoot(C.type === 'xp' ? 'paddle' : 'coin');
 }
 
-// proximity fade: regular pickups vanish a few seconds after the paddler first gets close;
-// the map is a rare key item and stays fully visible for the whole run. A rucksack drifting past
-// the take-out gets the same treatment but on its own, much shorter timer (see RUCKSACK.finishFadeTime)
-// — there's no one left downstream to grab it, so left alone it would just idle at the z-clamp in
-// updateRucksackDrift and pile up with every fresh one that spawns after it.
+// a rucksack drifting past the take-out fades on its own, shorter timer (RUCKSACK.finishFadeTime) so it doesn't pile up at the z-clamp
 function fadeAlpha(kind, it, dist) {
   if (kind === 'map') return 1;
   const pastFinish = kind === 'rucksack' && it.z >= S.river.finishZ;
@@ -273,7 +250,6 @@ function fadeAlpha(kind, it, dist) {
   return clamp(1 - fadeT / fadeTime, 0, 1);
 }
 
-// one pickup's transform/tint for this frame, plus collection against the paddler
 function updatePickup(kind, it, data, n) {
   if (!it.alive) {
     data.set(mat4TRS([it.x, -1000, it.z], 0, [1, 1, 1]), n * 20);
@@ -282,10 +258,7 @@ function updatePickup(kind, it, data, n) {
   }
   const P = kindParams(kind);
   const bobPhase = S.simTime * (it.evasive ? PICKUPS.evasiveBobSpeed : PICKUPS.bobSpeed) + it.bobPh;
-  // an "evasive" coin bobs from water level up to evasiveBobAmp metres in the air (never below —
-  // (1+sin)/2 stays in [0,1]) instead of the small symmetric wobble every other floater gets, so
-  // it's overhead more often than not and easy to paddle right underneath. reachable below still
-  // reads the raw sine phase, so the same "near the bottom of the cycle" gate applies either way.
+  // evasive coins bob 0..evasiveBobAmp above water (never below), not the small symmetric wobble other floaters get
   const bob = !it.floating ? 0 : it.evasive
     ? PICKUPS.evasiveBobAmp * (0.5 + 0.5 * Math.sin(bobPhase))
     : PICKUPS.bobAmp * Math.sin(bobPhase);

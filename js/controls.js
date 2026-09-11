@@ -1,5 +1,4 @@
-// Raw input state: keyboard flags and the two touch paddle pads. No game logic beyond the
-// "only queue strokes mid-run" guard; main.js does the key → action wiring.
+// Raw input state: keyboard flags and the two touch paddle pads.
 import { MOBILE } from './config/index.js';
 import { $ } from './platform.js';
 import { S } from './state.js';
@@ -12,12 +11,9 @@ export const KEYMAP = {
   KeyA: 'leanL', KeyD: 'leanR', KeyW: 'fwd', KeyS: 'back',
 };
 
-// in mobile mode the arrow keys drive the two pads (handy when developing with MOBILE.force)
 export const PAD_KEYS = { ArrowLeft: [1], ArrowRight: [-1], ArrowUp: [1, -1] };
 
-// side follows kayak.side: +1 = blade on the LEFT of the boat (the boat turns right),
-// -1 = blade on the right (turns left). A press queues one stroke; a pad still held when a
-// stroke ends starts the next one on that side; both held alternates sides like the desktop ↑.
+// side: +1 = blade on the LEFT of the boat (boat turns right), -1 = right blade (turns left)
 export const pad = { held: { 1: false, '-1': false }, queue: [] };
 const padEls = { 1: $('padL'), '-1': $('padR') };
 
@@ -32,8 +28,6 @@ export function padUp(side) {
   padEls[side].classList.remove('down');
 }
 
-// side of the next stroke (0 = none). `poised` is the side the paddle is already lifted toward,
-// i.e. the one an alternating (both-held) rhythm naturally continues with
 export function nextPadSide(poised) {
   if (pad.queue.length) return pad.queue.shift();
   const l = pad.held[1], r = pad.held[-1];
@@ -44,10 +38,10 @@ export function nextPadSide(poised) {
 export function initPads() {
   for (const side of [1, -1]) {
     const el = padEls[side];
-    const ids = new Set();   // several fingers on one pad: released when the last one lifts
+    const ids = new Set();
     el.addEventListener('pointerdown', e => {
       e.preventDefault();
-      try { el.setPointerCapture(e.pointerId); } catch (_) { /* some pointer types can't be captured */ }
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
       ids.add(e.pointerId);
       padDown(side);
     });
@@ -57,15 +51,11 @@ export function initPads() {
     };
     el.addEventListener('pointerup', release);
     el.addEventListener('pointercancel', release);
-    el.addEventListener('contextmenu', e => e.preventDefault());   // no long-press menu
+    el.addEventListener('contextmenu', e => e.preventDefault());
   }
 }
 
-// drag-to-orbit camera for the end-of-run screen (see cam.updateFree in render.js) — only live
-// while gameState is 'over', so it never fights the in-run chase cam or the pads.
-// Listens on `document`, not the canvas: #msg is a full-viewport `position:fixed;inset:0` overlay
-// that sits on top of the canvas whenever a run is over (that's how its buttons receive clicks at
-// all), so a canvas-only listener would never see a pointerdown that starts anywhere over it.
+// drag-to-orbit camera for the end-of-run screen; listens on `document` because #msg overlays the canvas
 export function initFreeLook() {
   let dragging = false, lastX = 0, lastY = 0;
   document.addEventListener('pointerdown', e => {

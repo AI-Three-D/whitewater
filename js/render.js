@@ -1,5 +1,4 @@
-// Everything that draws: chase camera, camera/sky uniforms, terrain LOD slices, the paddler's
-// pose, and the render pass itself.
+// Everything that draws: chase camera, camera/sky uniforms, terrain LOD slices, paddler pose, render pass.
 import { RENDER, SIM, KAYAK, BIOME_SKY, TIME_OF_DAY, BIOME_IDS, PARTS } from './config/index.js';
 import { v3, qMul, qRotate, qAxisAngle, mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, mat4Compose, mat4Transform, clamp } from './math.js';
 import { MeshBuilder, addCylinder } from './meshes.js';
@@ -27,10 +26,7 @@ export const cam = {
     this.look = [p[0], p[1], p[2] + 5];
   },
 
-  // camMode 0: follow heading (biased downstream when the boat points back up, but only where
-  // there's actual current to justify it — a dead-flat pond/lake has no "downstream" to keep
-  // watch on, so the bias there just fights the player for no reason), 1: fixed downstream,
-  // 2: high and far
+  // camMode 0: follow heading (biased downstream, but only where there's current), 1: fixed downstream, 2: high and far
   wantedDir() {
     if (S.camMode === 1) return [0, 0, 1];
     const f = qRotate(kayak.q, [0, 0, 1]);
@@ -39,9 +35,7 @@ export const cam = {
     return d;
   },
 
-  // orbit the crash/finish spot on drag input (S.freeCam, driven by controls.js) instead of
-  // chasing the boat — the chase cam can't be steered, so a drop right at the take-out or a
-  // capsize next to a waterfall is otherwise impossible to actually look at afterward
+  // orbit the crash/finish spot on drag input (S.freeCam, driven by controls.js) since the chase cam can't be steered
   updateFree(dt) {
     const { yaw, pitch, dist } = S.freeCam, anchor = kayak.p;
     const cp = Math.cos(pitch);
@@ -90,8 +84,7 @@ export function currentSky() {
   };
 }
 
-const camBuf = new Float32Array(76);   // 304 B — must match the Cam struct in shaders.js; reused
-                                        // every frame by writeCam instead of reallocated
+const camBuf = new Float32Array(76);   // 304 B — must match the Cam struct in shaders.js
 export function writeCam() {
   const { canvas } = gpu, R = S.river && S.river.R;
   const proj = mat4Perspective(60 * Math.PI / 180, canvas.width / canvas.height, 0.3, 900);
@@ -100,7 +93,7 @@ export function writeCam() {
   cam.right = [view[0], view[4], view[8]];
   cam.up = [view[1], view[5], view[9]];
   const sky = currentSky(), sunDir = v3.norm(sky.sunDir);
-  const wt = (R && R.waterTint) || [0.02, 0.10, 0.09];   // the original deep-water colour
+  const wt = (R && R.waterTint) || [0.02, 0.10, 0.09];
   const f = camBuf;
   f.set(vp, 0);
   f.set(ivp, 16);
@@ -119,8 +112,7 @@ export function writeCam() {
 }
 
 // ---------- terrain/water LOD ----------
-// the window [viewBehind, viewAhead] around the boat split into three density bands; `overlap`
-// extends the coarser bands one row back so the terrain has no cracks at the seams
+// `overlap` extends the coarser bands one row back so the terrain has no cracks at the seams
 function lodSlices(overlap) {
   const zk = kayak.p[2], lod = RENDER.lod;
   const near = Math.min(lod.near, RENDER.viewAhead), mid = Math.min(Math.max(lod.mid, near), RENDER.viewAhead);
@@ -140,8 +132,7 @@ function lodSlices(overlap) {
 }
 
 // ---------- paddler pose ----------
-const kayakInstBuf = new Float32Array(20);   // reused for every part; writeBuffer copies out
-                                              // synchronously so it's safe to overwrite right after
+const kayakInstBuf = new Float32Array(20);   // reused for every part; writeBuffer copies synchronously
 function writeKayakInst(name, m, tint = [1, 1, 1, 1]) {
   const d = kayakInstBuf;
   d.set(m, 0);
@@ -230,7 +221,7 @@ function drawVegetation(pass, zk) {
     const ib = instBufs[name];
     if (!ib || !ib.count) continue;
     const [first, n] = instRange(ib, zk);
-    if (n) drawInstanced(pass, gpu.vegMeshes[name], ib.buf, n, first);   // firstInstance offsets into the buffer
+    if (n) drawInstanced(pass, gpu.vegMeshes[name], ib.buf, n, first);
   }
 }
 
@@ -261,8 +252,7 @@ function drawPickups(pass) {
   if (sparks.length) drawInstanced(pass, gpu.sparkMesh, gpu.sparkBuf, sparks.length);
 }
 
-// draw order: sky, opaque terrain + scenery + boat, obstacles (alpha-capable), then the
-// transparent water, pickups/sparks and spray on top
+// draw order matters: opaque pass first, then transparent water, pickups/sparks and spray on top
 export function encodeRenderPass(enc) {
   const zk = kayak.p[2], fog = currentSky().fogColor;
   const pass = enc.beginRenderPass({

@@ -35,8 +35,8 @@ struct SimU {
   time: f32, inEta: f32, inQ: f32, inVelScale: f32,
   turbA: f32, turbL: f32, turbT: f32, foamDecay: f32,
   kDecay: f32, macCormack: f32, kGen: f32, foamGen: f32,
-  jOffset: f32, vortexX: f32, vortexZ: f32, vortexStrength: f32,   // jOffset: first row of this dispatch's moving compute window
-  vortexRadius: f32, maxRise: f32, maxFall: f32, p4: f32,   // vortexRadius <= 0 → no vortex this river
+  jOffset: f32, vortexX: f32, vortexZ: f32, vortexStrength: f32,   // jOffset: first row of this dispatch's window
+  vortexRadius: f32, maxRise: f32, maxFall: f32, p4: f32,   // vortexRadius <= 0 → no vortex
 };
 @group(0) @binding(0) var<uniform> P: SimU;
 @group(0) @binding(1) var<storage, read> B: array<f32>;
@@ -145,11 +145,7 @@ fn height(@builtin(global_invocation_id) gid: vec3u) {
   let FB = select(vB * h * sc, vB * hB * outScale(i, j-1), vB > 0.0);
   let FT = select(vT * hT * outScale(i, j+1), vT * h * sc, vT > 0.0);
   let hRaw = max(0.0, h - P.dt / P.dx * (FR - FL + FT - FB));
-  // rate-limit how fast depth can change in one substep — outScale above already caps how much a
-  // cell can drain, but nothing capped how much it can fill. Right below a steep drop, a cell can
-  // take in a huge flux in one step with no matching limit, producing an unphysical one-frame
-  // depth spike (the water surface — and anything riding it — popping instead of rising/falling).
-  // Ordinary flow changes depth by well under a metre per second, so this only ever engages there.
+  // rate-limit depth change per substep: outScale above caps drain but not fill, so a cell below a steep drop can otherwise spike
   let hNew = clamp(hRaw, h - P.maxFall * P.dt, h + P.maxRise * P.dt);
   SO[id] = vec4f(hNew, s.y, s.z, s.w);
   KO[id] = KI[id];
@@ -164,9 +160,7 @@ fn noiseGrad(p: vec2f, t: f32) -> vec2f {
          + 0.5 * (noise3(n2 + vec3f(0.0,e,0.0)) - noise3(n2 - vec3f(0.0,e,0.0))) / (2.0 * e);
   return vec2f(px, py);
 }
-// a placeable Rankine vortex: solid-body rotation inside a core (30% of vortexRadius), decaying
-// like 1/r outside it, faded smoothly to zero at vortexRadius so it doesn't end with a hard
-// edge. Sign of vortexStrength sets spin direction (CCW positive). vortexRadius <= 0 disables it.
+// Rankine vortex: solid-body rotation inside a 30%-radius core, 1/r decay outside, faded to zero at the edge
 fn vortexVel(p: vec2f) -> vec2f {
   if (P.vortexRadius <= 0.0) { return vec2f(0.0); }
   let d = p - vec2f(P.vortexX, P.vortexZ);
@@ -291,8 +285,8 @@ fn psim(@builtin(global_invocation_id) gid: vec3u) {
   let dt = U.dt;
   if (p.life > 0.0) {
     p.life = p.life - dt;
-    p.vel.y = p.vel.y - 9.81 * dt;        // gravity
-    p.vel = p.vel * exp(-1.8 * dt);       // air drag
+    p.vel.y = p.vel.y - 9.81 * dt;
+    p.vel = p.vel * exp(-1.8 * dt);
     p.pos = p.pos + p.vel * dt;
     let id = pci(i32(floor(p.pos.x / U.dx - 0.5)), i32(floor(p.pos.z / U.dx - 0.5)));
     if (p.pos.y < TB[id] + ST[id].x) { p.life = 0.0; }   // fell back into the water / ground
@@ -329,17 +323,9 @@ fn psim(@builtin(global_invocation_id) gid: vec3u) {
 const WGSL_RENDER_COMMON = WGSL_NOISE + /* wgsl */`
 struct Cam { vp: mat4x4f, ivp: mat4x4f, camPos: vec4f, sunDir: vec4f, prm: vec4f, fog: vec4f, dbg: vec4f,
              camRight: vec4f, camUp: vec4f,
-             water: vec4f,   // per-river water look: tint.rgb multiplies the water colour, .a is clarity
-                              // (>1 = see deeper/clearer, <1 = murkier — scales the absorption falloff)
-             env: vec4f,      // .x = biome id, selecting a terrain/prop palette (see fsTerrain).
-                              // .y = exposure: scales every lit surface (terrain/water/props — see
-                              // applyExposure below) so time-of-day (config.js TIME_OF_DAY) can make
-                              // night genuinely dark instead of just differently tinted at day brightness.
-                              // .z = moon: 0 for every daylight time-of-day, >0 at night — swaps
-                              // skyColor's disc/halo from the sun's look to the moon's (see below)
-             skyHorizon: vec4f, skyZenith: vec4f };  // sky gradient colours (.rgb; .a unused) — driven
-                              // by time-of-day in writeCam() (main.js), 'day' reproduces the values
-                              // that used to be hardcoded here
+             water: vec4f,    // tint.rgb + .a = clarity (>1 clearer, <1 murkier)
+             env: vec4f,      // .x biome id, .y exposure (scales lit surfaces for time-of-day), .z moon (0 = day)
+             skyHorizon: vec4f, skyZenith: vec4f };  // sky gradient colours, set per time-of-day in writeCam()
 fn applyExposure(col: vec3f) -> vec3f { return col * C.env.y; }
 @group(0) @binding(0) var<uniform> C: Cam;
 @group(0) @binding(1) var<storage, read> B: array<f32>;
@@ -354,19 +340,11 @@ fn skyColor(d: vec3f) -> vec3f {
   var c = mix(C.skyHorizon.rgb, C.skyZenith.rgb, pow(max(d.y, 0.0), 0.6));
   let sd = max(dot(d, C.sunDir.xyz), 0.0);
   let moon = clamp(C.env.z, 0.0, 1.0);
-  // sun disc + its warm atmospheric halo, scaled by exposure so dawn/dusk read dimmer than noon —
-  // fully silenced once 'moon' takes over (night) so the old below-horizon sunDir trick (which hid
-  // the sun by pointing it underground) isn't needed and can't paint a leftover glow back in
+  // sun disc + halo, scaled by exposure, silenced once the moon takes over at night
   c += vec3f(1.0, 0.92, 0.75) * (pow(sd, 900.0) * 6.0 + pow(sd, 12.0) * 0.25) * C.env.y * (1.0 - moon);
-  // moon: a cool disc with a soft, fairly wide halo — deliberately NOT scaled by the (very low)
-  // night exposure, so it still reads clearly against a properly black sky. The halo is wide on
-  // purpose: the chase camera can't look around, so a tight glow only ever visible when the moon's
-  // fixed sky position happens to be dead ahead was effectively invisible in normal play — this
-  // way a soft glow is noticeable well off to the side too, not just the crisp disc dead-on
+  // moon disc + wide halo, NOT scaled by (very low) night exposure so it stays visible against a black sky
   c += vec3f(0.82, 0.88, 1.0) * (pow(sd, 800.0) * 3.5 + pow(sd, 40.0) * 0.35) * moon;
-  // stars fade in as exposure drops (night) — no separate on/off knob needed. Sparse per-direction
-  // points via a coarse hash grid, twinkle-free (cheap: one hash lookup, no noise octaves) since a
-  // static point field already reads fine at this scale, and this runs once per sky pixel.
+  // stars fade in as exposure drops; sparse hash-grid points, no twinkle
   let starAmt = pow(clamp(1.0 - C.env.y, 0.0, 1.0), 2.0);
   if (starAmt > 0.01 && d.y > 0.05) {
     let g = floor(d * 220.0);
@@ -397,58 +375,50 @@ struct SkyOut { @builtin(position) pos: vec4f, @location(0) dir: vec3f };
 @fragment fn fsSky(in: SkyOut) -> @location(0) vec4f { return vec4f(skyColor(normalize(in.dir)), 1.0); }
 `;
 
-// terrain colouring shared by the heightfield (fsTerrain) and the natural land bridges (fsBridge):
-// biome palette, noise breakup, slope blending, altitude scree, channel gravel, lighting, fog.
+// terrain colouring shared by the heightfield (fsTerrain) and the natural land bridges (fsBridge)
 const WGSL_TERRAIN_SHADE = /* wgsl */`
-// per-biome base palette for grass/dirt/rock/gravel — everything else (noise breakup, slope
-// blending, altitude scree, lighting) stays identical, only these anchor colours shift.
-// ids match BIOME_IDS in config.js: 0 alpine (default), 1 canyon, 2 desert, 3 deciduous, 4 icy,
-// 5 barren, 6 rainforest, 7 savannah, 8 glacier, 9 volcanic, 10 autumn.
+// per-biome anchor colours for grass/dirt/rock/gravel; ids match BIOME_IDS in config.js
 fn biomeColors(biome: i32) -> array<vec3f, 4> {
-  if (biome == 1) {          // dry canyon: redder rock, sandier dirt, olive scrub instead of lush grass
+  if (biome == 1) {          // canyon
     return array<vec3f, 4>(vec3f(0.42, 0.38, 0.15), vec3f(0.55, 0.38, 0.22), vec3f(0.53, 0.35, 0.28), vec3f(0.58, 0.42, 0.27));
   }
-  if (biome == 2) {          // desert: sun-bleached sand and pale sandstone, sparse dry scrub
+  if (biome == 2) {          // desert
     return array<vec3f, 4>(vec3f(0.55, 0.48, 0.22), vec3f(0.62, 0.48, 0.28), vec3f(0.62, 0.52, 0.40), vec3f(0.58, 0.50, 0.35));
   }
-  if (biome == 3) {          // deciduous: lush leafy green, rich forest-floor dirt
+  if (biome == 3) {          // deciduous
     return array<vec3f, 4>(vec3f(0.18, 0.42, 0.13), vec3f(0.30, 0.23, 0.14), vec3f(0.42, 0.42, 0.40), vec3f(0.36, 0.31, 0.21));
   }
-  if (biome == 4) {          // icy: frosted rock and scree, near-white snow patches, cold blue cast
+  if (biome == 4) {          // icy
     return array<vec3f, 4>(vec3f(0.58, 0.62, 0.60), vec3f(0.55, 0.56, 0.59), vec3f(0.76, 0.79, 0.83), vec3f(0.68, 0.71, 0.75));
   }
-  if (biome == 5) {          // barren: scoured grey-brown rock, almost nothing growing
+  if (biome == 5) {          // barren
     return array<vec3f, 4>(vec3f(0.45, 0.42, 0.32), vec3f(0.40, 0.34, 0.26), vec3f(0.38, 0.36, 0.34), vec3f(0.42, 0.38, 0.32));
   }
-  if (biome == 6) {          // rainforest: saturated deep-jungle green, dark wet forest-floor dirt
+  if (biome == 6) {          // rainforest
     return array<vec3f, 4>(vec3f(0.10, 0.36, 0.10), vec3f(0.20, 0.16, 0.10), vec3f(0.36, 0.38, 0.34), vec3f(0.26, 0.24, 0.16));
   }
-  if (biome == 7) {          // savannah: dry golden grass, sun-baked red-brown earth
+  if (biome == 7) {          // savannah
     return array<vec3f, 4>(vec3f(0.62, 0.52, 0.20), vec3f(0.52, 0.34, 0.18), vec3f(0.55, 0.46, 0.32), vec3f(0.56, 0.42, 0.24));
   }
-  if (biome == 8) {          // glacier: nothing but snow and ice — every channel pushed pale white-blue
+  if (biome == 8) {          // glacier
     return array<vec3f, 4>(vec3f(0.80, 0.86, 0.93), vec3f(0.70, 0.77, 0.86), vec3f(0.86, 0.91, 0.98), vec3f(0.72, 0.78, 0.87));
   }
-  if (biome == 9) {          // volcanic: black basalt and dark ash, a warm rust-red dirt band
+  if (biome == 9) {          // volcanic
     return array<vec3f, 4>(vec3f(0.10, 0.09, 0.09), vec3f(0.30, 0.13, 0.08), vec3f(0.13, 0.12, 0.12), vec3f(0.20, 0.17, 0.16));
   }
-  if (biome == 10) {         // autumn: fall-foliage gold instead of green, warm leaf-litter dirt
+  if (biome == 10) {         // autumn
     return array<vec3f, 4>(vec3f(0.55, 0.38, 0.10), vec3f(0.40, 0.24, 0.12), vec3f(0.44, 0.40, 0.36), vec3f(0.50, 0.38, 0.22));
   }
   return array<vec3f, 4>(vec3f(0.24, 0.40, 0.13), vec3f(0.40, 0.32, 0.20), vec3f(0.45, 0.44, 0.42), vec3f(0.48, 0.40, 0.30));
 }
-// mask: channel gravel (terrain) / rock faces (bridge); h: water depth on top (0 for a bridge);
-// ao: baked ambient occlusion 0..1 (0 for terrain). Steep faces sample the noise on a vertical
-// plane instead of xz so a cliff or an arch's side wall doesn't streak.
+// mask: channel gravel (terrain) / rock faces (bridge); h: water depth (0 for bridge); ao: baked AO (0 for terrain)
 fn shadeTerrain(wp: vec3f, nIn: vec3f, mask: f32, h: f32, ao: f32) -> vec3f {
   let n = normalize(nIn);
   let slope = 1.0 - n.y;
   let sun = max(dot(n, C.sunDir.xyz), 0.0);
   let pal = biomeColors(i32(C.env.x));
   let dark = 1.0 - 0.5 * ao;
-  // steep faces (cliffs, the arch's sides, pillars) sample the noise on a vertical plane as well and
-  // blend the *values* — blending the coordinates instead beats the two patterns against each other
-  // in the transition band and reads as moiré
+  // steep faces also sample noise on a vertical plane; blend the values (not coordinates) to avoid moiré
   let steep = smoothstep(0.45, 0.8, 1.0 - abs(n.y));
   let uvH = wp.xz;
   let uvV = vec2f(wp.x * 0.6 + wp.z * 0.8, wp.y);
@@ -498,9 +468,7 @@ struct TVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(
   return vec4f(shadeTerrain(in.wp, in.n, in.mask, in.h, 0.0), 1.0);
 }
 `;
-// natural land bridges: a plain pos/normal/"colour" mesh (see buildLandBridgeMesh, meshes.js),
-// shaded as terrain so it's in the river's own biome palette; the vertex colour channels carry the
-// rock mask (.x) and baked ambient occlusion (.y) rather than an actual colour
+// land bridges: shaded as terrain; the vertex "colour" channels actually carry rock mask (.x) and baked AO (.y)
 export const WGSL_BRIDGE = WGSL_RENDER_COMMON + WGSL_TERRAIN_SHADE + /* wgsl */`
 struct BVIn { @location(0) pos: vec3f, @location(1) nrm: vec3f, @location(2) col: vec3f };
 struct BVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(1) n: vec3f, @location(2) ex: vec3f };
@@ -513,90 +481,6 @@ struct BVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(
   return vec4f(shadeTerrain(in.wp, in.n, in.ex.x, 0.0, in.ex.y), 1.0);
 }
 `;
-
-/*
-struct TVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(1) n: vec3f, @location(2) mask: f32, @location(3) h: f32 };
-@vertex fn vsTerrain(@builtin(vertex_index) vi: u32) -> TVOut {
-  let W = u32(C.prm.y); let dx = C.prm.w;
-  let i = i32(vi % W); let j = i32(vi / W);
-  let b = B[ci(i, j)];
-  let n = normalize(vec3f((B[ci(i-1,j)] - B[ci(i+1,j)]) / (2.0*dx), 1.0, (B[ci(i,j-1)] - B[ci(i,j+1)]) / (2.0*dx)));
-  let wp = vec3f((f32(i) + 0.5) * dx, b, (f32(j) + 0.5) * dx);
-  var o: TVOut;
-  o.pos = C.vp * vec4f(wp, 1.0); o.wp = wp; o.n = n; o.mask = M[ci(i, j)]; o.h = S[ci(i, j)].x;
-  return o;
-}
-// per-biome base palette for grass/dirt/rock/gravel — everything else (noise breakup, slope
-// blending, altitude scree, lighting) stays identical, only these anchor colours shift.
-// ids match BIOME_IDS in config.js: 0 alpine (default), 1 canyon, 2 desert, 3 deciduous, 4 icy,
-// 5 barren, 6 rainforest, 7 savannah, 8 glacier, 9 volcanic, 10 autumn.
-fn biomeColors(biome: i32) -> array<vec3f, 4> {
-  if (biome == 1) {          // dry canyon: redder rock, sandier dirt, olive scrub instead of lush grass
-    return array<vec3f, 4>(vec3f(0.42, 0.38, 0.15), vec3f(0.55, 0.38, 0.22), vec3f(0.53, 0.35, 0.28), vec3f(0.58, 0.42, 0.27));
-  }
-  if (biome == 2) {          // desert: sun-bleached sand and pale sandstone, sparse dry scrub
-    return array<vec3f, 4>(vec3f(0.55, 0.48, 0.22), vec3f(0.62, 0.48, 0.28), vec3f(0.62, 0.52, 0.40), vec3f(0.58, 0.50, 0.35));
-  }
-  if (biome == 3) {          // deciduous: lush leafy green, rich forest-floor dirt
-    return array<vec3f, 4>(vec3f(0.18, 0.42, 0.13), vec3f(0.30, 0.23, 0.14), vec3f(0.42, 0.42, 0.40), vec3f(0.36, 0.31, 0.21));
-  }
-  if (biome == 4) {          // icy: frosted rock and scree, near-white snow patches, cold blue cast
-    return array<vec3f, 4>(vec3f(0.58, 0.62, 0.60), vec3f(0.55, 0.56, 0.59), vec3f(0.76, 0.79, 0.83), vec3f(0.68, 0.71, 0.75));
-  }
-  if (biome == 5) {          // barren: scoured grey-brown rock, almost nothing growing
-    return array<vec3f, 4>(vec3f(0.45, 0.42, 0.32), vec3f(0.40, 0.34, 0.26), vec3f(0.38, 0.36, 0.34), vec3f(0.42, 0.38, 0.32));
-  }
-  if (biome == 6) {          // rainforest: saturated deep-jungle green, dark wet forest-floor dirt
-    return array<vec3f, 4>(vec3f(0.10, 0.36, 0.10), vec3f(0.20, 0.16, 0.10), vec3f(0.36, 0.38, 0.34), vec3f(0.26, 0.24, 0.16));
-  }
-  if (biome == 7) {          // savannah: dry golden grass, sun-baked red-brown earth
-    return array<vec3f, 4>(vec3f(0.62, 0.52, 0.20), vec3f(0.52, 0.34, 0.18), vec3f(0.55, 0.46, 0.32), vec3f(0.56, 0.42, 0.24));
-  }
-  if (biome == 8) {          // glacier: nothing but snow and ice — every channel pushed pale white-blue
-    return array<vec3f, 4>(vec3f(0.80, 0.86, 0.93), vec3f(0.70, 0.77, 0.86), vec3f(0.86, 0.91, 0.98), vec3f(0.72, 0.78, 0.87));
-  }
-  if (biome == 9) {          // volcanic: black basalt and dark ash, a warm rust-red dirt band
-    return array<vec3f, 4>(vec3f(0.10, 0.09, 0.09), vec3f(0.30, 0.13, 0.08), vec3f(0.13, 0.12, 0.12), vec3f(0.20, 0.17, 0.16));
-  }
-  if (biome == 10) {         // autumn: fall-foliage gold instead of green, warm leaf-litter dirt
-    return array<vec3f, 4>(vec3f(0.55, 0.38, 0.10), vec3f(0.40, 0.24, 0.12), vec3f(0.44, 0.40, 0.36), vec3f(0.50, 0.38, 0.22));
-  }
-  return array<vec3f, 4>(vec3f(0.24, 0.40, 0.13), vec3f(0.40, 0.32, 0.20), vec3f(0.45, 0.44, 0.42), vec3f(0.48, 0.40, 0.30));
-}
-@fragment fn fsTerrain(in: TVOut) -> @location(0) vec4f {
-  let n = normalize(in.n);
-  let slope = 1.0 - n.y;
-  let sun = max(dot(n, C.sunDir.xyz), 0.0);
-  let pal = biomeColors(i32(C.env.x));
-  // low detail: one noise sample instead of three, no altitude/gravel tinting — the branch is
-  // uniform across the draw (driven by a setting, not per-pixel data) so it costs nothing to keep
-  if (C.dbg.z > 0.5) {
-    let n2 = noise2(in.wp.xz * 2.3);
-    let grass = pal[0] * (0.8 + 0.4 * n2);
-    let rock  = pal[2] * (0.7 + 0.5 * n2);
-    var col = mix(grass, rock, smoothstep(0.3, 0.6, slope));
-    col = mix(col, rock, in.mask * 0.6);
-    let lit = applyExposure(col * (0.4 + sun * 0.85));
-    return vec4f(applyFog(lit, length(in.wp - C.camPos.xyz)), 1.0);
-  }
-  let n1 = noise2(in.wp.xz * 0.35); let n2 = noise2(in.wp.xz * 2.3); let n3 = noise2(in.wp.xz * 0.08);
-  let grass = pal[0] * (0.72 + 0.5 * n1) * (0.85 + 0.3 * n2) * (0.85 + 0.3 * n3);
-  let dirt  = pal[1] * (0.8 + 0.4 * n2);
-  let rock  = pal[2] * (0.7 + 0.5 * n2);
-  var col = mix(grass, dirt, smoothstep(0.18, 0.38, slope));
-  col = mix(col, rock, smoothstep(0.42, 0.68, slope));
-  // a little high-altitude scree / heath so the big hills are not uniformly green
-  col = mix(col, mix(rock, vec3f(0.38,0.36,0.30), n1), smoothstep(14.0, 26.0, in.wp.y) * 0.7);
-  let gravel = mix(pal[3], vec3f(0.36, 0.36, 0.35), n2) * (0.8 + 0.3 * n1);
-  col = mix(col, mix(gravel, rock, smoothstep(0.25, 0.5, slope)), in.mask);
-  col = mix(col, col * 0.55, smoothstep(0.0, 0.05, in.h));
-  let amb = 0.35 + 0.15 * n.y;
-  var lit = applyExposure(col * (amb + sun * 0.9));
-  lit = applyFog(lit, length(in.wp - C.camPos.xyz));
-  return vec4f(lit, 1.0);
-}
-`;
-*/
 
 export const WGSL_WATER = WGSL_RENDER_COMMON + /* wgsl */`
 struct WVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(1) n: vec3f,
@@ -616,8 +500,7 @@ fn etaN(i: i32, j: i32, eta0: f32, hmin: f32) -> f32 {
   let uc = 0.5 * (s.y + S[ci(i+1, j)].y); let vc = 0.5 * (s.z + S[ci(i, j+1)].z);
   let k = K[id];
   let p2 = vec2f((f32(i) + 0.5) * dx, (f32(j) + 0.5) * dx);
-  // waves are sub-pixel where the mesh goes coarse; fading them before the LOD seam keeps the
-  // fine and coarse edges at the same height there (no flickering slivers). dbg.w = RENDER.lod.near
+  // fade waves out before the LOD seam so fine/coarse mesh edges match height there (dbg.w = RENDER.lod.near)
   let camD = length(vec3f(p2.x, eta, p2.y) - C.camPos.xyz);
   let amp = 0.06 * k * smoothstep(0.0, 0.35, h) * (1.0 - smoothstep(0.6 * C.dbg.w, C.dbg.w, camD));
   
@@ -635,12 +518,7 @@ fn etaN(i: i32, j: i32, eta0: f32, hmin: f32) -> f32 {
   let h = in.hv.x; let vel = in.hv.yz; let foam = in.hv.w; let k = in.k;
   let fa = clamp(foam, 0.0, 1.0);
   var col: vec3f; var alpha: f32;
-  // low detail: skip the hash-noise flow ripple (~11 noise samples/px, each several hashes) and
-  // the noisy foam edge — but a perfectly flat geometric normal reads as a dead, glassy mirror,
-  // which is worse than just plain. Perturb the normal with the same travelling-wave pattern the
-  // vertex shader already displaces the surface by, analytically (its gradient is a few cos()
-  // calls) instead of resampling noise — real ripple, a fraction of the cost. Foam stays a plain
-  // threshold. Uniform branch (a setting, not per-pixel), so it costs nothing to keep both paths.
+  // low detail: perturb the normal analytically from the vertex wave (cos of its gradient) instead of resampling noise
   if (C.dbg.z > 0.5) {
     let p2 = in.wp.xz; let tt = C.prm.x;
     let ampR = 0.06 * k * smoothstep(0.0, 0.35, h);
@@ -661,19 +539,11 @@ fn etaN(i: i32, j: i32, eta0: f32, hmin: f32) -> f32 {
     col = mix(body, sky, F);
     let foamCol = vec3f(0.92, 0.95, 0.97) * (0.8 + 0.4 * max(dot(n, C.sunDir.xyz), 0.0));
     col = mix(col, foamCol, smoothstep(0.1, 0.55, fa));
-    // the specular glint is a direct reflection of the sun/moon disc, not ambient light — it
-    // shouldn't get fully crushed by night's very low exposure along with everything else (that's
-    // what was making a moon's reflection invisible on calm water), so it's added after exposure
-    // with only a floor applied (not the raw, uncapped brightness a sunny-day glint gets) and
-    // cooled toward the moon's own colour instead of the sun's warm tint, then still fogged like
-    // everything else
+    // specular glint added post-exposure with a floor (not raw brightness), cooled toward moon colour at night
     let moonLit1 = clamp(C.env.z, 0.0, 1.0);
     let specTint1 = mix(vec3f(1.0, 0.95, 0.85), vec3f(0.80, 0.88, 1.0), moonLit1);
     col = applyFog(applyExposure(col) + spec * specTint1 * max(C.env.y, 0.35), length(in.wp - C.camPos.xyz));
-    // real transparency now, not just the internal bed-colour mixing above: shallow water lets
-    // more of the actual terrain underneath show through, deep water goes opaque — and clarity
-    // (the same knob "murky vs crystal clear" uses for colour) controls how fast that happens,
-    // so a muddy river goes opaque in a few inches while a clear one stays see-through much deeper
+    // alpha: shallow water shows more of the terrain below; clarity controls how fast it goes opaque with depth
     let present = smoothstep(0.0, 0.06, h);
     let depthT = 1.0 - exp(-h * 2.2 / C.water.a);
     alpha = present * mix(0.42, 1.0, depthT);
@@ -705,16 +575,9 @@ fn etaN(i: i32, j: i32, eta0: f32, hmin: f32) -> f32 {
     let mask = smoothstep(0.62 - 0.55 * fa, 0.72 - 0.55 * fa, pat) * smoothstep(0.0, 0.15, fa);
     let foamCol = vec3f(0.92, 0.95, 0.97) * (0.8 + 0.4 * max(dot(n, C.sunDir.xyz), 0.0));
     col = mix(col, foamCol, mask);
-    // see the high-detail branch: the specular glint is added after exposure (with a floor, not
-    // full raw brightness) and cooled toward the moon's colour at night, so it isn't crushed but
-    // also doesn't blow out warm and bright against a dark scene
     let moonLit2 = clamp(C.env.z, 0.0, 1.0);
     let specTint2 = mix(vec3f(1.0, 0.95, 0.85), vec3f(0.80, 0.88, 1.0), moonLit2);
     col = applyFog(applyExposure(col) + spec * specTint2 * max(C.env.y, 0.35), length(in.wp - C.camPos.xyz));
-    // real transparency now, not just the internal bed-colour mixing above: shallow water lets
-    // more of the actual terrain underneath show through, deep water goes opaque — and clarity
-    // (the same knob "murky vs crystal clear" uses for colour) controls how fast that happens,
-    // so a muddy river goes opaque in a few inches while a clear one stays see-through much deeper
     let present = smoothstep(0.0, 0.06, h);
     let depthT = 1.0 - exp(-h * 2.2 / C.water.a);
     alpha = present * mix(0.42, 1.0, depthT);
@@ -741,9 +604,7 @@ struct MVOut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(
   var o: MVOut;
   o.pos = C.vp * vec4f(wp, 1.0); 
   o.wp = wp;
-  // inverse-transpose normal transform (cofactor columns of the upper 3x3). Instance matrices can
-  // carry non-uniform scale, and the plain M*n used before skewed the normals of anything tapered
-  // or tilted — on long thin objects badly enough that the shading popped as the camera moved.
+  // inverse-transpose normal transform (cofactor columns), needed since instances can carry non-uniform scale
   let a = in.m0.xyz; let b = in.m1.xyz; let c = in.m2.xyz;
   o.n = normalize(cross(b, c) * in.nrm.x + cross(c, a) * in.nrm.y + cross(a, b) * in.nrm.z);
   
@@ -762,8 +623,7 @@ fn litMesh(in: MVOut) -> vec3f {
 @fragment fn fsMesh(in: MVOut) -> @location(0) vec4f {
   return vec4f(litMesh(in), 1.0);
 }
-// pickups: honours the instance tint's alpha (fade in/out) and glows brightly from every angle
-// so paddles and coins stay easy to spot against the water regardless of the sun direction
+// pickups: fades via instance tint alpha, glows from every angle regardless of sun direction
 @fragment fn fsMeshFade(in: MVOut) -> @location(0) vec4f {
   if (in.a <= 0.001) { discard; }
   var n = normalize(in.n);
@@ -775,9 +635,7 @@ fn litMesh(in: MVOut) -> vec3f {
   lit = applyFog(lit, length(in.wp - C.camPos.xyz));
   return vec4f(lit, in.a);
 }
-  // lit exactly like the opaque props but honouring the instance alpha — floating obstacles use
-// it so they can fade as they sink away. Fully transparent fragments are discarded so a retired
-// obstacle doesn't keep writing depth.
+// floating obstacles: fades as they sink; fully transparent fragments discarded so it stops writing depth
 @fragment fn fsMeshAlpha(in: MVOut) -> @location(0) vec4f {
   if (in.a <= 0.01) { discard; }
   return vec4f(litMesh(in), in.a);

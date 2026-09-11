@@ -1,6 +1,6 @@
-// Floating obstacles (logs etc.): density-driven spawning ahead of the boat, per-sample drag and
-// grounding, capsule-capsule contacts between obstacles, retirement behind the boat, instancing.
-// Landslide boulders share the list and the instance buffers but are driven by landslides.js.
+// Floating obstacles (logs etc.): spawning ahead of the boat, per-sample drag/grounding,
+// capsule-capsule contacts, retirement, instancing. Landslide boulders share the list and instance
+// buffers but are driven by landslides.js.
 import { OBSTACLES, RENDER } from './config/index.js';
 import { clamp, mulberry32, qMul, qAxisAngle, mat4Compose } from './math.js';
 import { S } from './state.js';
@@ -12,8 +12,7 @@ import { W, dx } from './quality.js';
 
 const TWO_PI = 2 * Math.PI;
 
-// a landslide boulder is always exactly one of dormant (still hanging) / replaying / settled —
-// never live-stepped, never in a pair contact
+// a landslide boulder is always exactly one of dormant / replaying / settled — never live-stepped
 const isFrozen = ob => ob.dormant || ob.replaying || ob.settled;
 
 export function placeObstacles() {
@@ -29,7 +28,6 @@ export function placeObstacles() {
   river.obstAhead = cfg.spawnAhead ?? OBSTACLES.spawnAhead;
   river.obstRng = mulberry32(river.seed + 501);
   river.obstLastZ = kayak.p[2];
-  // one spawner per (kind, size class) the river config lists
   for (const [kindName, kindCfg] of Object.entries(cfg)) {
     const kind = OBSTACLES.kinds[kindName];
     if (!kind) continue;   // `max`, `spawnAhead` … aren't kinds
@@ -41,7 +39,7 @@ export function placeObstacles() {
     }
   }
   for (const name of Object.keys(gpu.obstMeshes)) ensureInstBuf(gpu.obstInstBufs, name, river.obstCap);
-  // seed the stretch ahead of the start so the river isn't empty for the first spawn window
+  // seed the stretch ahead of the start so it isn't empty on the first spawn window
   const z0 = kayak.p[2] + OBSTACLES.seedAheadFrom, z1 = kayak.p[2] + river.obstAhead[1];
   for (const e of river.obstSpawn) {
     const n = Math.floor((e.spec.per100m ?? 0) * (z1 - z0) / 100 + river.obstRng());
@@ -71,14 +69,13 @@ function spawnObstacle(e, z) {
     draft: V.draft * sc, mass: Math.max(20, e.kind.density * V.vol * sc * sc * sc),
     samples: e.cls.samples, hitK: e.cls.hitK, lift: e.cls.lift,
     x, z, y: surfaceAt(x, z), yaw: rng() * TWO_PI, roll: e.kind.roll ? rng() * TWO_PI : 0,
-    vx: w.u, vz: w.v, w: (rng() - 0.5) * 0.2, bobPh: rng() * TWO_PI,   // born moving with the current
+    vx: w.u, vz: w.v, w: (rng() - 0.5) * 0.2, bobPh: rng() * TWO_PI,
     fx: 0, fz: 0, tq: 0, grounded: false, sinking: false, sinkT: 0, y0: 0, alpha: 1,
     tint: [g, g, g, 1],
   });
   return true;
 }
 
-// spawners accumulate "obstacles owed" with downstream progress; each whole one is placed ahead
 function spawnObstacles() {
   const river = S.river;
   if (!river.obstSpawn.length) return;
@@ -94,7 +91,6 @@ function spawnObstacles() {
   }
 }
 
-// drag/grounding sampled at S points along the axis; forces integrate into (vx, vz, ω)
 function stepObstacle(ob, dt) {
   const dirx = Math.sin(ob.yaw), dirz = Math.cos(ob.yaw), half = ob.len / 2, n = ob.samples;
   let Fx = ob.fx, Fz = ob.fz, T = ob.tq, grounded = false;
@@ -103,16 +99,15 @@ function stepObstacle(ob, dt) {
     const rx = dirx * t, rz = dirz * t;
     const px = ob.x + rx, pz = ob.z + rz;
     const w = waterAt(px, pz);
-    const pvx = ob.vx + ob.w * rz, pvz = ob.vz - ob.w * rx;   // point velocity (ω about +Y)
+    const pvx = ob.vx + ob.w * rz, pvz = ob.vz - ob.w * rx;
     const relx = pvx - w.u, relz = pvz - w.v;
     const al = relx * dirx + relz * dirz;
     const latx = relx - al * dirx, latz = relz - al * dirz;
-    const wet = clamp(w.h / ob.draft, 0, 1);                  // a beached log barely feels the flow
+    const wet = clamp(w.h / ob.draft, 0, 1);
     const cA = ob.mass * OBSTACLES.dragAxial / n * wet, cL = ob.mass * OBSTACLES.dragLat / n * wet;
     let fx = -(cA * al * dirx + cL * latx), fz = -(cA * al * dirz + cL * latz);
     if (w.h < ob.draft) {
-      // grounded: the bed slope pushes it back toward deeper water (so a log in a shallow riffle
-      // shuffles off), but on a flat bar the slope is ~0 and friction simply strands it
+      // grounded: bed slope pushes it back toward deeper water; on a flat bar friction simply strands it
       const pen = ob.draft - w.h, nrm = terrainN(px, pz), sc = ob.mass / n;
       fx += sc * OBSTACLES.groundPush * pen * nrm[0];
       fz += sc * OBSTACLES.groundPush * pen * nrm[2];
@@ -141,8 +136,8 @@ function stepObstacle(ob, dt) {
   ob.grounded = grounded;
 }
 
-// A's axis sampled against B's axis, pushing the pair apart where the capsules overlap. Called
-// both ways round per pair — what lets logs pile up behind a jammed one instead of passing through.
+// A's axis sampled against B's axis, pushing the pair apart where they overlap; called both ways
+// round per pair, which is what lets logs pile up behind a jammed one instead of passing through.
 function contactSegs(A, B, dt) {
   const adx = Math.sin(A.yaw), adz = Math.cos(A.yaw);
   const bdx = Math.sin(B.yaw), bdz = Math.cos(B.yaw), bh = B.len / 2;
@@ -172,8 +167,7 @@ function contactSegs(A, B, dt) {
   }
 }
 
-// obstacles far behind the boat (or past the finish) freeze, sink on an ease-in while fading,
-// then leave the list. Returns the still-active ones.
+// obstacles far behind the boat (or past the finish) sink while fading, then leave the list
 function retireObstacles(list, dtReal) {
   const kz = kayak.p[2], active = [];
   for (const ob of list) {
@@ -217,8 +211,7 @@ function stepActive(active, dtReal) {
   }
 }
 
-// smooth Y toward the water surface (bobbing) or, for boulders, the terrain; clears the
-// accumulated kayak reaction forces for the next frame
+// smooth Y toward the water surface (bobbing) or, for boulders, the terrain
 function settleHeights(active, dtReal) {
   const ky = 1 - Math.exp(-dtReal * OBSTACLES.ySmooth);
   for (const ob of active) {

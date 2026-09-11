@@ -1,5 +1,4 @@
-// Browser/device plumbing with no game logic: DOM lookup, the error overlay, mobile detection,
-// the tilt sensor and fullscreen. Safe to import from anywhere.
+// Browser/device plumbing: DOM lookup, error overlay, mobile detection, tilt sensor, fullscreen.
 import { MOBILE } from './config/index.js';
 import { clamp } from './math.js';
 
@@ -47,9 +46,8 @@ export const gyro = {
   onOrient(e) {
     if (e.beta == null || e.gamma == null) return;
     const b = e.beta * DEG, c = e.gamma * DEG;
-    // "up" in the phone's natural frame …
     const ux = -Math.cos(b) * Math.sin(c), uy = Math.sin(b), uz = Math.cos(b) * Math.cos(c);
-    // … rotated into screen coords (x right, y up); the screen may be rotated CCW from natural
+    // rotate "up" from the phone's natural frame into screen coords (may be rotated CCW from natural)
     const deg = (screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0;
     const a = deg * DEG, ca = Math.cos(a), sa = Math.sin(a);
     const sx = ux * ca - uy * sa, sy = ux * sa + uy * ca;
@@ -74,8 +72,7 @@ export const gyro = {
   },
 };
 
-// best effort: fullscreen hides the browser chrome and (Android) allows a landscape lock.
-// iPhone Safari has no requestFullscreen and lock() rejects — both are simply skipped.
+// best effort: iPhone Safari has no requestFullscreen and lock() rejects — both are skipped
 export function enterFullscreen() {
   if (!MOBILE.fullscreen || document.fullscreenElement || !document.documentElement.requestFullscreen) return;
   document.documentElement.requestFullscreen({ navigationUI: 'hide' })

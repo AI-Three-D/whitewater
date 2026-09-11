@@ -1,14 +1,6 @@
 // Difficulty tiers, river packs and every river definition.
-//
-// Each tier has 5 regular rivers plus one hidden one (RIVERS_HIDDEN). A river with no `pack` is
-// free; the rest are gated behind that tier's single purchasable pack (bought once, like a craft —
-// see ownsPack/canBuyPack/buyPack in progression.js). The hidden river is unlocked by finding the
-// tier's map item (see MAP_ITEM / profile.mapCarrier).
-//
-// NOTE: the medium tier currently has only ONE free river (Boulder garden); easy and hard have
-// two each. Kopje Run's `pack: 'mediumPack'` may be unintended — left as is.
 
-// tier-to-tier scale factor — everything (finish xp, pickup counts) grows by this ratio
+// scale factor other systems (finish xp, pickup counts) multiply by per tier
 export const TIER_SCALE = { easy: 1, medium: 2, hard: 4 };
 
 export const TIERS = [
@@ -27,12 +19,10 @@ export const RIVER_PACKS = {
 export const PUTIN = 30;              // [m] length of the calm put-in pool
 export const RIVER_SIDE_MARGIN = 4;   // [m]
 
-// ---- river factory: fills the derivable fields so entries only carry what makes them different ----
+// river factory: fills the derivable fields so entries only carry what makes them different
 const CLASS_OF_TIER = { easy: 'Class II', medium: 'Class III', hard: 'Class IV' };
 const river = (tier, fields) => ({ tier, cls: `${CLASS_OF_TIER[tier]} · ${tier}`, ledges: [], bands: [], ...fields });
-// secrets are a one-shot: found via the tier's hidden map item, spent the moment you launch (see
-// isSecretSpent/markSecretSpent in progression.js), and run against a clock — but they make up for
-// it with a much richer scatter of loot (see lootMult, read by placePickups in pickups.js).
+// secrets: one-shot (spent on launch, see progression.js), timed, richer loot via lootMult
 const secret = (tier, fields) => ({ ...river(tier, fields), cls: `${CLASS_OF_TIER[tier]} · secret`, hidden: true, singleAttempt: true });
 
 // Field groups, in the order used below:
@@ -42,9 +32,9 @@ const secret = (tier, fields) => ({ ...river(tier, fields), cls: `${CLASS_OF_TIE
 //   rocks       rocks, rockR [min, max], emergent, ledges [[z, drop] …]
 //   look        biome (default alpine), timeOfDay (default day), waterTint, waterClarity
 //   features    forks, pond, boulderIslands, waterfalls, landBridges, builtBridges, obstacles,
-//               landslideZone, extraKind, bands [{ z0, z1, drop } …] — see dropAt in river.js
+//               landslideZone, extraKind, bands [{ z0, z1, drop } …]
 //   lanes       the channel's lateral wander
-//   secret-only timeLimit [s], lootMult (scatter density multiplier, on top of the tier's usual count)
+//   secret-only timeLimit [s], lootMult (scatter density multiplier)
 
 export const RIVERS = [
   // ---------- easy ----------
@@ -53,7 +43,7 @@ export const RIVERS = [
     slope: 0.0018, manning: 0.032, depth: 1.6, len: 320, seed: 11,
     halfW: 12, widthVar: 0.25, meander: [[18, 170], [6, 61]], constrictions: 0, valleyH: 12, valleyScale: 70,
     rocks: 10, rockR: [0.8, 2.0], emergent: 0.3,
-    waterTint: [0.02, 0.17, 0.06], waterClarity: 1.0,   // emerald
+    waterTint: [0.02, 0.17, 0.06], waterClarity: 1.0,
     landBridges: [{ z: 200, width: 7, widthVar: 0.35, height: 3.2, pillars: 2 }],
     forks: [{ startZ: 70, mergeZ: 83, splitLen: 22, mergeLen: 22, separation: 20, widthScale: 0.75, shares: [0.55, 0.45] }],
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 31 },
@@ -63,7 +53,7 @@ export const RIVERS = [
     slope: 0.0021, manning: 0.033, depth: 1.4, len: 290, seed: 15,
     halfW: 8, widthVar: 0.22, meander: [[15, 155], [6, 55]], constrictions: 1, valleyH: 14, valleyScale: 55,
     rocks: 16, rockR: [0.8, 2.1], emergent: 0.3,
-    biome: 'icy', timeOfDay: 'dawn', waterTint: [0.06, 0.15, 0.24], waterClarity: 2.2,   // pale blue meltwater
+    biome: 'icy', timeOfDay: 'dawn', waterTint: [0.06, 0.15, 0.24], waterClarity: 2.2,
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 41 },
   }),
   river('easy', {
@@ -71,7 +61,7 @@ export const RIVERS = [
     slope: 0.0017, manning: 0.031, depth: 1.5, len: 230, seed: 12,
     halfW: 11, widthVar: 0.3, meander: [[24, 190], [5, 48]], constrictions: 1, valleyH: 10, valleyScale: 60,
     rocks: 10, rockR: [0.8, 1.9], emergent: 0.3,
-    waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,   // crystal clear
+    waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,
     pond: { z: 150, len: 15 },
     builtBridges: [{ z: 95, material: 'wood', width: 5, height: 3.2, thickness: 0.8, pylons: 2, color: [1.0, 0.95, 0.88] }],
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 },
@@ -97,7 +87,7 @@ export const RIVERS = [
     slope: 0.002, manning: 0.033, depth: 1.4, len: 260, seed: 13,
     halfW: 6, widthVar: 0.2, meander: [[14, 150], [8, 70]], constrictions: 1, valleyH: 8, valleyScale: 90,
     rocks: 20, rockR: [1.0, 2.4], emergent: 0.4,
-    biome: 'canyon', waterTint: [0.16, 0.10, 0.04], waterClarity: 0.35,   // muddy
+    biome: 'canyon', waterTint: [0.16, 0.10, 0.04], waterClarity: 0.35,
     lanes: { count: 3, amp: 0.1, wander: 3, seedOffset: 35 },
   }),
 
@@ -107,7 +97,7 @@ export const RIVERS = [
     slope: 0.004, manning: 0.034, depth: 1.0, len: 240, seed: 24,
     halfW: 7, widthVar: 0.4, meander: [[20, 120], [6, 50]], constrictions: 0, valleyH: 24, valleyScale: 48,
     rocks: 165, rockR: [0.9, 2.4], emergent: 0.45,
-    biome: 'deciduous', timeOfDay: 'misty', waterTint: [0.03, 0.14, 0.05], waterClarity: 1.1,   // leafy green, enclosed hills
+    biome: 'deciduous', timeOfDay: 'misty', waterTint: [0.03, 0.14, 0.05], waterClarity: 1.1,
     lanes: { count: 2, amp: 0.18, wander: 3, seedOffset: 36 },
   }),
   river('medium', {
@@ -115,7 +105,7 @@ export const RIVERS = [
     slope: 0.009, manning: 0.035, depth: 1.1, len: 300, seed: 23,
     halfW: 8, widthVar: 0.35, meander: [[22, 140], [7, 55]], constrictions: 2, valleyH: 9, valleyScale: 95,
     rocks: 26, rockR: [0.9, 2.6], emergent: 0.5, ledges: [[300, 0.6]],
-    biome: 'savannah', timeOfDay: 'dawn', waterTint: [0.08, 0.13, 0.06], waterClarity: 1.3,   // open grassland, flat and broad
+    biome: 'savannah', timeOfDay: 'dawn', waterTint: [0.08, 0.13, 0.06], waterClarity: 1.3,
     landBridges: [{ z: 120, width: 8, widthVar: 0.3, height: 3.5, pillars: 1 }],
     boulderIslands: [{ z: 200, len: 8, widthFrac: 0.55 }],
     lanes: { count: 3, amp: 0.15, wander: 3, seedOffset: 32 },
@@ -134,11 +124,10 @@ export const RIVERS = [
     slope: 0.0014, manning: 0.032, depth: 1.2, len: 200, seed: 91, pack: 'mediumPack', art: 'img/Silver.png',
     halfW: 9, widthVar: 0.12, meander: [[6, 240]], constrictions: 0, valleyH: 26, valleyScale: 55,
     rocks: 0, emergent: 0.2,
-    //ledges: [[65, 0.4], [82, 0.5]],
     bands: [{ z0: 100, z1: 150, drop: 11 }],   // must match the fork's span (startZ/mergeZ) and both branches' actual totals
     forks: [{ startZ: 100, mergeZ: 160, islandHeight: 10.0, splitLen: 30, mergeLen: 25, separation: 24, widthScale: 0.7, shares: [0.5, 0.5] }],
     waterfalls: [
-      { z: 110, drop: 8, len: 8, branch: 1, pinch: 0.55 },                    // branch 1: one big plunge — spends the whole band
+      { z: 110, drop: 8, len: 8, branch: 1, pinch: 0.55 },   // spends the whole band in one plunge
     ],
     biome: 'icy', waterTint: [0.05, 0.14, 0.22], waterClarity: 1.0,
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 91 },
@@ -159,7 +148,7 @@ export const RIVERS = [
     slope: 0.03, manning: 0.04, depth: 1.4, len: 475, seed: 37,
     halfW: 5.5, widthVar: 0.4, meander: [[26, 110], [8, 45]], constrictions: 4, valleyH: 42, valleyScale: 60,
     rocks: 120, rockR: [0.9, 2.8], emergent: 0.55, ledges: [[120, 0.8], [210, 1.0], [330, 1.2], [440, 0.9]],
-    biome: 'glacier', timeOfDay: 'misty', waterTint: [0.10, 0.20, 0.28], waterClarity: 3.0,   // pale glacial melt, steep peaks
+    biome: 'glacier', timeOfDay: 'misty', waterTint: [0.10, 0.20, 0.28], waterClarity: 3.0,
     boulderIslands: [{ z: 250, len: 10, widthFrac: 0.65, bias: -0.15 }],
     waterfalls: [{ z: 320, drop: 4.0, len: 5 }],
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 33 },
@@ -170,7 +159,7 @@ export const RIVERS = [
     halfW: 6, widthVar: 0.35, meander: [[20, 130], [7, 40]], constrictions: 3, valleyH: 36, valleyScale: 55,
     rocks: 100, rockR: [0.9, 2.6], emergent: 0.5,
     ledges: [[100, 0.9], [160, 0.9], [220, 1.0], [280, 1.0], [340, 1.1], [400, 0.9]],
-    biome: 'rainforest', timeOfDay: 'dusk', waterTint: [0.03, 0.16, 0.10], waterClarity: 0.9,   // deep jungle green, steep ravine
+    biome: 'rainforest', timeOfDay: 'dusk', waterTint: [0.03, 0.16, 0.10], waterClarity: 0.9,
     waterfalls: [{ z: 460, drop: 3.0, len: 4 }],
     lanes: { count: 3, amp: 0.2, wander: 4, seedOffset: 38 },
   }),
@@ -179,7 +168,7 @@ export const RIVERS = [
     slope: 0.035, manning: 0.041, depth: 1.5, len: 440, seed: 39,
     halfW: 5, widthVar: 0.45, meander: [[28, 100], [9, 42]], constrictions: 5, valleyH: 46, valleyScale: 58,
     rocks: 130, rockR: [1.0, 3.0], emergent: 0.6, ledges: [[140, 1.0], [260, 1.2], [400, 1.0]],
-    biome: 'barren', timeOfDay: 'dusk', waterTint: [0.09, 0.09, 0.08], waterClarity: 0.7,   // scoured grey-brown, jagged peaks
+    biome: 'barren', timeOfDay: 'dusk', waterTint: [0.09, 0.09, 0.08], waterClarity: 0.7,
     forks: [{ startZ: 190, mergeZ: 230, splitLen: 20, mergeLen: 20, separation: 18, widthScale: 0.7, shares: [0.45, 0.55] }],
     boulderIslands: [{ z: 330, len: 12, widthFrac: 0.7, bias: 0.1 }],
     waterfalls: [{ z: 370, drop: 5.0, len: 6 }],
@@ -199,7 +188,7 @@ export const RIVERS = [
     slope: 0.033, manning: 0.041, depth: 1.5, len: 470, seed: 42,
     halfW: 5, widthVar: 0.42, meander: [[27, 102], [9, 40]], constrictions: 5, valleyH: 44, valleyScale: 56,
     rocks: 125, rockR: [1.0, 2.9], emergent: 0.6, ledges: [[130, 1.0], [250, 1.1], [380, 1.0]],
-    biome: 'volcanic', timeOfDay: 'night', waterTint: [0.10, 0.05, 0.03], waterClarity: 0.4,   // ash-choked water through a smoky hellscape
+    biome: 'volcanic', timeOfDay: 'night', waterTint: [0.10, 0.05, 0.03], waterClarity: 0.4,
     waterfalls: [{ z: 300, drop: 4.5, len: 5 }],
     lanes: { count: 3, amp: 0.22, wander: 4, seedOffset: 48 },
   }),
@@ -212,11 +201,11 @@ export const RIVERS_HIDDEN = [
     slope: 0.0000, manning: 0.031, depth: 2.5, len: 179, seed: 12,
     halfW: 19, widthVar: 0.3, meander: [[5, 48]], constrictions: 0, valleyH: 10, valleyScale: 60,
     rocks: 0, emergent: 0.3, halfW: 8,
-    waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,   // crystal clear
-    pond: { z: 240, len: 70, exitTail: 40 },   // a lake this big needs a long, gentle un-narrowing
-    timeLimit: 420, lootMult: 3.75,   // dead water — no current to help you, so the clock is generous
-    extraKind: 'diamond', extraCount: 3,   // a few, each worth several coins — not scattered thick like the rest
-    coinCount: 20, evasiveCoinCount: 20,   // half the coins bob high overhead — easy to paddle under
+    waterTint: [0.03, 0.12, 0.18], waterClarity: 2.4,
+    pond: { z: 240, len: 70, exitTail: 40 },
+    timeLimit: 420, lootMult: 3.75,
+    extraKind: 'diamond', extraCount: 3,
+    coinCount: 20, evasiveCoinCount: 20,
     lanes: { count: 2, amp: 0.12, wander: 2, seedOffset: 34 },
   }),
   secret('medium', {

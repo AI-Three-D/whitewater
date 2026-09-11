@@ -1,6 +1,4 @@
-// CPU-side reads of the world: bilinear terrain height/normal, water state from the band that is
-// read back from the GPU each frame (with a 1-D fallback outside it), and the channel-spot helper
-// shared by every placement routine.
+// CPU-side reads of the world: terrain height/normal, water state (GPU band + 1-D fallback), placement helpers.
 import { SIM } from './config/index.js';
 import { nearestChan } from './river.js';
 import { v3, clamp, smoothstep } from './math.js';
@@ -27,7 +25,6 @@ export function terrainN(x, z) {
   return v3.norm([terrainH(x - e, z) - terrainH(x + e, z), 2 * e, terrainH(x, z - e) - terrainH(x, z + e)]);
 }
 
-// channel ch of the water state at grid cell (i, j); clamped into the band
 function bandVal(ch, i, j) {
   return band.data[(clamp(j - band.j0, 0, BAND_ROWS - 1) * W + clamp(i, 0, W - 1)) * 4 + ch];
 }
@@ -39,8 +36,7 @@ function bilinBand(ch, gx, gz) {
 
 const inBand = z => band.ready && Math.abs(z / dx - (band.j0 + BAND_ROWS / 2)) <= BAND_ROWS / 2 - 3;
 
-// { eta, h, u, v } at a world position. Outside the read-back band this falls back to the 1-D
-// channel profile with a Manning estimate of the speed.
+// { eta, h, u, v }; outside the read-back band, falls back to the 1-D channel profile
 export function waterAt(x, z) {
   const river = S.river;
   const bed = terrainH(x, z);
@@ -52,7 +48,7 @@ export function waterAt(x, z) {
   }
   const gx = x / dx - 0.5, gz = z / dx - 0.5;
   const x0 = Math.floor(gx), z0 = Math.floor(gz), fx = gx - x0, fz = gz - z0;
-  // surface height averaged over the wet corners only, so a dry neighbour doesn't drag eta down
+  // averaged over wet corners only, so a dry neighbour doesn't drag eta down
   let wsum = 0, esum = 0;
   for (const [di, dj, wgt] of [[0, 0, (1 - fx) * (1 - fz)], [1, 0, fx * (1 - fz)], [0, 1, (1 - fx) * fz], [1, 1, fx * fz]]) {
     const i = clamp(x0 + di, 0, W - 1), j = clamp(z0 + dj, 0, L - 1), h = bandVal(0, i, j);
@@ -69,8 +65,7 @@ export function waterAt(x, z) {
   };
 }
 
-// water surface for things that float: the nominal 1-D surface, blended toward the simulated one
-// as a point enters the band so nothing pops at the band edge
+// nominal 1-D surface, blended toward the simulated one as a point enters the band (no pop at the edge)
 export function surfaceAt(x, z) {
   const nominal = Math.max(nearestChan(S.river.rows[rowOf(z)], x).eta, terrainH(x, z));
   if (!band.ready) return nominal;
@@ -79,8 +74,7 @@ export function surfaceAt(x, z) {
   return wgt <= 0 ? nominal : nominal + (waterAt(x, z).eta - nominal) * wgt;
 }
 
-// a spot that would sit inside a land bridge (under the arch where a hovering/bobbing item would
-// poke into the rock, or inside a pillar) — placement re-rolls such spots
+// true if (x, z) sits inside a land bridge's arch or pillar — placement re-rolls such spots
 export function bridgeBlocked(x, z) {
   for (const br of S.river.bridges) {
     if (Math.abs(z - br.z) > br.reach) continue;
@@ -90,9 +84,7 @@ export function bridgeBlocked(x, z) {
   return false;
 }
 
-// random spot inside a random channel of the row at zOf(try), re-rolled up to `tries` times to
-// avoid bridges. `rng` may be seeded (layout is part of the river) or Math.random. The RNG call
-// order (z, channel, x) matches the original placement code so seeded layouts are unchanged.
+// RNG call order (z, channel, x) must stay as-is — seeded layouts depend on it
 export function randomChannelSpot(rng, zOf, tries = 12) {
   let x = 0, z = 0;
   for (let t = 0; t < tries; t++) {

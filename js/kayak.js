@@ -1,6 +1,4 @@
-// Boat physics. step() gathers forces from a handful of single-purpose helpers via a per-tick
-// context `c` (orientation helpers, accumulated force/torque) and returns the run outcome
-// instead of ending the run itself, so physics never touches menus or the profile.
+// Boat physics — step() returns the run outcome instead of ending the run itself.
 import { KAYAK, SIM, STAMINA, SKILL, MOBILE, OBSTACLES, UPGRADES, ITEMS } from './config/index.js';
 import { v3, qMul, qConj, qNorm, qRotate, qAxisAngle, qFromRotVec, clamp } from './math.js';
 import { ownsUpgrade } from './progression.js';
@@ -14,15 +12,11 @@ const MAX_SPEED = 15;          // m/s hard cap on the boat
 const CAPSIZE_PITCH = 1.35;    // rad
 const HARD_HIT = 0.8;          // m/s normal speed that counts as a thud (hitFlash)
 
-// three points along the hull used for obstacle contact — a 3.3 m boat hitting a 9 m trunk has
-// to be tested at bow/centre/stern or the ends visibly sink into it, and it's what lets a hit
-// swing the boat parallel to the log instead of stopping it dead
+// hull contact points (bow/centre/stern) — lets a hit swing the boat along a log instead of stopping it dead
 const OBST_HULL_PTS = [[0, -0.06, 1.3], [0, -0.06, 0], [0, -0.06, -1.3]];
-// kayak-local points tested against a land bridge's arch underside: the paddler's head and the
-// bow/stern deck — hitting the rock ceiling shoves the boat down and scrapes it, pitching it
+// points tested against a land bridge's arch underside: head, bow deck, stern deck
 const BRIDGE_CEIL_PTS = [[0, 1.05, 0.05], [0, 0.2, 1.55], [0, 0.2, -1.55]];
 
-// KAYAK with the craft's (and, if owned, the better-paddle upgrade's) multiplicative mods applied
 export function craftKayakParams(craft, prof) {
   const K = { ...KAYAK };
   const apply = mods => {
@@ -33,11 +27,7 @@ export function craftKayakParams(craft, prof) {
   return K;
 }
 
-// effective parameters derived from the character's traits. An active energy booster adds to
-// skill here only — not to profile.skill — so it sharpens instabK/leanTorque/leanRate for its
-// buffDuration without touching the saved trait.
-// NOTE: reads the base KAYAK table, not S.effK — craft mods to rollInstab/formStab/leanTorque
-// would not apply here. Kept as in the original; confirm whether that is intended.
+// NOTE: reads base KAYAK, not S.effK — craft mods to rollInstab/formStab/leanTorque don't apply here.
 export function traits() {
   const prof = S.profile;
   const buffSkill = S.simTime < S.drinkBuffUntil ? ITEMS.energyDrink.buffSkill : 0;
@@ -77,7 +67,6 @@ export const kayak = {
     this.hitFlash = 0;
     this.stamina = STAMINA.max;
     this.tired = false;
-    // mobile stroke state
     this.strokeActive = false;
     this.lastSide = 0;
     pad.queue.length = 0;
@@ -93,8 +82,7 @@ export const kayak = {
     this.bladeVel = [0, 0, 0];
   },
 
-  // mobile: start one stroke on side s. Repeating the previous side makes it a turning sweep,
-  // alternating makes it a forward pull — so L R L R runs straight and L L L spins the boat.
+  // repeating the same side turns (sweep); alternating pulls straight (L R L R vs L L L)
   beginStroke(s) {
     this.mode = s === this.lastSide ? 'sweep' : 'fwd';
     this.lastSide = s;
@@ -118,7 +106,6 @@ export const kayak = {
     return this.outcome(c.K);
   },
 
-  // per-tick context: orientation helpers plus the force/torque accumulators
   beginTick() {
     const K = S.effK, q = this.q, p = this.p;
     const R = v => qRotate(q, v);
@@ -158,7 +145,6 @@ export const kayak = {
     return clamp(nwet / 4, 0, 1);
   },
 
-  // hydrodynamic drag relative to the local current
   drag(c) {
     const { K, p, R, fwdH, rightH, addForceAt, pointVel } = c;
     for (const lp of K.dragPts) {
@@ -200,7 +186,6 @@ export const kayak = {
     return { active: input.fwd || input.back || turn !== 0, turn };
   },
 
-  // regenerates 0 → full in regenTime, drains while paddling; tired → weaker, slower strokes
   updateStamina(dt, active, tr) {
     this.stamina += dt * STAMINA.max / STAMINA.regenTime;
     if (active) this.stamina -= dt * tr.drain;
@@ -219,14 +204,13 @@ export const kayak = {
     this.env = Math.sin(Math.PI * Math.min(this.strokeT, 1));
     const s = this.side, at = v3.add(p, R([s * 0.25, 0, 0.3]));
     let paddleYaw = 0;
-    if (this.mode === 'sweep') {   // same side again: a turning stroke (see beginStroke)
+    if (this.mode === 'sweep') {
       paddleYaw = -s * K.sweepTorque * MOBILE.repeatYaw * power * (0.5 + 0.5 * this.env);
       addForceAt(at, v3.scale(fwdH, K.paddleFwd * MOBILE.repeatFwd * power * this.env));
     } else {
       addForceAt(at, v3.scale(fwdH, K.paddleFwd * power * this.env));
     }
-    // stroke finished: the paddle is now poised over the other side (the same flip the desktop
-    // loop does — it keeps the drawn paddle angle continuous); next tick decides what follows
+    // flip side so the paddle angle stays continuous, matching desktopStroke
     if (this.strokeT >= 1) {
       this.strokeT = 0;
       this.strokeActive = false;
@@ -237,7 +221,7 @@ export const kayak = {
 
   desktopStroke(c, dt, power, period, turn) {
     const { K, p, R, fwdH, addForceAt } = c;
-    if (!this.paddling) this.strokeT = 0;   // keys just came back → a fresh stroke
+    if (!this.paddling) this.strokeT = 0;
     this.paddling = true;
     this.strokeT += dt / period;
     if (this.strokeT >= 1) {
@@ -250,26 +234,21 @@ export const kayak = {
     if (input.fwd) {
       addForceAt(v3.add(p, R([this.side * 0.25, 0, 0.3])), v3.scale(fwdH, K.paddleFwd * power * this.env));
     } else if (input.back) {
-      // fast local water (a steep drop's chute, a hard pinch) fades this toward zero — see
-      // backFadeLo/Hi in config/kayak.js: a paddle can slow drifting water, not a rapid
+      // fades to 0 in fast water — see backFadeLo/Hi in config/kayak.js
       const flow = waterAt(p[0], p[2]), flowSpeed = Math.hypot(flow.u, flow.v);
       const backEff = clamp(1 - (flowSpeed - K.backFadeLo) / (K.backFadeHi - K.backFadeLo), 0, 1);
       addForceAt(v3.add(p, R([this.side * 0.25, 0, -0.3])), v3.scale(fwdH, -K.paddleBack * power * this.env * backEff));
     }
     if (turn === 0) return 0;
-    // a pure sweep also nudges the boat forward a little (no torque, so added to F directly)
     if (!input.fwd && !input.back) c.F = v3.add(c.F, v3.scale(fwdH, K.sweepFwd * power * this.env * 0.5));
     return turn * K.sweepTorque * power * (0.5 + 0.5 * this.env) * (input.fwd ? 0.7 : 1);
   },
 
-  // A/D give a binary target, the device tilt an analog one. Keys win while pressed, so a
-  // forced-mobile desktop session (or a phone without a sensor) can still lean.
+  // keys win over tilt, so a forced-mobile desktop session (or a sensorless phone) can still lean
   updateLean(c, dt) {
     const keyLean = (input.leanL ? 1 : 0) - (input.leanR ? 1 : 0);
     const useTilt = isMobile && keyLean === 0 && gyro.live();
     const target = useTilt ? gyro.lean() : keyLean;
-    // key-driven leaning reacts a little faster with more skill (tilt is a physical sensor
-    // reading, not a trained reflex, so it's left at MOBILE.leanRate regardless of skill)
     const rate = useTilt ? MOBILE.leanRate : c.K.leanRate + SKILL.leanRatePerPt * c.tr.skill;
     this.lean += (target - this.lean) * Math.min(1, dt * rate);
   },
@@ -287,8 +266,7 @@ export const kayak = {
     }
   },
 
-  // capsule contact against nearby floating obstacles (broad phase: river.obstNear, built by
-  // obstacles.updateObstacles). The reaction is fed back to the log at the contact point.
+  // reaction force is fed back to the log at the contact point
   obstacleContact(c) {
     const { K, p, R, addForceAt, pointVel } = c;
     if (!S.river.obstNear) return;
@@ -321,7 +299,6 @@ export const kayak = {
     const { K, p, R, addForceAt, pointVel } = c;
     for (const br of S.river.bridges) {
       if (Math.abs(p[2] - br.z) > br.reach + 3) continue;
-      // pillars: horizontal capsule contact
       for (const pl of br.pillars) {
         for (const lp of K.collPts) {
           const pw = v3.add(p, R(lp));
@@ -335,7 +312,6 @@ export const kayak = {
           if (-vn > HARD_HIT) this.hitFlash = 1;
         }
       }
-      // arch ceiling: pushes down, scrapes along the rock
       for (const lp of BRIDGE_CEIL_PTS) {
         const pw = v3.add(p, R(lp)), d = br.at(pw[0], pw[2]);
         if (!d || pw[1] <= d.bottom) continue;
@@ -348,7 +324,6 @@ export const kayak = {
     }
   },
 
-  // roll is an inverted pendulum; skill lowers instability and raises hip torque
   integrate(c, dt, subFac, paddleYaw) {
     const { K, q, p, F, T, tr } = c;
     const Tl = qRotate(qConj(q), T);

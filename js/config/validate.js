@@ -1,6 +1,4 @@
-// Cross-table sanity checks. The config is full of string references between tables; a typo in
-// one would otherwise surface as a black sky or an undefined read deep in a frame. Run once at
-// boot (main.js), before validateRiverConfig.
+// Cross-table sanity checks for the config's string references. Run once at boot (main.js).
 import { QUALITY, QUALITY_LEVELS } from './simulation.js';
 import { BIOMES, BIOME_SKY, BIOME_IDS, TIME_OF_DAY } from './environment.js';
 import { TIERS, RIVERS, RIVERS_HIDDEN, RIVER_PACKS } from './rivers.js';

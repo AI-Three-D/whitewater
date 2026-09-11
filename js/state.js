@@ -1,10 +1,8 @@
-// The one shared, mutable game state. Anything that used to be a `let` in the old main()
-// closure lives here so modules can be split without threading 40 parameters around.
+// The one shared, mutable game state — replaces the old main() closure's `let`s.
 import { KAYAK, CRAFTS } from './config/index.js';
 
 export const TIME_SCALE = 2;
-// hard cap on ticks replayed in one frame — after a big stall (tab backgrounded, a long GC
-// pause) sim time falls behind real time instead of the frame replaying all of it and spiralling
+// cap on ticks replayed in one frame, so a big stall doesn't spiral trying to catch up
 export const MAX_PHYS_TICKS = 8;
 
 export const newRunLoot = () => ({
@@ -23,15 +21,12 @@ export const S = {
   frameTicks: 2,            // physics ticks run this frame (kayak.step divides obstacle reactions by it)
   fps: 60,
   camMode: 0,
-  // free-look orbit used once a run ends (gameState 'over') so a capsize/finish next to a big
-  // drop can actually be looked at — see cam.update in render.js and initFreeLook in controls.js
+  // post-run free-look orbit — see cam.update in render.js and initFreeLook in controls.js
   freeCam: { yaw: 0, pitch: 0.28, dist: 9 },
   dbgMode: 0,
   debugUnlockAll: false,    // dev: show every river as unlocked regardless of pack ownership
   debugNoCapsize: false,    // dev: kayak.step ignores roll/pitch capsize (KeyG / mGod)
-  // the boat for the current run: KAYAK with the craft's (and paddle upgrade's) mods applied,
-  // plus the craft itself for hull colour / lootMod. Set in startRun.
-  effK: KAYAK,
+  effK: KAYAK,               // this run's boat: KAYAK with craft/paddle mods applied; set in startRun
   runCraft: CRAFTS.classic,
   runLoot: newRunLoot(),
   // simTime deadlines for transient HUD lines / buffs

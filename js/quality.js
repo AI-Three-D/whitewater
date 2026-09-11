@@ -1,7 +1,5 @@
-// Detail tier. Loads the saved tier, applies it to the mutable config tables and exports the
-// grid dimensions *after* that mutation. Every module that sizes anything by the grid imports
-// W/L/dx from here, never from config.js: ES modules evaluate their dependencies first, so this
-// guarantees the tier has been applied before any buffer is allocated.
+// Detail tier: applies the saved quality tier, then exports W/L/dx. Other modules must import
+// grid dims from here (not config.js) so the tier is applied before any buffer is sized.
 import { GRID, SIM, RENDER, PARTS, VEG, QUALITY, QUALITY_LEVELS } from './config/index.js';
 
 const QKEY = 'whitewater.quality';

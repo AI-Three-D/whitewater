@@ -17,7 +17,6 @@ const el = {
 const lootEls = { paddle: el.pcount, coin: el.ccount, snack: el.scount, energyDrink: el.dcount };
 const DBG_VIEWS = ['off', 'speed', 'foam', 'turbulence k', 'Froude'];
 
-// one-shot bump animation on a loot counter (CSS `.pop`); ignored while one is already running
 export function popLoot(kind) {
   const e = lootEls[kind];
   if (!e || e.classList.contains('pop')) return;
@@ -60,7 +59,7 @@ function transientLines() {
 }
 
 function renderBalance() {
-  // NOTE: base KAYAK.capsize, not S.effK.capsize — see traits() in kayak.js
+  // base KAYAK.capsize, not S.effK.capsize — see traits() in kayak.js
   const tilt = clamp(-kayak.roll / KAYAK.capsize, -1, 1), a = Math.abs(tilt);
   el.mk.style.left = (50 + tilt * 50) + '%';
   el.mk.style.background = a > 0.7 ? '#ff5040' : a > 0.35 ? '#ffb040' : '#ffe08a';
@@ -99,8 +98,6 @@ export function hud() {
     `<b>${river.R.name}</b> · ${river.R.cls} · <b>${c.name}</b> lv ${prof.level} · ${S.runCraft.name}${injury}<br>` +
     `speed <b>${kayak.speed.toFixed(1)}</b> m/s · distance <b>${dist.toFixed(0)}</b> / ${total.toFixed(0)} m · ` +
     `time <b>${S.runTime.toFixed(1)}</b> s${transientLines()}`;
-  // a single-attempt river's countdown is the whole point — put it front and centre instead of
-  // making the player glance at the corner, with its own urgency colour/pulse as it runs low
   const limit = river.R.timeLimit;
   if (limit) {
     const timeLeft = Math.max(0, limit - S.runTime), urgent = timeLeft < 15;

@@ -1,9 +1,6 @@
 // Water/particle simulation sizes and the detail tiers that override them.
-//
-// QUALITY is the single source of truth for anything tier-dependent. GRID / SIM / PARTS / VEG
-// below are the *mutable* tables the game reads at run time; js/quality.js copies the chosen
-// tier into them at load (see applyQuality). Their initial values are taken from the high tier
-// so there is exactly one place to edit a number.
+// QUALITY is the source of truth; GRID/SIM/PARTS/VEG are mutable tables js/quality.js overwrites
+// at load from the chosen tier (see applyQuality).
 
 export const QUALITY = {
     high: {
@@ -19,9 +16,7 @@ export const QUALITY = {
       particles: 3000, kayakShare: 1000,
       veg: { caps: { tree: 400, bush: 300, rock: 250, grass: 2500, boulder: 35 }, attempts: 12000 },
       dprCap: 1.0, warmupSteps: 700, macCormack: 1, turbA: 0.6, simpleShading: false, substeps: 2,
-      // computeAhead/Behind stay a healthy margin past viewAhead/Behind: rows beyond the compute
-      // window only hold the one-time load warm-up state (no live turbulence/foam) until the moving
-      // window reaches them, so a view range that outruns compute reads as dead, frozen water.
+      // computeAhead/Behind must stay past viewAhead/Behind or unreached rows show as dead, frozen water
       lod: { near: 60, mid: 110 },
       viewAhead: 150, viewBehind: 25, computeAhead: 120, computeBehind: 45, fogDensity: 0.0028,
     },
@@ -35,38 +30,28 @@ export const QUALITY = {
     },
   };
   export const QUALITY_LEVELS = ['high', 'medium', 'low'];
-  
+
   const HIGH = QUALITY.high;
-  
-  // ---- mutable run-time tables (overwritten per tier by applyQuality) ----
+
+  // mutable run-time tables, overwritten per tier by applyQuality
   export const GRID = { ...HIGH.grid };
-  
+
   export const SIM = {
     dt: 1 / 120,
     substeps: HIGH.substeps,
     g: 9.81,
     hmin: 0.02,             // [m] below this a cell counts as dry
     umax: 12.0,             // [m/s] velocity clamp
-    // per-substep depth-change rate cap [m/s] — see height() in shaders.js. Nothing upstream
-    // limited how fast a cell could *fill* (only draining was CFL-limited), so a steep drop could
-    // dump a huge flux into one cell in a single step and spike its depth unphysically; this bounds
-    // that to something no faster than a real hydraulic jump, well above any ordinary wave/rapid
-    maxRise: 3.0, maxFall: 3.0,
-    turbA: HIGH.turbA,      // stochastic forcing amplitude [m/s²] (1.5 = too much backflow)
-    turbL: 3.0,             // turbulence length scale
-    turbT: 0.8,             // turbulence time scale
+    maxRise: 3.0, maxFall: 3.0,   // [m/s] per-substep depth-change cap, see height() in shaders.js
+    turbA: HIGH.turbA,      // [m/s²] stochastic forcing amplitude
+    turbL: 3.0,
+    turbT: 0.8,
     foamDecay: 0.35,
     kDecay: 0.8,
     macCormack: HIGH.macCormack,
     kGen: 1.0,
     foamGen: 1.0,
-    warmupSteps: HIGH.warmupSteps,   // turbulence (k) around static obstacles like rocks needs a
-                                      // little more of this than the flow field itself to fully
-                                      // settle — too few steps and it keeps growing into the first
-                                      // seconds of real play as a small, localized ripple. Also the
-                                      // margin covering local momentum readjustment (bends, pinches)
-                                      // the per-row discharge-matched initial condition doesn't
-                                      // capture on its own — see the state-building loop in river.js
+    warmupSteps: HIGH.warmupSteps,
     waterFrac: 0.75,
   };
   

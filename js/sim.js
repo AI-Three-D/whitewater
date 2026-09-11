@@ -22,10 +22,8 @@ export function writeSimUniforms(time, inQ, jOffset = 0) {
   gpu.device.queue.writeBuffer(gpu.simUBuf, 0, ab);
 }
 
-// slowly varying inflow discharge multiplier
 export const inflowQ = t => 1 + 0.06 * Math.sin(0.21 * t) + 0.04 * Math.sin(0.53 * t + 1) + 0.025 * Math.sin(1.3 * t + 2);
 
-// rows of the grid the water sim is run on this frame: a window around the boat
 export function computeWindow(zk) {
   const cj0 = clamp(Math.floor((zk - RENDER.computeBehind) / dx), 0, L - 1);
   const cj1 = clamp(Math.ceil((zk + RENDER.computeAhead) / dx), cj0 + 1, L);
@@ -57,10 +55,7 @@ export function encodeParticleSim(enc) {
 
 export async function runWarmup() {
   const chunk = 30;
-  // hold inflow at the same neutral discharge (multiplier 1) the initial condition was built
-  // against — inflowQ(0) is already off by a few percent from that baseline, and forcing the
-  // boundary to a slightly different Q than the interior was initialized for is one more thing
-  // warm-up has to iron out before settling, on top of local bends/pinches
+  // holds inflow at Q multiplier 1, matching the baseline the initial state was built against
   for (let s = 0; s < SIM.warmupSteps; s += chunk) {
     writeSimUniforms(s * SIM.dt, 1);
     const enc = gpu.device.createCommandEncoder();

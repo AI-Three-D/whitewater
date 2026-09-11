@@ -1,6 +1,4 @@
-// WebGPU resource ownership: device, fixed-size buffers, pipelines, bind groups and uploaded
-// meshes. No game behaviour lives here. Usage flags are only referenced inside functions so that
-// a browser without WebGPU fails at initGpu() with a readable message, not at module load.
+// WebGPU resource ownership: device, fixed-size buffers, pipelines, bind groups and uploaded meshes.
 import { PARTS } from './config/index.js';
 import { WGSL_SIM, WGSL_PART_SIM, WGSL_SKY, WGSL_TERRAIN, WGSL_WATER, WGSL_MESH, WGSL_PART_DRAW, WGSL_BRIDGE } from './shaders.js';
 import { buildKayakParts, buildVegetationMeshes, buildCoinMesh, buildSparkMesh, buildDiamondMesh, buildMapMesh, buildRucksackMesh, buildObstacleMeshes } from './meshes.js';
@@ -38,10 +36,8 @@ export function ensureInstBuf(registry, name, count) {
   return registry[name];
 }
 
-// grow-only Float32Array registry, keyed by name within `pool` — lets per-frame instance writers
-// (obstacles, pickups: rebuilt and reuploaded every frame) reuse one buffer instead of allocating
-// fresh every frame. Callers must pass the live element count to queue.writeBuffer's size argument
-// since the returned array can be longer than what's filled this frame.
+// grow-only Float32Array registry; callers must pass the live element count to writeBuffer's size
+// since the returned array can be longer than what's filled this frame
 const scratchPools = {};
 export function ensureScratch(pool, name, floats) {
   const reg = scratchPools[pool] || (scratchPools[pool] = {});
@@ -95,9 +91,7 @@ function createBuffers() {
   gpu.obstInstBufs = {};   // per obstacle mesh name, grown by obstacles.js / landslides.js
 }
 
-// terrain/water index buffers at three mesh densities. The grid vertex shaders derive (i, j)
-// from the vertex index over the full grid, so a coarser mesh is simply an index buffer that
-// skips vertices. Each is laid out one row of quads at a time, so a Z-range is a contiguous slice.
+// terrain/water index buffers at three mesh densities (a coarser mesh just skips vertices)
 function createLods() {
   gpu.lods = [1, 2, 4].map(s => {
     const cols = Math.floor((W - 1) / s) + 1, rows = Math.floor((L - 1) / s) + 1;
@@ -242,8 +236,7 @@ function uploadMeshes() {
     map: gpuMesh(buildMapMesh()),
     rucksack: gpuMesh(buildRucksackMesh()),
   };
-  // each obstacle mesh keeps its builder's nominal metres (len/rad/draft/vol) so an instance can be
-  // scaled uniformly to a chosen length and get its physics numbers from that
+  // keeps each mesh's nominal metres so an instance can be uniformly scaled and get physics numbers from that
   gpu.obstMeshes = mapValues(buildObstacleMeshes(), v =>
     ({ ...gpuMesh(v.mb), len: v.len, rad: v.rad, draft: v.draft, vrad: v.vrad, vol: v.vol }));
   gpu.sparkMesh = gpuMesh(buildSparkMesh());

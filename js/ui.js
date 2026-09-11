@@ -1,5 +1,4 @@
-// Out-of-run screens: main menu (character select, top bar, boat picker, river carousels),
-// level-up, store and character sheet. Pure DOM; game actions are injected via initUi().
+// Out-of-run screens: main menu, level-up, store and character sheet. Pure DOM; game actions are injected via initUi().
 import { QUALITY_LEVELS, TIERS, RIVERS, RIVERS_HIDDEN, RIVER_PACKS, CHARACTERS, CRAFTS, ITEMS, UPGRADES, TRAINING, STORE_LISTING, OBSTACLES } from './config/index.js';
 import { clamp } from './math.js';
 import { newProfile, clearProfile, saveProfile, character, canRaise, anyRaisable, spendPoint, discardPending, pointsForLevel,
@@ -22,8 +21,7 @@ export const isOpen = id => $(id).style.display === 'flex';
 const show = (id, mode = 'flex') => { $(id).style.display = mode; };
 const hide = id => { $(id).style.display = 'none'; };
 
-// floor val: passive per-level trait growth is fractional, but a pip should only light up once a
-// full point's worth has accrued
+// floor val: trait growth is fractional, but a pip only lights up once a full point has accrued
 const pips = (val, cap, max = 10) => `<div class="bar">${Array.from({ length: max }, (_, i) =>
   `<i class="${i < Math.floor(val) ? 'on' : ''}${i >= cap ? ' cap' : ''}"></i>`).join('')}</div>`;
 
@@ -120,16 +118,14 @@ function renderTopbar() {
     saveProfile(prof);
     renderMenu();
   };
-  // dev: skill/stamina/health straight to this character's caps — the level/xp/points bookkeeping
-  // is left alone, this is only for testing what maxed-out traits feel like
+  // dev: raises traits straight to caps, leaves level/xp/points bookkeeping alone
   $('debugMaxBtn').onclick = () => {
     const caps = c.caps;
     prof.skill = caps.skill; prof.stamina = caps.stamina; prof.health = caps.health;
     saveProfile(prof);
     renderMenu();
   };
-  // dev: own every craft and upgrade — debugInvBtn only covers consumables (ITEMS), this is the
-  // one-time, ownership-based store items (boats, gear) it doesn't touch
+  // dev: own every craft/upgrade — debugInvBtn only covers consumables (ITEMS)
   $('debugGearBtn').onclick = () => {
     for (const id of Object.keys(CRAFTS)) if (!prof.crafts.includes(id)) prof.crafts.push(id);
     for (const id of Object.keys(UPGRADES)) if (!prof.upgrades.includes(id)) prof.upgrades.push(id);
@@ -138,11 +134,10 @@ function renderTopbar() {
   };
 }
 
-// boat picker: one toggle per owned craft. Selection persists in the profile (read by startRun).
 function renderCraftBar() {
   const prof = S.profile, cb = $('craftbar');
   cb.style.display = 'flex';
-  // only count crafts actually sold in the store — the raft is found, not bought
+  // only crafts actually sold in the store — the raft is found, not bought
   const unowned = STORE_LISTING.filter(e => e.type === 'craft' && !prof.crafts.includes(e.id)).length;
   cb.innerHTML = '<span>boat</span>' + prof.crafts.map(id => {
     const c = CRAFTS[id];
@@ -159,7 +154,6 @@ function renderCraftBar() {
 const countLabel = (list, singular, pluralWord) =>
   (list && list.length ? ` · ${list.length > 1 ? list.length + ' ' + pluralWord : singular}` : '');
 
-// the feature summary on an unlocked river card
 function riverFeatures(R) {
   const forks = R.forks && R.forks.length ? ` · ${plural(R.forks.length, 'fork')}` : '';
   const falls = R.waterfalls && R.waterfalls.length ? ' · waterfall' : '';
@@ -189,8 +183,7 @@ function riverCard(R, { unlocked, hidden }) {
   d.innerHTML = `${artSlot('riv-thumb', R.name + ' art', hidden ? undefined : R.art)}
     <h3>${R.name}</h3><small>gradient ${(R.slope * 100).toFixed(1)} % · ${R.rocks} boulders · ${R.ledges.length} ledges${hidden ? '' : riverFeatures(R)}${R.timeLimit ? ` · ${R.timeLimit}s clock` : ''}</small>
     ${best ? `<br><span class="best">best ${best.toFixed(1)} s</span>` : ''}`;
-  // a timed river warns up front, on this screen, instead of after a load the player would then
-  // have to sit through again if they back out — see confirmStart in run.js
+  // a timed river warns up front here instead of after a load — see confirmStart in run.js
   d.onclick = () => (R.timeLimit ? handlers.confirmStart(R) : handlers.startRun(R));
   return d;
 }
@@ -240,10 +233,7 @@ export function renderMenu() {
 }
 
 // ---------- river carousel ----------
-// wraps one tier's row of cards in [‹][viewport][›]. The viewport is an overflow:auto strip with
-// its scrollbar hidden; layoutCarousels() sizes it to a whole number of cards for the current
-// window width, so nothing gets cut off and the page itself never scrolls sideways.
-const CAR_BTN = 34 + 8;   // .carbtn width + .carousel gap, as laid out in css
+const CAR_BTN = 34 + 8;   // .carbtn width + .carousel gap, must match css
 
 function makeCarousel(row) {
   const car = document.createElement('div');
@@ -329,7 +319,7 @@ export function showLevelUp() {
 }
 
 // ---------- store ----------
-// store categories — which ones are expanded survives the re-render after every purchase
+// storeOpen tracks which categories are expanded, surviving the re-render after every purchase
 const STORE_GROUPS = [
   { id: 'supplies', label: 'Supplies', icon: '🎒', types: ['item'] },
   { id: 'training', label: 'Training', icon: '📘', types: ['training'] },
@@ -433,8 +423,6 @@ export function hideStore() {
 }
 
 // ---------- how to play ----------
-// static reference, not data-driven like the store — collapsible <details> sections so it stays
-// skimmable instead of one wall of text. "basics" starts open, same idea as storeOpen above.
 const howtoOpen = new Set(['basics']);
 const HOWTO_SECTIONS = [
   { id: 'basics', icon: '🚣', title: 'The basics', html: `

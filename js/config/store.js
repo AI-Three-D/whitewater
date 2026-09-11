@@ -1,10 +1,8 @@
 // Everything with a price (or found instead of bought): boats, consumables, upgrades, training.
 import { SPECIAL_ITEMS } from './loot.js';
 
-// Every boat the player can own. `mods` multiply the matching KAYAK physics numbers for a run in
-// that craft (see craftKayakParams in kayak.js), so a new hull is a config entry, not code.
-// `color` is the deck colour (the hull mesh is white/grey and takes it as tint). `lootMod`
-// scales PICKUPS/RUCKSACK collectRadius. price 0 = owned from the start.
+// `mods` multiply the matching KAYAK physics fields for a run in that craft (see craftKayakParams
+// in kayak.js). `lootMod` scales PICKUPS/RUCKSACK collectRadius. price 0 = owned from the start.
 export const CRAFTS = {
   classic: {
     name: 'River Runner', type: 'kayak', price: 0, color: [0.92, 0.22, 0.12],
@@ -16,17 +14,13 @@ export const CRAFTS = {
     desc: 'Shorter, harder-edged hull: sweep strokes bite and swing the boat round noticeably faster.',
     mods: { sweepTorque: 1.45, sweepFwd: 1.15 },
   },
-  // barely steerable and weak on the paddle, but very hard to flip and forgiving of rocks. Fine
-  // for cruising an easy river for a little xp, but its tiny reach means it rarely grabs much loot.
   tubering: {
     name: 'Tube Ring', type: 'tube', price: 15, color: [0.95, 0.55, 0.1],
     desc: 'An inflatable ring. Almost impossible to flip, almost impossible to steer — just float and enjoy the ride.',
     mods: { sweepTorque: 0.25, sweepFwd: 0.3, paddleFwd: 0.5, paddleBack: 0.5, rollInstab: 0.3, capsize: 1.6 },
     lootMod: 0.4,
   },
-  // not sold — found once, globally, as a rucksack special item (see SPECIAL_ITEMS and awardRun's
-  // raftFound handling). Slower and clumsier than the tube ring, but tougher still against
-  // flipping. Behaviour on hard water (waterfalls/vortices) is future calibration work.
+  // found only, as a rucksack special item — see SPECIAL_ITEMS and awardRun's raftFound handling
   raft: {
     name: 'Inflatable Raft', type: 'raft', price: 0, color: SPECIAL_ITEMS.raft.color,
     desc: 'A found inflatable raft. Slow and clumsy to steer, but very hard to flip — cruises easy water almost on its own.',
@@ -35,8 +29,8 @@ export const CRAFTS = {
   },
 };
 
-// consumables. `stamina` → usable mid-run (E), `heal` → usable from the character sheet,
-// `buffSkill`/`buffDuration` → temporary mid-run skill buff (Q; see traits() in kayak.js)
+// `stamina` → usable mid-run (E), `heal` → usable from the character sheet, `buffSkill`/
+// `buffDuration` → temporary mid-run skill buff (Q; see traits() in kayak.js)
 export const ITEMS = {
   snack: {
     name: 'Trail snack', icon: '🥜', price: 2, stamina: 45, maxStack: 9, color: [0.85, 0.65, 0.25],
@@ -56,11 +50,10 @@ export const ITEMS = {
   },
 };
 
-// every paddler already has a small equipment deal paying this many coins per finished run;
-// UPGRADES.sponsor adds its runIncome on top
+// base per-run coin income; UPGRADES.sponsor adds its runIncome on top
 export const BASE_SPONSOR_INCOME = 1;
 
-// permanent upgrades — bought once (or found once: no `price`), then always in effect
+// bought once (or found once: no `price`), then always in effect
 export const UPGRADES = {
   lifevest: {
     name: 'Life vest', icon: '🦺', price: 20, injuryReduction: 1,

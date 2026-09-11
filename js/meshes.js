@@ -53,7 +53,6 @@ function buildHull() {
     return [w * cx, rocker + y, (t - 0.5) * Lk];
   };
   for (let k = 0; k < ns; k++) for (let ai = 0; ai < m; ai++) {
-    // white deck / grey underside: the real colour comes from the per-craft instance tint
     const a = 6.2832 * (ai + 0.5) / m, col = Math.sin(a) >= 0 ? [1, 1, 1] : [0.58, 0.45, 0.45];
 
     mb.quad(sec(k, ai), sec(k + 1, ai), sec(k + 1, ai + 1), sec(k, ai + 1), col);
@@ -78,20 +77,17 @@ export function buildKayakParts() {
   parts.paddle = paddle;
   return parts;
 }
-// a solid gold coin standing upright, face toward +/-Z — spinning it around the vertical axis
-// makes it flip between face-on and edge-on, the classic "spinning coin" look
+// upright coin, face toward +/-Z, so spinning around Y flips face-on/edge-on
 export function buildCoinMesh() {
   const mb = new MeshBuilder(), gold = [1.0, 0.86, 0.3];
   addCylinder(mb, [0, 0, -0.09], [0, 0, 0.09], 0.48, 0.48, 22, gold);
   return mb;
 }
-// tiny bright sphere used for the pickup-collection spark burst — tinted per-instance
 export function buildSparkMesh() {
   const mb = new MeshBuilder();
   addSphere(mb, [0, 0, 0], [1, 1, 1], 4, 6, [1, 1, 1]);
   return mb;
 }
-// small faceted gem — a bipyramid (two stacked pyramid caps) around the vertical axis
 export function buildDiamondMesh() {
   const mb = new MeshBuilder(), n = 6, col = [0.65, 0.92, 1.0];
   const ring = a => [Math.cos(a) * 0.22, 0, Math.sin(a) * 0.22];
@@ -102,7 +98,6 @@ export function buildDiamondMesh() {
   }
   return mb;
 }
-// a dropped canvas rucksack — lumpy rounded body, a smaller flap on top, two thin straps
 export function buildRucksackMesh() {
   const mb = new MeshBuilder(), sackCol = [0.45, 0.34, 0.20], strapCol = [0.30, 0.22, 0.12];
   addSphere(mb, [0, 0.16, 0], [0.26, 0.22, 0.18], 6, 8, sackCol, d => 0.85 + 0.3 * vnoise3(d[0] * 3, d[1] * 3 + 4, d[2] * 3, 20));
@@ -111,7 +106,6 @@ export function buildRucksackMesh() {
   addCylinder(mb, [0.20, 0.08, -0.16], [0.13, 0.40, -0.12], 0.025, 0.02, 5, strapCol);
   return mb;
 }
-// rolled scroll/map — a short parchment-tinted cylinder with a darker ribbon band round the middle
 export function buildMapMesh() {
   const mb = new MeshBuilder(), parchment = [0.85, 0.72, 0.45], ribbon = [0.55, 0.32, 0.18];
   addCylinder(mb, [-0.32, 0, 0], [0.32, 0, 0], 0.16, 0.16, 12, parchment);
@@ -127,9 +121,7 @@ export function buildVegetationMeshes() {
   addCylinder(tree, [0, 1.9, 0], [0, 4.1, 0], 0.95, 0.0, 9, [0.10, 0.34, 0.13]);
   addCylinder(tree, [0, 2.8, 0], [0, 4.9, 0], 0.6, 0.0, 8, [0.12, 0.38, 0.15]);
   M.tree = tree;
-  // same conifer, snow-dusted: each tier blended further toward white going up, the way snow
-  // actually accumulates more on a conifer's upper boughs than lower down — for icy (see BIOMES,
-  // config.js), a plain conifer read too summery and treeBirch/treeWithered too leafy-deciduous
+  // snow-dusted conifer variant (icy biome)
   const treeSnowy = new MeshBuilder(), snowCol = [0.92, 0.95, 1.0];
   const dust = (col, t) => [col[0] + (snowCol[0] - col[0]) * t, col[1] + (snowCol[1] - col[1]) * t, col[2] + (snowCol[2] - col[2]) * t];
   addCylinder(treeSnowy, [0, 0, 0], [0, 1.5, 0], 0.14, 0.1, 7, [0.36, 0.24, 0.13]);
@@ -161,7 +153,7 @@ export function buildVegetationMeshes() {
   addSphere(treeDeciduous, [0, 2.1, 0], [1.15, 1.05, 1.15], 7, 10, [0.22, 0.5, 0.16], d => 0.85 + 0.35 * vnoise3(d[0] * 2, d[1] * 2 + 3, d[2] * 2, 4));
   M.treeDeciduous = treeDeciduous;
 
-  // saguaro cactus (desert) — fluted trunk with two upturned arms
+  // saguaro cactus (desert)
   const cactus = new MeshBuilder(); const cactusCol = [0.27, 0.52, 0.30];
   addCylinder(cactus, [0, 0, 0], [0, 2.6, 0], 0.16, 0.13, 8, cactusCol);
   addCylinder(cactus, [0, 1.1, 0], [0.5, 1.1, 0], 0.09, 0.08, 6, cactusCol);
@@ -177,16 +169,14 @@ export function buildVegetationMeshes() {
   addSphere(treeRainforest, [0.4, 4.3, 0.3], [1.1, 0.8, 1.1], 6, 9, [0.14, 0.48, 0.17], d => 0.85 + 0.3 * vnoise3(d[0] * 2, d[1] * 2 + 2, d[2] * 2, 6));
   M.treeRainforest = treeRainforest;
 
-  // acacia (savannah) — long thin trunk, flat but lumpy/irregular umbrella canopy (a noise-
-  // displaced flattened blob, not a smooth geometric disc — a perfectly even cone reads as a
-  // flying saucer rather than foliage)
+  // acacia (savannah) — flat noise-displaced umbrella canopy
   const treeSavannah = new MeshBuilder(); const acaciaCol = [0.32, 0.42, 0.14];
   addCylinder(treeSavannah, [0, 0, 0], [0, 2.5, 0], 0.10, 0.06, 7, [0.34, 0.24, 0.14]);
   addSphere(treeSavannah, [0, 2.62, 0], [1.5, 0.32, 1.5], 6, 11, acaciaCol,
     d => 0.7 + 0.45 * vnoise3(d[0] * 1.8, d[1] * 1.8 + 9, d[2] * 1.8, 12) + 0.15 * vnoise3(d[0] * 5 + 3, d[1] * 5, d[2] * 5 + 6, 17));
   M.treeSavannah = treeSavannah;
 
-  // withered/dead tree (icy, barren) — bare trunk and a few thin bare branches, no canopy
+  // withered/dead tree (icy, barren)
   const treeWithered = new MeshBuilder(); const witherCol = [0.35, 0.30, 0.26];
   addCylinder(treeWithered, [0, 0, 0], [0, 2.2, 0], 0.10, 0.04, 6, witherCol);
   addCylinder(treeWithered, [0, 1.3, 0], [0.5, 2.0, 0], 0.04, 0.015, 5, witherCol);
@@ -194,16 +184,13 @@ export function buildVegetationMeshes() {
   addCylinder(treeWithered, [0, 1.9, 0], [0.15, 2.6, 0], 0.03, 0.01, 5, witherCol);
   M.treeWithered = treeWithered;
 
-  // boulder — a single large rock. Two noise octaves: a broad low-frequency one for the
-  // overall lumpy/asymmetric shape (not a round ball) plus a finer high-frequency one for
-  // surface roughness — kept subtle so it reads as rock, not a spiky mess
+  // boulder: low-freq noise for lumpy shape, high-freq for surface roughness
   const boulder = new MeshBuilder();
   addSphere(boulder, [0, 0.5, 0], [1.6, 1.2, 1.5], 7, 10, [0.42, 0.41, 0.39],
     d => 0.68 + 0.45 * vnoise3(d[0] * 1.3 + 11, d[1] * 1.3, d[2] * 1.3 + 4, 9) + 0.14 * vnoise3(d[0] * 4.5 + 2, d[1] * 4.5, d[2] * 4.5 + 7, 15));
   M.boulder = boulder;
 
-  // ice formation (glacier) — a cluster of angular faceted shards, no noise displacement —
-  // sharp flat facets read as ice, where rock/boulder's organic lumpiness reads as stone
+  // ice formation (glacier): angular faceted shards, no noise displacement
   const iceFormation = new MeshBuilder();
   addCylinder(iceFormation, [0.02, 0, 0.02], [0.08, 1.35, 0.06], 0.36, 0.02, 5, [0.80, 0.90, 0.98]);
   addCylinder(iceFormation, [-0.32, 0, 0.12], [-0.38, 0.85, 0.08], 0.20, 0.015, 5, [0.75, 0.87, 0.96]);
@@ -211,35 +198,24 @@ export function buildVegetationMeshes() {
   addCylinder(iceFormation, [-0.05, 0, -0.28], [-0.08, 0.45, -0.34], 0.14, 0.01, 5, [0.78, 0.89, 0.97]);
   M.iceFormation = iceFormation;
 
-  // ---------- variant props: same "role" as an existing mesh (see BIOMES[x].props in config.js,
-  // where a role can list several mesh names and one is picked at random per placement) but a
-  // different silhouette or a colour a plain tint multiply can't reach, so a biome's ground cover
-  // doesn't read as one shape copy-pasted everywhere ----------
+  // ---------- variant props: alternate meshes for the same biome "role" (BIOMES[x].props in config.js picks one at random) ----------
 
-  // flat angular slab — a rock variant: squashed low and irregular-edged rather than a rounded
-  // lump, so a "rock" patch mixes rounded boulders with flatter shelf-like stones
   const rockSlab = new MeshBuilder();
   addSphere(rockSlab, [0, 0.22, 0], [1.15, 0.28, 0.85], 5, 8, [0.48, 0.46, 0.43],
     d => 0.75 + 0.4 * vnoise3(d[0] * 2.2 + 6, d[1] * 2.2, d[2] * 2.2 + 3, 13));
   M.rockSlab = rockSlab;
 
-  // taller, sharper-edged boulder — heavier high-frequency noise weight than the base boulder
-  // reads as angular scree/talus rather than a big smooth stone
   const boulderJagged = new MeshBuilder();
   addSphere(boulderJagged, [0, 0.65, 0], [1.35, 1.7, 1.3], 6, 10, [0.40, 0.38, 0.37],
     d => 0.6 + 0.3 * vnoise3(d[0] * 1.1 + 8, d[1] * 1.1, d[2] * 1.1 + 5, 19) + 0.35 * vnoise3(d[0] * 5 + 1, d[1] * 5, d[2] * 5 + 9, 23));
   M.boulderJagged = boulderJagged;
 
-  // bush with a scatter of bright berries — a colour pop the base bush's plain-green tint can't
-  // reach (multiplying green by a biome tint can only shift it toward another green, never red)
   const bushBerry = new MeshBuilder();
   addSphere(bushBerry, [0, 0.32, 0], [0.68, 0.46, 0.68], 6, 9, [0.16, 0.38, 0.13], d => 0.85 + 0.35 * vnoise3(d[0] * 2 + 5, d[1] * 2, d[2] * 2, 3));
   const berryCol = [0.75, 0.1, 0.18];
   for (const [bx, by, bz] of [[0.35, 0.5, 0.1], [-0.3, 0.4, 0.25], [0.1, 0.6, -0.32], [-0.2, 0.55, -0.15], [0.3, 0.3, -0.3]]) addSphere(bushBerry, [bx, by, bz], [0.07, 0.07, 0.07], 3, 5, berryCol);
   M.bushBerry = bushBerry;
 
-  // grass tuft topped with a small flower head — same crossed-blade base as `grass`, same
-  // colour-pop reasoning as the berry bush above
   const flowerTuft = new MeshBuilder();
   for (let k = 0; k < 3; k++) {
     const a = Math.PI * k / 3, dxx = Math.cos(a) * 0.3, dzz = Math.sin(a) * 0.3;
@@ -248,16 +224,11 @@ export function buildVegetationMeshes() {
   addSphere(flowerTuft, [0, 0.5, 0], [0.13, 0.1, 0.13], 4, 6, [0.95, 0.85, 0.25]);
   M.flowerTuft = flowerTuft;
 
-  // birch/aspen — pale trunk, sparse light canopy. A "living" tree alternative to treeWithered
-  // for cold biomes so they're not entirely bare and grey
   const treeBirch = new MeshBuilder();
   addCylinder(treeBirch, [0, 0, 0], [0, 2.4, 0], 0.11, 0.06, 7, [0.82, 0.80, 0.76]);
   addSphere(treeBirch, [0, 2.9, 0], [0.85, 0.9, 0.85], 6, 9, [0.62, 0.72, 0.42], d => 0.8 + 0.4 * vnoise3(d[0] * 2.3 + 7, d[1] * 2.3, d[2] * 2.3, 11));
   M.treeBirch = treeBirch;
 
-  // autumn maple/deciduous — same silhouette as treeDeciduous but a warm red/orange/gold canopy
-  // gradient (top redder, bottom golder) instead of green — needs a new mesh, not just a tint,
-  // since multiplying a green canopy by any single colour can't turn it red
   const treeAutumn = new MeshBuilder();
   addCylinder(treeAutumn, [0, 0, 0], [0, 1.3, 0], 0.13, 0.09, 7, [0.32, 0.22, 0.12]);
   addSphere(treeAutumn, [0, 2.1, 0], [1.15, 1.05, 1.15], 7, 10,
@@ -265,8 +236,7 @@ export function buildVegetationMeshes() {
     d => 0.85 + 0.35 * vnoise3(d[0] * 2, d[1] * 2 + 3, d[2] * 2, 4));
   M.treeAutumn = treeAutumn;
 
-  // charred dead tree (volcanic) — like treeWithered but blackened, with a couple of ember-glow
-  // spots at the base standing in for the lighting engine this game doesn't have
+  // charred dead tree (volcanic), with ember-glow spots standing in for lighting the game doesn't have
   const treeCharred = new MeshBuilder(); const charCol = [0.08, 0.07, 0.07];
   addCylinder(treeCharred, [0, 0, 0], [0, 2.0, 0], 0.11, 0.04, 6, charCol);
   addCylinder(treeCharred, [0, 1.2, 0], [0.45, 1.8, 0], 0.04, 0.015, 5, charCol);
@@ -275,8 +245,6 @@ export function buildVegetationMeshes() {
   addSphere(treeCharred, [-0.08, 0.08, -0.04], [0.04, 0.04, 0.04], 3, 5, [0.9, 0.35, 0.05]);
   M.treeCharred = treeCharred;
 
-  // lava rock (volcanic) — dark basalt with bright glowing cracks standing in for the lighting
-  // engine this game doesn't have, same trick as treeCharred's embers
   const lavaRock = new MeshBuilder();
   addSphere(lavaRock, [0, 0.45, 0], [1.1, 0.9, 1.05], 6, 9, [0.10, 0.09, 0.09],
     d => 0.7 + 0.4 * vnoise3(d[0] * 1.6 + 14, d[1] * 1.6, d[2] * 1.6 + 6, 27));
@@ -288,28 +256,23 @@ export function buildVegetationMeshes() {
   return M;
 }
 // ---------- floating obstacles ----------
-// Modelled in metres: long axis along local Z (centred), y = 0 at the waterline. Instances are
-// scaled *uniformly* to their chosen length and never stretched, so branch stubs and tapers keep
-// their shape. Each builder returns the mesh plus the nominal numbers the physics needs:
-// len, rad (collision capsule radius), draft (depth below the waterline) and vol (m³, for mass).
+// Metres, long axis along local Z, y = 0 at waterline. Each builder returns the mesh plus the
+// nominal numbers the physics needs: len, rad (collision capsule radius), draft, vol (m³, for mass).
 const OBST_BARK = [0.34, 0.25, 0.16], OBST_DARK = [0.24, 0.17, 0.11], OBST_CUT = [0.66, 0.52, 0.33];
 const ICE_UP = [0.88, 0.94, 1.0], ICE_DOWN = [0.48, 0.66, 0.78];
 
-// broken-off branch stubs poking out at random angles. Purely cosmetic — the physics treats the
-// log as a plain capsule — so they're kept under half a metre so the boat never visibly passes
-// through one. Whichever ones land on the underside are simply hidden by the water.
+// branch stubs: purely cosmetic (physics treats the log as a plain capsule), kept under ~0.45m so the boat never visibly passes through one
 function addStubs(mb, rng, len, rad, count, col) {
   for (let k = 0; k < count; k++) {
     const z = (rng() - 0.5) * len * 0.8, a = rng() * 6.2832;
     const out = [Math.cos(a), Math.sin(a), 0];
-    const dir = v3.norm([out[0], out[1], (rng() - 0.5) * 1.2]);     // leans fore/aft a little
+    const dir = v3.norm([out[0], out[1], (rng() - 0.5) * 1.2]);
     const base = v3.scale(out, rad * 0.8); base[2] = z;
-    const tip = v3.add(base, v3.scale(dir, rad * 0.2 + 0.15 + rng() * 0.27));   // ≤ ~0.45 m proud of the bark
+    const tip = v3.add(base, v3.scale(dir, rad * 0.2 + 0.15 + rng() * 0.27));
     addCylinder(mb, base, tip, Math.min(0.06, rad * 0.3), 0.012, 5, col);
   }
 }
-// one trunk section: tapered barrel, pale cut faces, optional root flare at the butt (`flare` m)
-// or a splintered snapped-off top (`snap` m), and `stubs` branch stubs
+// trunk section: `flare` = root flare at the butt (m), `snap` = splintered top (m), `stubs` = branch count
 function buildLog(seed, len, r0, r1, sides, o = {}) {
   const mb = new MeshBuilder(), rng = mulberry32(seed), h = len / 2;
   let zb = -h, rb = r0;
@@ -317,16 +280,14 @@ function buildLog(seed, len, r0, r1, sides, o = {}) {
   const ze = o.snap ? h - o.snap : h;
   addCylinder(mb, [0, 0, zb], [0, 0, ze], r0, r1, sides, OBST_BARK);
   if (o.snap) addCylinder(mb, [0, 0, ze], [0, 0, h], r1, r1 * 0.35, sides, OBST_CUT);
-  // cut faces: thin discs a hair proud of the ends, so they win the depth test against the barrel caps
+  // cut faces sit a hair proud of the barrel ends to win the depth test
   addCylinder(mb, [0, 0, -h - 0.012], [0, 0, -h + 0.02], rb * 0.97, rb * 0.97, sides, OBST_CUT);
   if (!o.snap) addCylinder(mb, [0, 0, h - 0.02], [0, 0, h + 0.012], r1 * 0.97, r1 * 0.97, sides, OBST_CUT);
   addStubs(mb, rng, len, (r0 + r1) / 2, o.stubs || 0, OBST_DARK);
   const rm = (r0 + r1) / 2;
   return { mb, len, rad: r0, draft: r0, vol: Math.PI * rm * rm * len };
 }
-// extrude a 2-D cross-section polygon along Z through a list of stations ([zFrac, sx, sy]) —
-// flat facets and hard edges read as ice where the noise-displaced spheres used for rock read as
-// stone. Quads above the waterline get the bright colour, submerged ones the darker blue-green.
+// extrude a 2-D cross-section polygon along Z through a list of stations ([zFrac, sx, sy])
 function addStack(mb, poly, stations, colUp, colDown) {
   const n = poly.length;
   const pt = (st, k) => [poly[k][0] * st.sx, poly[k][1] * st.sy, st.z];
@@ -344,7 +305,7 @@ function addStack(mb, poly, stations, colUp, colDown) {
     }
   }
 }
-// irregular convex slab cross-section: `hw` half-width [m], spanning y = bot … top [m]
+// convex slab cross-section: `hw` half-width (m), spanning y = bot..top (m)
 function icePoly(n, hw, top, bot, sd) {
   return Array.from({ length: n }, (_, k) => {
     const a = 6.2832 * (k + 0.18 * vnoise3(k * 0.9, sd, 0.5, 31)) / n;
@@ -357,14 +318,9 @@ function buildIce(seed, sides, len, hw, top, bot, stations) {
   addStack(mb, icePoly(sides, hw, top, bot, seed), stations.map(([zf, sx, sy]) => ({ z: zf * len, sx, sy })), ICE_UP, ICE_DOWN);
   return { mb, len, rad: hw, draft: -bot, vol: 1.3 * hw * (top - bot) * len };
 }
-// landslide boulders: a lumpy, noise-displaced rock — same primitive buildVegetationMeshes uses for
-// the 'rock'/'boulder' props (a flattened, roughened ellipsoid reads as stone far more convincingly
-// than a smooth sphere would) — but returned in the {mb, len, rad, draft, vol} shape the obstacle
-// physics needs, sized round rather than elongated (len ≈ diameter) since stepObstacle's along-axis
-// sampling degrades gracefully to "a short, chunky capsule" for a near-1:1 aspect ratio, no separate
-// code path required. draft is set deep relative to its size (see OBSTACLES kinds.boulder in
-// config.js) so it stays in stepObstacle's grounded/rolling regime instead of ever really floating —
-// a dense rock tumbling along the bed, not a log riding on top of the current.
+// landslide boulders, in the {mb, len, rad, draft, vol} shape the obstacle physics needs (sized
+// round, len ≈ diameter). draft is set deep (see OBSTACLES kinds.boulder, config.js) to keep
+// stepObstacle in its grounded/rolling regime rather than ever floating.
 const ROCK_OBST = [0.44, 0.41, 0.37], ROCK_OBST_DARK = [0.30, 0.27, 0.23];
 function buildBoulder(seed, r) {
   const mb = new MeshBuilder(), rng = mulberry32(seed);
@@ -373,11 +329,7 @@ function buildBoulder(seed, r) {
     d => 0.72 + 0.32 * vnoise3(d[0] * 1.7 + seed, d[1] * 1.7 - seed, d[2] * 1.7 + seed * 2, seed + 60)
        + 0.12 * vnoise3(d[0] * 4.5 + seed, d[1] * 4.5, d[2] * 4.5 + seed, seed + 61));
   const rMax = Math.max(rx, rz);
-  // vrad (vertical semi-axis) is separate from draft: draft keeps stepObstacle's physics in the
-  // grounded regime (see below), vrad is what main.js uses to rest the *rendered* boulder's centre
-  // exactly one radius above the terrain — otherwise it inherits the generic obstacle render path's
-  // water-surface anchor (correct for a buoyant log, wrong for a rock: half the mesh pokes up out
-  // of the water reading as "floating" no matter how grounded the physics underneath actually is).
+  // vrad (vertical semi-axis, distinct from draft) is what main.js uses to rest the rendered boulder's centre one radius above the terrain
   return { mb, len: 2 * rMax, rad: rMax, draft: ry * 2.2, vrad: ry, vol: (4 / 3) * Math.PI * rx * ry * rz };
 }
 export function buildObstacleMeshes() {
@@ -399,14 +351,10 @@ export function buildObstacleMeshes() {
 }
 
 // ---------- natural land bridges ----------
-// Geometry for one bridge descriptor from generateRiver() (river.js). Everything the descriptor
-// defines analytically (deck top, centreline, width, pillar radius profile) is sampled here rather
-// than re-derived, so the rendered deck is exactly the surface props stand on and the collision
-// code tests against. The vertex "colour" isn't a colour: .x is a rock mask (0 = deck top, shaded
-// grass/dirt/rock by slope like any terrain; 1 = rock faces), .y is baked ambient occlusion, both
-// consumed by fsBridge (shaders.js) which otherwise shades the bridge exactly like the terrain.
-// swept tube: rings[si][k] is vertex k of cross-section si, cens[si] its centre (used to orient
-// the smooth normals outward), cols the per-vertex mask/ao. Optional end caps as fans.
+// Geometry for one bridge descriptor from generateRiver() (river.js), sampled directly from the
+// descriptor's analytic surface so the rendered deck matches what props stand on and the collision
+// code tests against. Vertex "colour" isn't a colour: .x is a rock mask, .y is baked AO — consumed
+// by fsBridge (shaders.js).
 function emitTube(mb, rings, cols, cens, caps) {
   const nS = rings.length - 1, M = rings[0].length, N = [];
   for (let si = 0; si <= nS; si++) {
@@ -445,14 +393,10 @@ export function buildLandBridgeMesh(br) {
     for (let k = 0; k < M; k++) {
       const a = 2 * Math.PI * k / M, ca = Math.cos(a), sa = Math.sin(a);
       if (sa >= -1e-9) {
-        // deck top: the exact analytic surface (u = cos a → denser sampling toward the edges)
         const u = ca, z = zc + u * hw;
         ring.push([x, br.topAt(s, u, x, z), z]);
-        col.push([clamp((Math.abs(u) - 0.7) / 0.3, 0, 1), 0, 0]);   // the rim turns rocky
+        col.push([clamp((Math.abs(u) - 0.7) / 0.3, 0, 1), 0, 0]);
       } else {
-        // sides + underside: a rounded superellipse hanging from the deck edges, displaced
-        // outward by two noise octaves — strongest on the underside, fading at the rim so the
-        // top edge stays put
         const e = 2 / 2.6, u = Math.sign(ca) * Math.pow(Math.abs(ca), e), v = Math.pow(-sa, e);
         const z0 = zc + u * hw, y0 = br.topAt(s, u, x, z0) - v * th;
         const nz = vnoise3(x * 0.45, y0 * 0.45, z0 * 0.45, br.seed + 7) * 2 - 1;
@@ -460,18 +404,13 @@ export function buildLandBridgeMesh(br) {
         const disp = rough * (0.18 + 0.06 * th) * (0.7 * nz + 0.4 * nf) * Math.min(1, 0.15 + 2.5 * v);
         const dz = z0 - cen[2], dy = y0 - cen[1], dl = Math.hypot(dz, dy) || 1;
         ring.push([x, y0 + disp * dy / dl, z0 + disp * dz / dl]);
-        col.push([1, 0.9 * v * v, 0]);   // darkest under the middle of the arch
+        col.push([1, 0.9 * v * v, 0]);
       }
     }
     rings.push(ring); cols.push(col); cens.push(cen);
   }
   emitTube(mb, rings, cols, cens, true);
-  // pillars: stacked rings from below the bed to inside the arch, radius from the shared profile,
-  // roughened and slightly twisted; elongated along the flow, leaning a touch
-  // pillars: stacked rings from below the bed to inside the arch. Elliptical (rx along the bridge,
-  // rz across), rotated by yaw, radius from the shared profile (talus foot / waist / flare into the
-  // arch), roughened by the column's own `irregular` — a low octave for lobes and asymmetry, two
-  // finer ones for surface — and slightly twisted and leaning
+  // pillars: stacked elliptical rings from below the bed to inside the arch, roughened by noise and slightly twisted/leaning
   for (const pl of br.pillars) {
     const nL = clamp(Math.ceil(pl.h / 0.35), 6, 70);
     const Mp = clamp(Math.round(Math.max(pl.rx, pl.rz) * 12), 16, 48), pr = [], pc = [], pcen = [];
@@ -485,7 +424,7 @@ export function buildLandBridgeMesh(br) {
         const nr = vnoise3(ca * 1.3 + 7, y * 0.7, sa * 1.3, pl.seed) * 2 - 1;
         const nf = vnoise3(ca * 3.5, y * 2.2, sa * 3.5 + 5, pl.seed + 1) * 2 - 1;
         const kk = k0 * (1 + pl.irregular * (0.12 * nl + 0.16 * nr + 0.07 * nf));
-        const lx = pl.rx * kk * ca, lz = pl.rz * kk * sa;                       // pillar frame → world
+        const lx = pl.rx * kk * ca, lz = pl.rz * kk * sa;   // pillar frame → world
         ring.push([cx + lx * pl.cy - lz * pl.sy, y, cz + lx * pl.sy + lz * pl.cy]);
         col.push([1, 0.55 * fy * fy, 0]);
       }
@@ -497,10 +436,8 @@ export function buildLandBridgeMesh(br) {
 }
 
 // ---------- built (road) bridges ----------
-// A rectangular prism between two cross-sections (cx, cz, hx, hz) at y0 and y1, rotated by yaw —
-// the one primitive every part of a built bridge is made of (deck slab, girders, parapets, posts,
-// abutments, pylon shafts/footings/caps). Winding doesn't matter: fsMesh flips normals toward the
-// viewer, so a box is lit correctly from either side.
+// Rectangular prism between two cross-sections (cx, cz, hx, hz) at y0/y1, rotated by yaw — the one
+// primitive every part of a built bridge is made of. Winding doesn't matter: fsMesh flips normals toward the viewer.
 function addPrism(mb, y0, y1, s0, s1, yaw, colSide, colTop, colBot) {
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
   const pt = (s, y, sx, sz) => { const lx = sx * s.hx, lz = sz * s.hz; return [s.cx + lx * cy - lz * sy, y, s.cz + lx * sy + lz * cy]; };
@@ -514,18 +451,15 @@ function addPrism(mb, y0, y1, s0, s1, yaw, colSide, colTop, colBot) {
 }
 const addBox = (mb, cx, cz, hx, hz, y0, y1, colSide, colTop, colBot, yaw = 0) =>
   addPrism(mb, y0, y1, { cx, cz, hx, hz }, { cx, cz, hx, hz }, yaw, colSide, colTop, colBot);
-// Geometry for one built-bridge descriptor from generateRiver(). Colours come from the material
-// table (BRIDGE_MATERIALS); the per-level `color` is applied as the instance tint, so the same mesh
-// can be painted without rebuilding it. Drawn with the ordinary prop shader — a road bridge is a
-// man-made object, not terrain, so it deliberately doesn't take the biome's rock/grass shading.
+// Geometry for one built-bridge descriptor from generateRiver(). Colours come from BRIDGE_MATERIALS;
+// drawn with the ordinary prop shader since a road bridge doesn't take the biome's rock/grass shading.
 export function buildBuiltBridgeMesh(br) {
   const mb = new MeshBuilder(), C = br.cfg, M = br.mat;
   const hw = br.halfW, zb = br.z, yD = br.yDeck, sB = br.slabBottom, yU = br.yUnder;
-  const cw = Math.max(hw - C.railThick, hw * 0.5);          // carriageway half-width, inside the parapets
+  const cw = Math.max(hw - C.railThick, hw * 0.5);   // carriageway half-width, inside the parapets
   const shade = (c, f) => [c[0] * f, c[1] * f, c[2] * f];
   const hash = n => { const s = Math.sin(n * 12.9898) * 43758.5453; return s - Math.floor(s); };
-  // ---- road surface: the whole corridor at deck level (the terrain under the approaches is
-  // graded to just below it), planks across for timber, faint patch variation for asphalt ----
+  // ---- road surface ----
   const step = M.planks ? 0.45 : 2.0;
   let n = 0;
   for (let x = br.roadX0; x < br.roadX1 - 1e-6; x += step, n++) {
@@ -533,7 +467,7 @@ export function buildBuiltBridgeMesh(br) {
     const f = M.planks ? (n % 2 ? 0.9 : 1.08) * (0.96 + 0.08 * hash(n)) : 1 + (hash(n) - 0.5) * 0.06;
     mb.quad([x, yD, zb - cw], [x1, yD, zb - cw], [x1, yD, zb + cw], [x, yD, zb + cw], shade(M.road, f));
   }
-  for (const s of [-1, 1])   // skirts: hide the seam where the road meets the graded shoulder
+  for (const s of [-1, 1])   // skirts hide the seam where road meets graded shoulder
     mb.quad([br.roadX0, yD, zb + s * hw], [br.roadX1, yD, zb + s * hw],
             [br.roadX1, yD - 0.35, zb + s * hw], [br.roadX0, yD - 0.35, zb + s * hw], shade(M.side, 0.95));
   if (C.roadLine && M.line[0] + M.line[1] + M.line[2] > 0.05)

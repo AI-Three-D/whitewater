@@ -32,10 +32,7 @@ export function toggleNoCapsize() {
   $('mGod').classList.toggle('on', S.debugNoCapsize);
 }
 
-// P key and the pause button share this. Only meaningful mid-run — frame() in main.js checks
-// S.paused and skips physics/rendering entirely while it's set, which is what actually freezes
-// the game; this just flips the flag and swaps #msg to a Resume/River-menu prompt over the frozen
-// frame (reusing #msg is safe here: nothing else uses it while gameState is 'run').
+// frame() in main.js checks S.paused and skips physics/rendering while set; this just flips it and swaps #msg to a Resume prompt
 export function togglePause() {
   if (S.gameState !== 'run') return;
   S.paused = !S.paused;
@@ -52,7 +49,6 @@ export function togglePause() {
   }
 }
 
-// only mid-run, only if there's one, and not when the bar is already (nearly) full
 export function eatSnack() {
   if (S.gameState !== 'run' || !S.profile) return;
   if (itemCount(S.profile, 'snack') <= 0 || kayak.stamina >= STAMINA.max - 2) return;
@@ -63,7 +59,7 @@ export function eatSnack() {
   popLoot('snack');
 }
 
-// unlike the snack there's no "already full" guard: the buff always refreshes to a full window
+// unlike eatSnack, no "already full" guard — the buff always refreshes to a full window
 export function drinkEnergy() {
   if (S.gameState !== 'run' || !S.profile) return;
   if (itemCount(S.profile, 'energyDrink') <= 0) return;
@@ -73,13 +69,12 @@ export function drinkEnergy() {
   popLoot('energyDrink');
 }
 
-// R key and the Retry button share the same guard
 export function retryRun() {
   if (S.river && S.gameState !== 'menu' && !S.warmingUp && !isOpen('lvl')) startRun(S.river.R);
 }
 
 // ---------- start ----------
-// regenerate terrain, scenery and pickups — only when the river changes (restarts are instant)
+// only called when the river changes — restarts are instant
 function loadRiver(R) {
   const river = generateRiver(R);
   S.river = river;
@@ -98,11 +93,7 @@ function uploadInitialWater() {
   device.queue.writeBuffer(gpu.partBuf, 0, new Float32Array(PARTS.count * 8));
 }
 
-// shown on the river-selection screen for a timed river, before any loading happens — warns the
-// player up front instead of making them sit through a load only to hit a Start gate afterward.
-// Reuses #msg like the pause prompt; safe here since nothing else shows it while gameState is
-// 'menu'. Cancelling just hides the prompt — nothing's been touched yet (markSecretSpent doesn't
-// run until startRun itself does, on Start).
+// reuses #msg like the pause prompt (safe: nothing else shows it in 'menu'); cancel just hides it, nothing touched until Start
 export function confirmStart(R) {
   if (!S.profile) return showMenu();
   if (isSecretSpent(S.profile, R)) return showMenu();
@@ -120,13 +111,12 @@ export function confirmStart(R) {
 export async function startRun(R) {
   if (S.warmingUp) return;
   if (!S.profile) return showMenu();
-  // a single-attempt river (the secrets) is spent the instant it launches — win, capsize or time
-  // out, doesn't matter — so re-render the menu (it'll show the card as spent) instead of starting
+  // a single-attempt (secret) river is spent the instant it launches, win/capsize/timeout alike
   if (isSecretSpent(S.profile, R)) return showMenu();
   markSecretSpent(S.profile, R);
   S.runCraft = craftOf(S.profile);
   S.effK = craftKayakParams(S.runCraft, S.profile);
-  if (isMobile) {   // both must run inside the tap that brought us here
+  if (isMobile) {   // must run inside the tap that brought us here
     gyro.request();
     enterFullscreen();
   }
@@ -140,7 +130,7 @@ export async function startRun(R) {
 
   if (!S.river || S.river.R !== R) loadRiver(R);
   resetPickupsForAttempt();
-  placeMapItem();   // re-rolled every attempt, not just on river regeneration
+  placeMapItem();   // re-rolled every attempt
   resetRunCounters();
   uploadInitialWater();
   writeSimUniforms(0, 1);
@@ -148,9 +138,9 @@ export async function startRun(R) {
   band.ready = false;
   kayak.reset();
   cam.reset();
-  placeObstacles();   // seeded relative to the boat, so after reset; redone every attempt
+  placeObstacles();   // seeded relative to the boat, so after reset
   placeLandslides();
-  if (isMobile) gyro.calibrate();   // however the phone is held right now counts as level
+  if (isMobile) gyro.calibrate();   // current phone tilt counts as level
   document.body.classList.add('inrun');
   S.simTime = 0;
   S.runTime = 0;
@@ -161,8 +151,7 @@ export async function startRun(R) {
 }
 
 // ---------- end ----------
-// a spent single-attempt river drops the retry button entirely (retryRun would just bounce off
-// startRun's isSecretSpent guard anyway) and says so, rather than silently doing nothing on R/click
+// a spent single-attempt river drops the retry button entirely and says so
 const actionsHtml = R => R.singleAttempt
   ? `<div class="mbtns"><button id="btnMenu">River menu</button></div>
     <small class="desktop-only">Esc — river menu</small>
@@ -225,7 +214,6 @@ function lossMessage() {
     ${actionsHtml(R)}`;
 }
 
-// no capsize, no injury — the clock just ran out. Loot still doesn't bank (see lostLootLine).
 function timeoutMessage() {
   const R = S.river.R;
   return `⏱️ Time's up!<br>${progressLine()}
@@ -236,8 +224,7 @@ function timeoutMessage() {
 export function endRun(outcome) {
   if (S.gameState !== 'run') return;
   S.gameState = 'over';
-  // seed free-look from the chase cam's current angle so the switch to orbiting doesn't jump —
-  // it's still roughly "behind the boat", just now draggable (see cam.update in render.js)
+  // seed free-look from the chase cam's angle so the switch to orbiting doesn't jump
   S.freeCam.yaw = Math.atan2(-cam.dir[0], -cam.dir[2]);
   S.freeCam.pitch = 0.28;
   S.freeCam.dist = 9;

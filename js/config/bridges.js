@@ -1,5 +1,5 @@
-// Natural rock arches (land bridges) and built road bridges — defaults that a river's
-// landBridges[] / builtBridges[] entries override per bridge.
+// Natural rock arches (land bridges) and built road bridges — defaults a river's landBridges[] /
+// builtBridges[] entries override per bridge.
 
 export const LAND_BRIDGE = {
     width: 6, widthVar: 0.3, height: 3, pillars: 1, thickness: 1.3, rise: 0.5, roughness: 1, wander: 1, flare: 0.8,
