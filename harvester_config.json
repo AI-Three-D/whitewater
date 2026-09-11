@@ -1,0 +1,21 @@
+{
+  "output_file": "harvested_code.txt",
+  "path_prefix": "===== FILE:",
+  "path_suffix": "=====",
+  "exclude_dirs": [".git", ".svn", ".hg", "node_modules", "__pycache__", "venv", ".venv", "build", "dist", "target", ".idea", ".vscode"],
+  "languages": {
+    "python": {
+      "extensions": [".py", ".pyw"]
+    },
+    "java": {
+      "extensions": [".java"]
+    },
+    "javascript": {
+      "extensions": [".js", ".jsx", ".mjs", ".cjs"]
+    },
+    "web": {
+      "extensions": [".html", ".htm", ".css", ".scss", ".js", ".jsx", ".mjs", ".ts", ".tsx", ".json", ".md", ".svg"],
+      "exclude": ["js/config/*.js"]
+    }
+  }
+}

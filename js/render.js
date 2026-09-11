@@ -279,7 +279,7 @@ export function encodeRenderPass(enc) {
   drawSlices(pass, lodSlices(true));
   drawBridges(pass, zk);
   pass.setPipeline(gpu.meshPipe);
-  drawVegetation(pass, zk);
+  drawVegetation(pass, zk);   
   drawKayak(pass);
   drawObstacles(pass);
   pass.setPipeline(gpu.waterPipe);

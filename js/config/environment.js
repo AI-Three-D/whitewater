@@ -16,9 +16,7 @@ export const RENDER = {
     day:   { sunDir: null,               skyHorizon: [0.70, 0.80, 0.92], skyZenith: [0.20, 0.42, 0.80], fogTint: [1.00, 1.00, 1.00], fogMul: 1.00, exposure: 1.00 },
     dawn:  { sunDir: [0.85, 0.16, 0.30], skyHorizon: [0.96, 0.64, 0.48], skyZenith: [0.24, 0.32, 0.58], fogTint: [1.15, 0.78, 0.58], fogMul: 1.15, exposure: 0.75 },
     dusk:  { sunDir: [-0.82, 0.14, 0.42], skyHorizon: [0.85, 0.38, 0.28], skyZenith: [0.16, 0.13, 0.34], fogTint: [1.20, 0.72, 0.62], fogMul: 1.20, exposure: 0.62 },
-    // sunDir now points up at the moon (see skyColor's `moon` branch in shaders.js) instead of
-    // hiding below the horizon — moon: 1 swaps the sky's disc/halo term from sun to moon and
-    // silences the old sun glow entirely, so it lights the scene without reading as dusk
+
     night: { sunDir: [0.30, 0.62, 0.55], moon: 1, skyHorizon: [0.05, 0.07, 0.15], skyZenith: [0.01, 0.015, 0.05], fogTint: [0.14, 0.16, 0.30], fogMul: 1.35, exposure: 0.20 },
     misty: { sunDir: [0.40, 0.45, 0.72], skyHorizon: [0.80, 0.82, 0.84], skyZenith: [0.55, 0.58, 0.63], fogTint: [0.95, 0.97, 1.00], fogMul: 2.0,  exposure: 0.85 },
   };
@@ -38,14 +36,7 @@ export const RENDER = {
     // warm golden-hour light for a fall-foliage river
     autumn:     { sunDir: [0.50, 0.42, 0.65], fogColor: [0.85, 0.72, 0.58], fogMul: 1.0 },
   };
-  
-  // Per biome:
-  //   props      role → mesh name, or an array to pick from at random
-  //   mix        role weights per ground type (steep slope / river bank / open ground); weights need
-  //              not sum to 1, the remainder is "place nothing". Leaving a role out of every table
-  //              (not just giving it a low weight) is how glacier/volcanic never roll vegetation.
-  //   vegTint    per-role RGB multiplier
-  //   vegDensity per-role multiplier on VEG.caps
+
   const DEFAULT_PROPS = { tree: 'tree', bush: 'bush', rock: 'rock', grass: 'grass', boulder: 'boulder' };
   const NEUTRAL_TINT = { tree: [1, 1, 1], bush: [1, 1, 1], rock: [1, 1, 1], grass: [1, 1, 1], boulder: [1, 1, 1] };
   

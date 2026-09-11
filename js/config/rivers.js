@@ -131,7 +131,7 @@ export const RIVERS = [
   }),
   river('medium', {
     name: 'Silver Falls',
-    slope: 0.0014, manning: 0.032, depth: 1.2, len: 200, seed: 91, pack: 'mediumPack',
+    slope: 0.0014, manning: 0.032, depth: 1.2, len: 200, seed: 91, pack: 'mediumPack', art: 'img/Silver.png',
     halfW: 9, widthVar: 0.12, meander: [[6, 240]], constrictions: 0, valleyH: 26, valleyScale: 55,
     rocks: 0, emergent: 0.2,
     //ledges: [[65, 0.4], [82, 0.5]],
