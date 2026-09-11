@@ -36,8 +36,13 @@ const KEY_ACTIONS = {
   KeyP: togglePause,
   F1: e => { toggleDbg(); e.preventDefault(); },
   KeyF: () => { if (S.gameState === 'run') endRun('finished'); },
-  Escape: () => {
-    if (isOpen('charsheet')) hideCharSheet();
+  Escape: e => {
+    // stopImmediatePropagation: exitTestRun() flips gameState back to 'editor', and editor.js has
+    // its own window-level Escape handler right behind this one — without this it would see that
+    // new gameState on the very same keypress and immediately call closeEditor() → showMenu(),
+    // undoing the return-to-editor it just did
+    if (S.testExit) { e.stopImmediatePropagation(); S.testExit(); }
+    else if (isOpen('charsheet')) hideCharSheet();
     else if (isOpen('store')) hideStore();
     else if (isOpen('howto')) hideHowTo();
     else if (!isOpen('lvl')) showMenu();
@@ -125,6 +130,8 @@ function frame(now) {
     if (S.river) renderFrame(dtReal, editorUpdate(dtReal));
     return;
   }
+  // editor test-run setup (editor.js): mid-transition, nothing to draw until it lands on 'run'
+  if (S.gameState === 'testWarmup') return;
   if (!S.river || S.gameState === 'menu' || S.warmingUp || S.paused) return;
   stepPhysics(dtReal);
   if (!S.river) return;   // permadeath tore the run down mid-tick: leave the last frame on screen

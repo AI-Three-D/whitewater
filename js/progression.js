@@ -39,7 +39,12 @@ export function loadProfile() {
   } catch (_) { /* corrupt save → ignore */ }
   return null;
 }
-export function saveProfile(p) { localStorage.setItem(KEY, JSON.stringify(p)); }
+// held while the level editor's test run uses a synthetic, throwaway profile (editor.js) — every
+// write in this file funnels through saveProfile, so this one flag keeps a test run from ever
+// clobbering the player's real save, no matter how deep the call (useItem, awardRun, applyInjury, …)
+let saveSuspended = false;
+export const suspendSave = v => { saveSuspended = v; };
+export function saveProfile(p) { if (!saveSuspended) localStorage.setItem(KEY, JSON.stringify(p)); }
 export function clearProfile() { localStorage.removeItem(KEY); }
 
 export function newProfile(charId) {

@@ -240,17 +240,29 @@ body.mobile #dbg{top:calc(56px + env(safe-area-inset-top))}   /* clear the mbtn 
    #store>:last-child,#charsheet>:last-child,#lvl>:last-child,#howto>:last-child{margin-bottom:auto}
 
    /* ---------- level editor (debug) ---------- */
-#editor{position:fixed;left:0;right:0;top:0;display:none;z-index:6;pointer-events:none;font-size:13px;text-shadow:0 1px 2px #000}
-#editor .ed-bar{pointer-events:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;
+/* a flex column so the header/alert/body stack in normal flow — nothing here uses a hardcoded
+   pixel offset, so an extra wrapped toolbar row (more buttons than fit on one line) or the alert
+   banner never gets hidden behind the side panel the way a fixed "top:48px" would */
+#editor{position:fixed;inset:0;display:none;flex-direction:column;z-index:6;pointer-events:none;font-size:13px;text-shadow:0 1px 2px #000}
+#editor .ed-bar{pointer-events:auto;flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;
   background:rgba(5,15,25,.8);border-bottom:1px solid rgba(127,232,201,.35)}
 #editor button{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:7px;padding:5px 12px;cursor:pointer;font-size:13px}
 #editor button:hover{background:rgba(255,255,255,.28)}
 #editor button.on{background:#7fe8c9;color:#06201a;border-color:#7fe8c9;font-weight:700}
-#editor input{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:5px 8px;font-size:14px;width:210px}
+#editor input{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:5px 8px;font-size:14px;width:210px;min-width:0}
 #edStatus{color:#9bc;margin-left:auto;max-width:45vw}
 #edStatus.err{color:#ff9a80;white-space:pre-wrap}
-#editor .ed-info{position:fixed;left:12px;bottom:10px;font:12px/1.5 monospace;white-space:pre;color:#dfe}
+#editor .ed-alert{pointer-events:auto;flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:8px 14px;font-size:13px;
+  background:rgba(120,20,10,.94);border-bottom:1px solid rgba(255,154,128,.5);color:#ffd9cc}
+#editor .ed-alert.warn{background:rgba(110,80,10,.94);border-bottom-color:rgba(255,224,138,.5);color:#ffe9b8}
+#editor .ed-alert span{flex:1 1 auto;white-space:pre-wrap}
+#editor .ed-alert button{flex:0 0 auto}
+/* the rest of the column: the side panel (auto height, scrolls) beside the click-through 3D view */
+#editor .ed-body{flex:1 1 auto;min-height:0;display:flex;position:relative}
+#editor .ed-info{position:fixed;left:314px;bottom:10px;font:12px/1.5 monospace;white-space:pre;color:#dfe}
 #editor .ed-help{position:fixed;right:12px;bottom:22px;text-align:right;font-size:12px;color:#cde;line-height:1.6}
+#editor.panelHidden .ed-panel{display:none}
+#editor.panelHidden .ed-info{left:12px}
 body.editing canvas{cursor:crosshair}
 body.editing #hud,body.editing #gauge,body.editing #gl,body.editing #stam,body.editing #loot,
 body.editing #clock,body.editing #dbg{display:none!important}
@@ -267,7 +279,7 @@ body.editing #clock,body.editing #dbg{display:none!important}
 .riv select option{color:#000}
 /* level editor: side panel + mode buttons + overlay-adjacent chrome */
 #editor .ed-modes{display:flex;gap:4px;margin:0 4px}
-#editor .ed-panel{position:fixed;left:0;top:48px;bottom:0;width:302px;overflow-y:auto;pointer-events:auto;
+#editor .ed-panel{flex:0 0 302px;max-width:80vw;overflow-y:auto;pointer-events:auto;
   background:rgba(5,15,25,.84);border-right:1px solid rgba(127,232,201,.3);padding:8px 8px 40px;box-sizing:border-box;scrollbar-width:thin}
 .ed-panel details.sec{border:1px solid rgba(255,255,255,.15);border-radius:8px;margin:0 0 8px;background:rgba(255,255,255,.04);overflow:hidden}
 .ed-panel summary{cursor:pointer;padding:6px 10px;font-weight:600;font-size:13px;color:#9fe;user-select:none;list-style:none}
@@ -292,4 +304,3 @@ body.editing #clock,body.editing #dbg{display:none!important}
 .ed-panel .featparams .hint{padding:2px 10px;font-size:11px;color:#9bc}
 .ed-panel .featparams .del{margin:4px 10px;border-color:rgba(255,120,90,.7);color:#ffb3a0}
 .ed-panel .note{padding:2px 10px 4px;font-size:11px;color:#9bc}
-#editor .ed-info{left:314px}   /* clear the panel */

@@ -5,7 +5,8 @@ import { ownsUpgrade } from './progression.js';
 import { S } from './state.js';
 import { gyro, isMobile } from './platform.js';
 import { input, pad, nextPadSide } from './controls.js';
-import { terrainH, terrainN, waterAt } from './sampling.js';
+import { terrainH, terrainN, waterAt, rowOf } from './sampling.js';
+import { nearestChan } from './river.js';
 import { W, L, dx } from './quality.js';
 
 const MAX_SPEED = 15;          // m/s hard cap on the boat
@@ -49,11 +50,22 @@ export const kayak = {
   stamina: STAMINA.max, tired: false,
   blade: [0, 0, 0], bladePrev: [0, 0, 0], bladeVel: [0, 0, 0],
 
-  reset() {
+  // spawn: optional {x, z} to place the boat anywhere instead of the put-in (level editor test runs)
+  reset(spawn) {
     const river = S.river;
-    const j = 30, z = (j + 0.5) * dx, row = river.rows[j][0];
+    let x, z, eta;
+    if (spawn) {
+      z = clamp(spawn.z, 1, L * dx - 1);
+      x = clamp(spawn.x, 1, W * dx - 1);
+      eta = nearestChan(river.rows[rowOf(z)], x).eta;
+    } else {
+      const j = 30, row = river.rows[30][0];
+      z = (j + 0.5) * dx;
+      x = row.c;
+      eta = row.eta;
+    }
     const dcdz = (river.centerAt(z + 1) - river.centerAt(z - 1)) / 2;
-    this.p = [row.c, row.eta + 0.06, z];
+    this.p = [x, eta + 0.06, z];
     this.q = qAxisAngle([0, 1, 0], Math.atan2(dcdz, 1));
     this.v = v3.scale(qRotate(this.q, [0, 0, 1]), 1.0);
     this.wl = [0, 0, 0];

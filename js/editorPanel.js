@@ -1,12 +1,12 @@
 // The level editor's side panel: collapsible sections of sliders/selects/toggles built from the
 // custom river's config, plus the feature placement buttons and the selected feature's parameters.
 // Pure DOM; all effects go through ctx.api (editor.js) so changes save and rebuild uniformly.
-import { BIOMES, TIME_OF_DAY, TIERS, COLLECTIBLES } from './config/index.js';
+import { BIOMES, TIME_OF_DAY, TIERS, COLLECTIBLES, CRAFTS } from './config/index.js';
 import { clamp } from './math.js';
 import { L, dx } from './quality.js';
 import { FEATURES, FEATURE_ORDER, sld, sel, chk } from './editorFeatures.js';
 
-const panelOpen = new Set(['river', 'channel', 'features']);   // survives re-renders
+const panelOpen = new Set(['river', 'channel', 'features', 'test']);   // survives re-renders
 
 const div = (cls, html) => {
   const d = document.createElement('div');
@@ -78,6 +78,7 @@ const buildCtl = (spec, onChange) =>
 function section(id, title, children) {
   const d = document.createElement('details');
   d.className = 'sec';
+  d.dataset.sec = id;
   d.open = panelOpen.has(id);
   d.addEventListener('toggle', () => { if (d.open) panelOpen.add(id); else panelOpen.delete(id); });
   const s = document.createElement('summary');
@@ -146,6 +147,52 @@ function meanderRows(cfg, ctx) {
   if (cfg.meander.length < 4) {
     rows.push(btn('＋ add component', () => { cfg.meander.push([8, 60 + 60 * cfg.meander.length]); ctx.api.change({ panel: true }); }, 'addbtn'));
   }
+  return rows;
+}
+// ---------- bridge pillar/pylon columns: a count (auto-spread) or a hand-edited array ----------
+const COLUMN_FIELD_SPECS = {
+  along: { label: 'along span', min: -0.2, max: 1.2, step: 0.01, fmt: v => v.toFixed(2) },
+  across: { label: 'across (± half-width)', min: -1.5, max: 1.5, step: 0.02, fmt: v => v.toFixed(2) },
+  radius: { label: 'radius (m)', min: 0.2, max: 3, step: 0.05, fmt: v => v.toFixed(2) },
+  sizeAlong: { label: 'size along (m)', min: 0.2, max: 6, step: 0.1, fmt: v => v.toFixed(1) },
+  sizeAcross: { label: 'size across (m)', min: 0.2, max: 8, step: 0.1, fmt: v => v.toFixed(1) },
+  yaw: { label: 'yaw (°)', min: -90, max: 90, step: 1, fmt: v => v.toFixed(0) },
+};
+// converts an even auto-spread count into the same positions generateRiver() would've used
+// (river.js), so switching to individual editing doesn't visually jump
+const spreadColumns = (n, template) => Array.from({ length: n }, (_, k) => ({ ...template, along: +((k + 1) / (n + 1)).toFixed(3) }));
+function columnRows(it, colSpec, ctx) {
+  const { key, label, max, template, fields } = colSpec, ch = () => ctx.api.change();
+  const rows = [];
+  if (!Array.isArray(it[key])) {
+    rows.push(div('note', `${label}s are auto-spread evenly across the span (may be trimmed if it's too narrow)`));
+    rows.push(buildCtl(sld(`${label}s`, () => it[key] ?? 0, v => { it[key] = v; }, 0, max, 1), ch));
+    rows.push(btn(`✎ place each ${label} individually`, () => {
+      it[key] = spreadColumns(Math.max(1, Math.round(it[key] ?? 1)), template);
+      ctx.api.change({ panel: true });
+    }, 'addbtn'));
+    return rows;
+  }
+  const cols = it[key];
+  rows.push(div('note', `${cols.length} ${label}${cols.length === 1 ? '' : 's'}, placed individually`));
+  cols.forEach((col, i) => {
+    const head = div('ctl mhead');
+    head.appendChild(div('lab', `${label} ${i + 1}`));
+    head.appendChild(btn('✕', () => {
+      cols.splice(i, 1);
+      if (!cols.length) it[key] = 0;
+      ctx.api.change({ panel: true });
+    }));
+    rows.push(head);
+    for (const f of fields) {
+      const fs = COLUMN_FIELD_SPECS[f];
+      rows.push(buildCtl(sld(fs.label, () => col[f] ?? template[f] ?? 0, v => { col[f] = v; }, fs.min, fs.max, fs.step, fs.fmt), ch));
+    }
+  });
+  if (cols.length < max) {
+    rows.push(btn(`＋ add ${label}`, () => { cols.push({ ...template, along: +((cols.length + 1) / (cols.length + 2)).toFixed(3) }); ctx.api.change({ panel: true }); }, 'addbtn'));
+  }
+  rows.push(btn('↺ back to a simple count', () => { it[key] = cols.length; ctx.api.change({ panel: true }); }));
   return rows;
 }
 function rockRows(cfg, ch) {
@@ -233,6 +280,7 @@ function featureRows(cfg, ctx) {
       if (seld) {
         const box = div('featparams');
         for (const spec of F.params(it)) box.appendChild(buildCtl(spec, () => ctx.api.change()));
+        if (F.columns) for (const row of columnRows(it, F.columns, ctx)) box.appendChild(row);
         box.appendChild(div('hint', 'drag its marker on the river to move it' + (type === 'vortex' ? ' (moves in x and z)' : '')));
         box.appendChild(btn('🗑 Delete (Del)', ctx.api.del, 'del'));
         rows.push(box);
@@ -242,9 +290,23 @@ function featureRows(cfg, ctx) {
   return rows;
 }
 
+// test-run settings live on ctx.test (editor.js's ed.test) — session-only prefs, not part of the
+// river config, so changes here don't save/rebuild; they just take effect on the next test run
+function testRunRows(test) {
+  const noop = () => {};
+  return [
+    div('note', 'pick a boat and traits, then switch to 🛶 Test mode and click the river to spawn it there and start a real run — full inventory every time, and none of this touches your save.'),
+    buildCtl(sel('boat', () => test.craft, v => { test.craft = v; }, Object.keys(CRAFTS)), noop),
+    buildCtl(sld('skill', () => test.skill, v => { test.skill = v; }, 0, 10, 1), noop),
+    buildCtl(sld('stamina', () => test.stamina, v => { test.stamina = v; }, 0, 10, 1), noop),
+    buildCtl(chk('🛡 god mode (no capsizing)', () => test.god, v => { test.god = v; }), noop),
+  ];
+}
 export function renderPanel(host, ctx) {
   const { cfg } = ctx, ch = () => ctx.api.change();
   host.innerHTML = '';
+  // first and always open — it's how you play what's below, not part of what's being built
+  host.appendChild(section('test', '🛶 Test run', testRunRows(ctx.test)));
   host.appendChild(section('river', '🏞 River', riverRows(cfg, ctx)));
   host.appendChild(section('hydro', '🌊 Hydraulics', hydroRows(cfg, ch)));
   host.appendChild(section('channel', '↔ Channel & valley', channelRows(cfg, ctx)));

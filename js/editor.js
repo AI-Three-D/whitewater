@@ -2,14 +2,14 @@
 // controls (editorPanel.js), drag gestures for width/meander, click-to-place feature markers
 // (editorFeatures.js) and live overlay gizmos (editorOverlay.js). Edits save (debounced) and
 // trigger a debounced rebuild, so in pause mode the static river follows changes near real-time.
-import { PARTS } from './config/index.js';
+import { PARTS, PUTIN, CRAFTS, ITEMS } from './config/index.js';
 import { v3, clamp, mat4Perspective, mat4LookAt, mat4Mul, mat4Invert } from './math.js';
 import { validateRiverConfig, channelProfile, nearestChan } from './river.js';
-import { S, TIME_SCALE } from './state.js';
+import { S, TIME_SCALE, resetRunCounters } from './state.js';
 import { $ } from './platform.js';
 import { gpu } from './gpu.js';
 import { band, terrainH, rowOf } from './sampling.js';
-import { kayak } from './kayak.js';
+import { kayak, craftKayakParams } from './kayak.js';
 import { cam, writeCam } from './render.js';
 import { sparks } from './effects.js';
 import { MeshBuilder, addSphere, addCylinder, addRingTube } from './meshes.js';
@@ -18,6 +18,8 @@ import { placeObstacles, updateObstacles, writeObstacleInstances } from './obsta
 import { placeLandslides } from './landslides.js';
 import { loadRiver, uploadInitialWater } from './run.js';
 import { showMenu } from './ui.js';
+import { craftOf, newProfile, suspendSave } from './progression.js';
+import { runWarmup } from './sim.js';
 import { getCustom, saveCustom, customRiverR, checkCustomR, exportJson, downloadJson } from './customRivers.js';
 import { FEATURES, FEATURE_ORDER } from './editorFeatures.js';
 import { renderPanel } from './editorPanel.js';
@@ -25,20 +27,27 @@ import { setOverlayMesh, clearOverlay } from './editorOverlay.js';
 import { W, L, dx } from './quality.js';
 
 const DBG_VIEWS = ['normal', 'speed', 'foam', 'turbulence k', 'Froude'];
-const MODES = ['view', 'width', 'meander', 'features'];
-const MODE_LABEL = { view: '🎥 View', width: '↔ Width', meander: '〰 Meander', features: '📍 Features' };
+const MODES = ['view', 'width', 'meander', 'features', 'test'];
+const MODE_LABEL = { view: '🎥 View', width: '↔ Width', meander: '〰 Meander', features: '📍 Features', test: '🛶 Test' };
 const MODE_HELP = {
   view: 'drag — look · W A S D — move · Q / E — down / up · Shift — fast · wheel — fly speed',
   width: 'left-drag on the river: ← → half width · ↑ ↓ width variation · right-drag — look',
   meander: 'left-drag: ← → amplitude · ↑ ↓ wavelength of the selected component · right-drag — look',
   features: 'click — select / place armed feature · drag marker — move · Del — delete · right-drag — look',
+  test: 'click the river to spawn the chosen boat there and start a real run · right-drag — look',
 };
 const FLY = { look: 0.005, keyTurn: 1.6, boost: 4, minSpeed: 2, maxSpeed: 250, minClear: 0.4 };
 const FLY_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight',
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
-const MODE_KEYS = { Digit1: 'view', Digit2: 'width', Digit3: 'meander', Digit4: 'features' };
+const MODE_KEYS = { Digit1: 'view', Digit2: 'width', Digit3: 'meander', Digit4: 'features', Digit5: 'test' };
 
-const ed = { entry: null, playing: false, infoT: 0, mode: 'view', armed: null, sel: null, meanderSel: 0, profile: null, drag: null };
+const ed = {
+  entry: null, playing: false, infoT: 0, mode: 'view', armed: null, sel: null, meanderSel: 0, profile: null, drag: null, alert: null,
+  panelHidden: false,
+  // test-run panel settings (session-only — not part of the river config, never saved with it)
+  test: { craft: 'classic', skill: 5, stamina: 5, god: false },
+  testSpawn: null, savedProfile: null,
+};
 const keys = new Set();
 let rebuildTimer = 0, saveTimer = 0;
 const isOpenEd = () => S.gameState === 'editor' && !!ed.entry;
@@ -91,6 +100,35 @@ function setStatus(text, err = false) {
   s.textContent = text;
   s.classList.toggle('err', err);
 }
+// a banner under the toolbar for a broken/degraded build — the corner status text is too easy to
+// miss while dragging, and a failed rebuild otherwise just freezes on the last good frame in silence
+const BRIDGE_ARRAY_TYPE = { landBridges: 'landBridge', builtBridges: 'builtBridge' };
+const locateFromMessage = msg => {
+  const m = /(\w+)\[(\d+)\]/.exec(msg), type = m && BRIDGE_ARRAY_TYPE[m[1]];
+  return type ? { type, i: +m[2] } : null;
+};
+function renderAlert() {
+  const el = $('edAlert');
+  if (!el) return;
+  if (!ed.alert) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const { text, warn, locate } = ed.alert;
+  el.className = 'ed-alert' + (warn ? ' warn' : '');
+  el.innerHTML = `<span>${warn ? '⚠' : '🛑'} ${text.replace(/[&<]/g, c => (c === '&' ? '&amp;' : '&lt;'))}</span>` +
+    (locate ? '<button id="edLocate">🔍 show me</button>' : '');
+  el.style.display = 'flex';
+  if (locate) {
+    $('edLocate').onclick = () => {
+      ed.sel = locate;
+      setMode('features');
+      refreshOverlayMesh();
+      refreshPanel();
+    };
+  }
+}
+function setAlert(text, opts = {}) {
+  ed.alert = text ? { text, warn: !!opts.warn, locate: opts.locate || null } : null;
+  renderAlert();
+}
 function refreshProfile() {
   try { ed.profile = channelProfile(customRiverR(ed.entry)); }
   catch (_) { ed.profile = null; }   // mid-edit nonsense → no overlay until it's valid again
@@ -134,7 +172,9 @@ function rebuild(resetCam) {
     loadRiver(R);
   } catch (e) {
     if (S.river !== prev) S.river = null;   // half-loaded — don't draw a mismatched scene
-    setStatus('⚠ ' + (e.message || String(e)), true);
+    const msg = e.message || String(e);
+    setStatus('⚠ ' + msg, true);
+    setAlert(msg, { locate: locateFromMessage(msg) });
     return false;
   }
   kayak.reset();                 // obstacles/landslides are seeded relative to the boat at the put-in
@@ -144,12 +184,83 @@ function rebuild(resetCam) {
   if (resetCam || !prev) setView(ed.entry.view);
   refreshProfile();
   refreshOverlayMesh();
-  setStatus(`built in ${(performance.now() - t0).toFixed(0)} ms`);
+  const warnings = S.river.warnings;
+  if (warnings && warnings.length) {
+    setStatus(`built in ${(performance.now() - t0).toFixed(0)} ms · ⚠ ${warnings[0]}`);
+    setAlert(warnings.join('\n'), { warn: true });
+  } else {
+    setStatus(`built in ${(performance.now() - t0).toFixed(0)} ms`);
+    setAlert(null);
+  }
   return true;
 }
 export function scheduleRebuild(resetCam = false) {
   setStatus('Building river…');
   setTimeout(() => rebuild(resetCam), 30);
+}
+
+// ---------- test run: a real, physics-driven run from any point, without touching the save ----------
+// a synthetic profile, full inventory every time — starts fresh from the character's own base
+// traits, then applies the panel's skill/stamina/craft sliders on top
+function testProfile() {
+  const p = newProfile(S.profile.charId);
+  p.skill = ed.test.skill;
+  p.stamina = ed.test.stamina;
+  p.crafts = Object.keys(CRAFTS);   // every boat unlocked for testing, regardless of what's owned
+  p.craft = ed.test.craft;
+  p.inventory = Object.fromEntries(Object.keys(ITEMS).map(id => [id, ITEMS[id].maxStack]));
+  return p;
+}
+async function startTestRun(pt) {
+  if (!S.river || !ed.entry) return;
+  clearTimeout(rebuildTimer);
+  clearTimeout(saveTimer);
+  ed.testSpawn = pt;
+  ed.savedProfile = S.profile;
+  suspendSave(true);   // the synthetic profile below must never reach the real save slot
+  S.profile = testProfile();
+  S.debugNoCapsize = ed.test.god;
+  S.runCraft = craftOf(S.profile);
+  S.effK = craftKayakParams(S.runCraft, S.profile);
+  resetRunCounters();
+  S.gameState = 'testWarmup';   // main.js draws nothing for this state — same idea as a real run's warmup
+  S.testExit = exitTestRun;
+  S.testRetry = () => startTestRun(ed.testSpawn);
+  S.onRunOver = handleTestRunOver;
+  document.body.classList.remove('editing');
+  document.body.classList.add('inrun');
+  $('stam').style.display = 'block';
+  $('loot').style.display = 'flex';
+  $('editor').style.display = 'none';
+  kayak.reset(pt);
+  cam.reset();
+  resetWorld();               // obstacles/landslides re-seed relative to the new spawn
+  await runWarmup();
+  if (S.gameState !== 'testWarmup') return;   // the tester backed out (Esc etc.) while this was settling
+  S.simTime = 0;
+  S.runTime = 0;
+  S.paused = false;
+  S.gameState = 'run';
+}
+function handleTestRunOver() {
+  const btnMenu = $('btnMenu'), btnRetry = $('btnRetry');
+  if (btnMenu) { btnMenu.textContent = '← Back to editor'; btnMenu.onclick = exitTestRun; }
+  if (btnRetry) { btnRetry.textContent = '↻ Retry test'; btnRetry.onclick = () => { $('msg').style.display = 'none'; startTestRun(ed.testSpawn); }; }
+}
+function exitTestRun() {
+  suspendSave(false);
+  S.profile = ed.savedProfile;
+  ed.savedProfile = null;
+  S.testExit = null;
+  S.testRetry = null;
+  S.onRunOver = null;
+  S.paused = false;
+  $('msg').style.display = 'none';
+  document.body.classList.remove('inrun');
+  document.body.classList.add('editing');
+  $('editor').style.display = 'flex';
+  S.gameState = 'editor';
+  rebuild(false);   // the test run's water/obstacles were seeded around the spawn point, not the fly camera
 }
 
 // ---------- picking: mouse → a point on the river surface ----------
@@ -210,10 +321,19 @@ function markerAt(pt) {
   }
   return best;
 }
-const featureZMax = () => ((ed.profile ? ed.profile.finishZ : L * dx - 25) - 12);
+// bridges alone must clear validateRiverConfig's placement() window (river.js): z in
+// [PUTIN + 25, finishZ - 10], kept 1 m inside that on both ends against rounding. Every other
+// feature type just needs to stay clear of the put-in pool — validateRiverConfig imposes no
+// z bound on them at all, so the generic floor/ceiling here is a courtesy, not a hard limit.
+const BRIDGE_FEATURES = new Set(['landBridge', 'builtBridge']);
+function featureZRange(type) {
+  const zMax = ed.profile ? ed.profile.finishZ : L * dx - 25;
+  return BRIDGE_FEATURES.has(type) ? [PUTIN + 26, Math.max(PUTIN + 27, zMax - 11)] : [40, Math.max(41, zMax - 12)];
+}
 function placeFeature(type, pt) {
   const F = FEATURES[type], cfg = ed.entry.config;
-  const z = clamp(pt.z, 40, Math.max(41, featureZMax()));
+  const [zLo, zHi] = featureZRange(type);
+  const z = clamp(pt.z, zLo, zHi);
   F.storage.insert(cfg, F.make(z, pt));
   ed.sel = { type, i: F.storage.items(cfg).length - 1 };
   ed.armed = null;
@@ -285,6 +405,10 @@ function setMode(m) {
     if (m !== 'features') ed.armed = null;
     refreshOverlayMesh();
     refreshPanel();
+    if (m === 'test') {
+      if (ed.panelHidden) togglePanel();   // the boat/skill/stamina controls live in the panel
+      $('edPanel')?.querySelector('[data-sec="test"]')?.scrollIntoView({ block: 'start' });
+    }
   }
   updateModeButtons();
 }
@@ -292,7 +416,7 @@ function refreshPanel() {
   const host = $('edPanel');
   if (!host || !ed.entry) return;
   renderPanel(host, {
-    cfg: ed.entry.config, mode: ed.mode, sel: ed.sel, armed: ed.armed, meanderSel: ed.meanderSel,
+    cfg: ed.entry.config, mode: ed.mode, sel: ed.sel, armed: ed.armed, meanderSel: ed.meanderSel, test: ed.test,
     api: {
       change: apiChange,
       arm: type => {
@@ -339,6 +463,12 @@ function cycleView() {
   const b = $('edView');
   if (b) b.textContent = `👁 ${DBG_VIEWS[S.dbgMode]}`;
 }
+function togglePanel() {
+  ed.panelHidden = !ed.panelHidden;
+  $('editor').classList.toggle('panelHidden', ed.panelHidden);
+  const b = $('edPanelToggle');
+  if (b) b.classList.toggle('on', ed.panelHidden);
+}
 function copyJson() {
   if (!navigator.clipboard) return setStatus('clipboard not available — use Export', true);
   navigator.clipboard.writeText(exportJson(ed.entry))
@@ -349,6 +479,7 @@ function renderToolbar() {
   const el = $('editor');
   el.innerHTML = `<div class="ed-bar">
       <button id="edBack" title="save and return to the river menu (Esc)">← Menu</button>
+      <button id="edPanelToggle" title="show/hide the side panel (Tab)">☰</button>
       <input id="edName" maxlength="60" spellcheck="false" title="river name">
       <span class="ed-modes">${MODES.map(m =>
         `<button data-mode="${m}" title="${MODE_HELP[m]} (${MODES.indexOf(m) + 1})">${MODE_LABEL[m]}</button>`).join('')}</span>
@@ -359,10 +490,13 @@ function renderToolbar() {
       <button id="edCopy" title="copy the config JSON to the clipboard">📋 Copy JSON</button>
       <span id="edStatus"></span>
     </div>
-    <div class="ed-panel" id="edPanel"></div>
+    <div class="ed-alert" id="edAlert" style="display:none"></div>
+    <div class="ed-body">
+      <div class="ed-panel" id="edPanel"></div>
+    </div>
     <div class="ed-info" id="edInfo"></div>
     <div class="ed-help"><span id="edModeHelp">${MODE_HELP[ed.mode]}</span><br>
-      1–4 — modes · P — play / pause · R — reset water · F1 — debug view · Esc — menu</div>`;
+      1–5 — modes · P — play / pause · R — reset water · F1 — debug view · Tab — panel · Esc — menu</div>`;
   const name = $('edName');
   name.value = ed.entry.config.name;
   name.onchange = () => {
@@ -374,14 +508,18 @@ function renderToolbar() {
     setStatus('renamed · saved');
   };
   $('edBack').onclick = closeEditor;
+  $('edPanelToggle').onclick = togglePanel;
   $('edPlay').onclick = togglePlay;
   $('edReset').onclick = resetWater;
   $('edView').onclick = cycleView;
   $('edExport').onclick = () => { downloadJson(ed.entry); setStatus('exported'); };
   $('edCopy').onclick = copyJson;
   for (const b of el.querySelectorAll('.ed-modes button')) b.onclick = () => setMode(b.dataset.mode);
+  el.classList.toggle('panelHidden', ed.panelHidden);
+  $('edPanelToggle').classList.toggle('on', ed.panelHidden);
   renderPlayBtn();
   updateModeButtons();
+  renderAlert();
 }
 function updateInfo(dt) {
   ed.infoT -= dt;
@@ -401,7 +539,7 @@ export function openEditor(id) {
   if (S.warmingUp) return;
   const entry = getCustom(id);
   if (!entry) return;
-  Object.assign(ed, { entry, playing: false, infoT: 0, mode: 'view', armed: null, sel: null, meanderSel: 0, drag: null });
+  Object.assign(ed, { entry, playing: false, infoT: 0, mode: 'view', armed: null, sel: null, meanderSel: 0, drag: null, alert: null, panelHidden: false });
   keys.clear();
   S.gameState = 'editor';
   S.paused = false;
@@ -414,7 +552,7 @@ export function openEditor(id) {
   refreshProfile();
   renderToolbar();
   refreshPanel();
-  $('editor').style.display = 'block';
+  $('editor').style.display = 'flex';
   S.river = null;   // never show the previous river under this one's toolbar
   clearOverlay();
   scheduleRebuild(true);
@@ -470,6 +608,7 @@ function bindKeys() {
     else if (e.code === 'KeyR') resetWater();
     else if (e.code === 'Delete' || e.code === 'Backspace') deleteSelected();
     else if (e.code === 'F1') { cycleView(); e.preventDefault(); }
+    else if (e.code === 'Tab') { togglePanel(); e.preventDefault(); }
   });
   addEventListener('keyup', e => keys.delete(e.code));
   addEventListener('blur', () => keys.clear());
@@ -510,6 +649,9 @@ function bindPointer() {
         refreshOverlayMesh();
         refreshPanel();
       }
+    } else if (ed.mode === 'test') {
+      const pt = pickGround(e);
+      if (pt) startTestRun(pt);
     }
   });
   c.addEventListener('pointermove', e => {
@@ -539,7 +681,8 @@ function bindPointer() {
       if (!pt) return;
       const F = FEATURES[ed.sel.type], it = F.storage.items(cfg)[ed.sel.i];
       if (!it) return;
-      F.setZ(it, clamp(pt.z, 40, Math.max(41, featureZMax())), pt);
+      const [zLo, zHi] = featureZRange(ed.sel.type);
+      F.setZ(it, clamp(pt.z, zLo, zHi), pt);
       setStatus(`${F.label} → ${F.z(it).toFixed(0)} m`);
       apiChange();
     }

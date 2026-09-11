@@ -40,10 +40,10 @@ export function togglePause() {
   if (S.paused) {
     msg.style.display = 'flex';
     msg.innerHTML = `⏸️ Paused<br>
-      <div class="mbtns"><button id="btnResume">▶ Resume</button><button id="btnPauseMenu">River menu</button></div>
-      <small class="desktop-only">P — resume · Esc — river menu</small>`;
+      <div class="mbtns"><button id="btnResume">▶ Resume</button><button id="btnPauseMenu">${S.testExit ? '← Back to editor' : 'River menu'}</button></div>
+      <small class="desktop-only">P — resume · Esc — ${S.testExit ? 'back to editor' : 'river menu'}</small>`;
     $('btnResume').onclick = togglePause;
-    $('btnPauseMenu').onclick = () => { S.paused = false; showMenu(); };
+    $('btnPauseMenu').onclick = () => { S.paused = false; (S.testExit || showMenu)(); };
   } else {
     msg.style.display = 'none';
   }
@@ -70,6 +70,7 @@ export function drinkEnergy() {
 }
 
 export function retryRun() {
+  if (S.testRetry) return S.testRetry();
   if (S.river && S.gameState !== 'menu' && !S.warmingUp && !isOpen('lvl')) startRun(S.river.R);
 }
 
@@ -233,4 +234,5 @@ export function endRun(outcome) {
   msg.innerHTML = outcome === 'finished' ? winMessage() : outcome === 'timeout' ? timeoutMessage() : lossMessage();
   if ($('btnRetry')) $('btnRetry').onclick = retryRun;   // absent on a spent single-attempt river
   $('btnMenu').onclick = () => showMenu();
+  if (S.onRunOver) S.onRunOver(outcome);   // level editor: relabel/rewire the screen's buttons
 }

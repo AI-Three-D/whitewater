@@ -169,6 +169,9 @@ export function generateRiver(R) {
   const { rng, finishZ, pinchAt, pond0, pond1, pondTail, hwAt, centerAt } = channelProfile(R);
   const forks = R.forks || [], waterfalls = R.waterfalls || [], bands = R.bands || [];
   const seed = R.seed;
+  // non-fatal generation notices (e.g. a land bridge's pillar count trimmed to fit) — the level
+  // editor surfaces these; console.warn alone would go unseen there
+  const warnings = [];
   // shared by base.T and every fork branch so their elevations agree exactly where z-ranges overlap (esp. fork merges)
   const dropAt = (z, wfPool) => {
     let d = 0;
@@ -406,7 +409,11 @@ export function generateRiver(R) {
     else {
       let nP = cfg.pillars;
       while (nP > 0 && wet / (nP + 1) < 4.7) nP--;
-      if (nP < cfg.pillars) console.warn(`River "${R.name}": land bridge at z=${zb} — channel only ${wet.toFixed(1)} m wide, pillars reduced from ${cfg.pillars} to ${nP} to keep the passages open`);
+      if (nP < cfg.pillars) {
+        const msg = `land bridge at z=${zb} — channel only ${wet.toFixed(1)} m wide, pillars reduced from ${cfg.pillars} to ${nP} to keep the passages open`;
+        console.warn(`River "${R.name}": ${msg}`);
+        warnings.push(msg);
+      }
       specs = Array.from({ length: nP }, (_, k) => ({ ...LAND_BRIDGE.pillar,
         along: (k + 1) / (nP + 1) + (brng() - 0.5) * 0.45 / (nP + 1), across: (brng() - 0.5) * 0.8 }));
     }
@@ -432,7 +439,11 @@ export function generateRiver(R) {
       const A = pillars[a], Bp = pillars[c];
       const ra = Math.max(A.rx, A.rz) * A.kWater, rb = Math.max(Bp.rx, Bp.rz) * Bp.kWater;
       const d = Math.hypot(A.cx - Bp.cx, A.cz - Bp.cz);
-      if (d < ra + rb + 1.0) console.warn(`River "${R.name}": land bridge at z=${zb} — pillars ${a} and ${c} are ${d.toFixed(1)} m apart (radii ~${ra.toFixed(1)} + ${rb.toFixed(1)} m); they overlap or leave no passage`);
+      if (d < ra + rb + 1.0) {
+        const msg = `land bridge at z=${zb} — pillars ${a} and ${c} are ${d.toFixed(1)} m apart (radii ~${ra.toFixed(1)} + ${rb.toFixed(1)} m); they overlap or leave no passage`;
+        console.warn(`River "${R.name}": ${msg}`);
+        warnings.push(msg);
+      }
     }
 
 
@@ -542,5 +553,5 @@ export function generateRiver(R) {
   }
   // natural and built bridges share one descriptor interface; `built` tells them apart
   return { R, rows, b, mask, state, kArr, centerAt, inEta: rows[0][0].eta, inVelScale, Q, finishZ, seed,
-    bridges: bridges.concat(builtBridges) };
+    bridges: bridges.concat(builtBridges), warnings };
 }

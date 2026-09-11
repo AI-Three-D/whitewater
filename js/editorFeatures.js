@@ -98,6 +98,9 @@ export const FEATURES = {
     storage: arr('landBridges'),
     make: z => ({ z: rz(z), width: 7, height: 3.5, pillars: 1 }),
     z: it => it.z, setZ: (it, z) => { it.z = rz(z); },
+    // count = auto-spread columns (generateRiver may trim it if the channel's too narrow — the
+    // editor surfaces that as a build warning); array = hand-placed, edited via the panel's column list
+    columns: { key: 'pillars', label: 'pillar', max: LAND_BRIDGE.maxPillars, template: LAND_BRIDGE.pillar, fields: ['along', 'across', 'radius', 'yaw'] },
     params: it => [
       sld('width (m)', () => it.width ?? LAND_BRIDGE.width, v => { it.width = v; }, 2, 20, 0.5),
       sld('clearance (m)', () => it.height ?? LAND_BRIDGE.height, v => { it.height = v; }, 1.5, 12, 0.25),
@@ -107,8 +110,6 @@ export const FEATURES = {
       sld('roughness', () => it.roughness ?? LAND_BRIDGE.roughness, v => { it.roughness = v; }, 0, 2.5, 0.1),
       sld('wander', () => it.wander ?? LAND_BRIDGE.wander, v => { it.wander = v; }, 0, 3, 0.1),
       sld('flare', () => it.flare ?? LAND_BRIDGE.flare, v => { it.flare = v; }, 0, 2, 0.05),
-      sld('pillars', () => (Array.isArray(it.pillars) ? it.pillars.length : it.pillars ?? LAND_BRIDGE.pillars),
-        v => { it.pillars = Math.round(v); }, 0, 8, 1),
     ],
   },
   builtBridge: {
@@ -116,6 +117,7 @@ export const FEATURES = {
     storage: arr('builtBridges'),
     make: z => ({ z: rz(z), material: 'concrete', width: 7, height: 4, pylons: 2 }),
     z: it => it.z, setZ: (it, z) => { it.z = rz(z); },
+    columns: { key: 'pylons', label: 'pylon', max: BUILT_BRIDGE.maxPylons, template: BUILT_BRIDGE.pylon, fields: ['along', 'across', 'sizeAlong', 'sizeAcross', 'yaw'] },
     params: it => [
       sel('material', () => it.material ?? BUILT_BRIDGE.material, v => { it.material = v; }, Object.keys(BRIDGE_MATERIALS)),
       sld('width (m)', () => it.width ?? BUILT_BRIDGE.width, v => { it.width = v; }, 2, 20, 0.5),
@@ -127,8 +129,6 @@ export const FEATURES = {
       sld('slab (m)', () => Math.min(it.slab ?? BUILT_BRIDGE.slab, it.thickness ?? BUILT_BRIDGE.thickness),
         v => { it.slab = Math.min(v, it.thickness ?? BUILT_BRIDGE.thickness); }, 0.1, 4, 0.05),
       sld('railing (m)', () => it.rail ?? BUILT_BRIDGE.rail, v => { it.rail = v; }, 0, 2.5, 0.05),
-      sld('pylons', () => (Array.isArray(it.pylons) ? it.pylons.length : it.pylons ?? BUILT_BRIDGE.pylons),
-        v => { it.pylons = Math.round(v); }, 0, 8, 1),
       sld('shoulder (m)', () => it.shoulder ?? BUILT_BRIDGE.shoulder, v => { it.shoulder = v; }, 1, 20, 0.5),
       sld('abutment ext. (m)', () => it.abutExt ?? BUILT_BRIDGE.abutExt, v => { it.abutExt = v; }, 0, 20, 0.5),
     ],
