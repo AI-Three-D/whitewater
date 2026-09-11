@@ -9,7 +9,7 @@ import { waterAt, terrainH, terrainN, surfaceAt, rowOf } from './sampling.js';
 import { kayak } from './kayak.js';
 import { triggerLandslides, replayLandslides } from './landslides.js';
 import { W, dx } from './quality.js';
-
+import { viewWindow } from './view.js';
 const TWO_PI = 2 * Math.PI;
 
 // a landslide boulder is always exactly one of dormant / replaying / settled — never live-stepped
