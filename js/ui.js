@@ -8,6 +8,7 @@ import { S } from './state.js';
 import { $ } from './platform.js';
 import { quality, saveQuality } from './quality.js';
 import { pad } from './controls.js';
+import { loadCustomRivers, saveCustomRivers, newCustomRiver, openEditor } from './editor.js';
 
 const handlers = { startRun: null, confirmStart: null };
 export function initUi(h) {
@@ -208,6 +209,35 @@ function renderRiverList() {
     if (hiddenR) {
       row.appendChild(riverCard(hiddenR, { unlocked: S.debugUnlockAll || prof.unlockedHidden[tier.id], hidden: true }));
     }
+    rl.appendChild(makeCarousel(row));
+  }
+
+  if (S.debugUnlockAll) {
+    const h = document.createElement('div');
+    h.className = 'tier';
+    h.textContent = 'Custom rivers — level editor';
+    rl.appendChild(h);
+    const row = document.createElement('div');
+    row.className = 'rivers';
+    const customs = loadCustomRivers();
+    customs.forEach((cfg, i) => {
+      const d = document.createElement('div');
+      d.className = 'riv';
+      d.innerHTML = `<h3>${cfg.name}</h3><small>custom · gradient ${(cfg.slope * 100).toFixed(1)} % · ${cfg.len} m · ${cfg.biome || 'alpine'}</small>`;
+      d.onclick = () => openEditor(i);
+      row.appendChild(d);
+    });
+    const add = document.createElement('div');
+    add.className = 'riv';
+    add.innerHTML = '<h3>＋ New river</h3><small>create and edit a custom river</small>';
+    add.onclick = () => {
+      const name = prompt('River name', 'Custom river ' + (customs.length + 1));
+      if (!name) return;
+      customs.push(newCustomRiver(name));
+      saveCustomRivers(customs);
+      openEditor(customs.length - 1);
+    };
+    row.appendChild(add);
     rl.appendChild(makeCarousel(row));
   }
   layoutCarousels();
