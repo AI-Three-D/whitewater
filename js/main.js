@@ -18,7 +18,7 @@ import { updateObstacles, writeObstacleInstances } from './obstacles.js';
 import { hud } from './hud.js';
 import { initUi, showMenu, hideStore, hideCharSheet, showHowTo, hideHowTo, isOpen } from './ui.js';
 import { startRun, confirmStart, endRun, retryRun, eatSnack, drinkEnergy, cycleCamera, toggleDbg, toggleNoCapsize, togglePause } from './run.js';
-import { initEditor, openEditor, editorUpdate } from './editor.js';
+import { clearFrame, initEditor, openEditor, editorUpdate } from './editor.js';
 const BUILD = 'build 36';
 installErrorHandlers();
 {
