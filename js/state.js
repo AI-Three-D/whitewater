@@ -39,12 +39,10 @@ export const S = {
   drinkBuffUntil: 0,
   drinkMsgUntil: 0,
   mapFoundUntil: 0,
-  // level editor "test run" (editor.js): non-null only while a run was launched from the editor.
-  // Escape / the pause-menu's quit button / KeyR check these first so a test run returns to the
-  // editor instead of the main menu, and endRun() calls onRunOver so its win/loss screen can be
-  // relabelled — kept here rather than importing editor.js into run.js/main.js to avoid a cycle.
+
   testExit: null,
   testRetry: null,
+  testEnd: null,
   onRunOver: null,
 };
 

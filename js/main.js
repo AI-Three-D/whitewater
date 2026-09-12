@@ -51,6 +51,11 @@ const KEY_ACTIONS = {
 function bindKeys() {
   addEventListener('keydown', e => {
     if (S.gameState === 'editor') return;   // the level editor binds its own keys (editor.js)
+    if (S.gameState === 'testWarmup') {
+      if (KEYMAP[e.code] || KEY_ACTIONS[e.code] || PAD_KEYS[e.code]) e.preventDefault();
+      return;
+    }
+
     if (isMobile && PAD_KEYS[e.code]) {
       if (!e.repeat) for (const s of PAD_KEYS[e.code]) padDown(s);
       e.preventDefault();
@@ -72,7 +77,12 @@ function bindKeys() {
   });
 }
 function bindMobileButtons() {
-  $('mExit').onclick = () => { if (S.gameState !== 'menu' && !isOpen('lvl')) showMenu(); };
+  $('mExit').onclick = () => {
+    if (S.gameState === 'editor' || S.gameState === 'testWarmup') return;
+    if (S.testExit) return S.testExit();   // a test run goes back to the editor, like Esc
+    if (S.gameState !== 'menu' && !isOpen('lvl')) showMenu();
+  };
+  
   $('mCam').onclick = cycleCamera;
   $('mDbg').onclick = toggleDbg;
   $('mEat').onclick = eatSnack;
@@ -96,6 +106,14 @@ function stepPhysics(dtReal) {
     else if (S.river.R.timeLimit && S.runTime >= S.river.R.timeLimit) endRun('timeout');
   }
   physAccum -= S.frameTicks * SIM.dt;
+}
+function clearFrame() {
+  const enc = gpu.device.createCommandEncoder();
+  enc.beginRenderPass({ colorAttachments: [{
+    view: gpu.ctx.getCurrentTexture().createView(),
+    clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store',
+  }] }).end();
+  gpu.device.queue.submit([enc.finish()]);
 }
 function updateWorld(dtReal) {
   spawnRucksacks(dtReal);
@@ -128,8 +146,10 @@ function frame(now) {
   const dtReal = clamp(dtRaw, 0, 0.05);
   if (S.gameState === 'editor') {
     if (S.river) renderFrame(dtReal, editorUpdate(dtReal));
+    else clearFrame();
     return;
   }
+
   // editor test-run setup (editor.js): mid-transition, nothing to draw until it lands on 'run'
   if (S.gameState === 'testWarmup') return;
   if (!S.river || S.gameState === 'menu' || S.warmingUp || S.paused) return;

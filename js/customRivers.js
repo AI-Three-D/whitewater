@@ -1,6 +1,7 @@
 // Custom (level-editor) rivers: persisted in localStorage the same way as the save game, exported
 // as JSON for pasting into config/rivers.js later. Pure data apart from the download helper.
 import { RIVERS, RIVERS_HIDDEN, TIERS, BIOMES, TIME_OF_DAY, COLLECTIBLES, OBSTACLES, makeRiver } from './config/index.js';
+import { riverConfigIssues } from './river.js';
 
 const KEY = 'whitewater.customRivers.v1';
 
@@ -64,23 +65,63 @@ export function customRiverR(entry) {
   return { ...makeRiver(tier, fields), custom: entry.id };
 }
 
-// cheap structural checks generateRiver() doesn't do itself; bridges are checked by validateRiverConfig
+// cheap structural checks generateRiver() doesn't do itself, as { field, msg } — field names the
+// config key at fault ('obstacles.<kind>' for an obstacle kind); bridges are riverConfigIssues' job
 const REQUIRED_NUMBERS = ['slope', 'manning', 'depth', 'seed', 'halfW', 'widthVar', 'constrictions', 'valleyH', 'valleyScale', 'rocks', 'emergent'];
-export function checkCustomR(R) {
-  const errs = [];
-  if (typeof R.name !== 'string' || !R.name.trim()) errs.push('name is required');
-  if (!TIERS.some(t => t.id === R.tier)) errs.push(`tier must be one of ${TIERS.map(t => t.id).join(', ')} (got ${R.tier})`);
-  for (const k of REQUIRED_NUMBERS) if (typeof R[k] !== 'number' || !Number.isFinite(R[k])) errs.push(`${k} must be a number (got ${R[k]})`);
-  if (!Array.isArray(R.meander)) errs.push('meander must be an array of [amplitude, wavelength] pairs');
-  if (!Array.isArray(R.ledges)) errs.push('ledges must be an array of [z, drop] pairs');
-  if (R.rocks > 0 && !(Array.isArray(R.rockR) && R.rockR.length === 2)) errs.push('rockR must be [min, max] when rocks > 0');
-  if (R.biome && !BIOMES[R.biome]) errs.push(`unknown biome "${R.biome}"`);
-  if (R.timeOfDay && !TIME_OF_DAY[R.timeOfDay]) errs.push(`unknown timeOfDay "${R.timeOfDay}"`);
-  if (R.extraKind && !COLLECTIBLES[R.extraKind]) errs.push(`unknown extraKind "${R.extraKind}"`);
+export function customRiverIssues(R) {
+  const issues = [], add = (field, msg) => issues.push({ field, msg });
+  if (typeof R.name !== 'string' || !R.name.trim()) add('name', 'name is required');
+  if (!TIERS.some(t => t.id === R.tier)) add('tier', `tier must be one of ${TIERS.map(t => t.id).join(', ')} (got ${R.tier})`);
+  for (const k of REQUIRED_NUMBERS) if (typeof R[k] !== 'number' || !Number.isFinite(R[k])) add(k, `${k} must be a number (got ${R[k]})`);
+  if (!Array.isArray(R.meander)) add('meander', 'meander must be an array of [amplitude, wavelength] pairs');
+  if (!Array.isArray(R.ledges)) add('ledges', 'ledges must be an array of [z, drop] pairs');
+  if (R.rocks > 0 && !(Array.isArray(R.rockR) && R.rockR.length === 2)) add('rockR', 'rockR must be [min, max] when rocks > 0');
+  if (R.biome && !BIOMES[R.biome]) add('biome', `unknown biome "${R.biome}"`);
+  if (R.timeOfDay && !TIME_OF_DAY[R.timeOfDay]) add('timeOfDay', `unknown timeOfDay "${R.timeOfDay}"`);
+  if (R.extraKind && !COLLECTIBLES[R.extraKind]) add('extraKind', `unknown extraKind "${R.extraKind}"`);
   for (const k of Object.keys(R.obstacles || {})) {
-    if (k !== 'max' && k !== 'spawnAhead' && !OBSTACLES.kinds[k]) errs.push(`unknown obstacle kind "${k}"`);
+    if (k !== 'max' && k !== 'spawnAhead' && !OBSTACLES.kinds[k]) add(`obstacles.${k}`, `unknown obstacle kind "${k}"`);
   }
-  if (errs.length) throw new Error(`River "${R.name}":\n` + errs.join('\n'));
+  return issues;
+}
+export function checkCustomR(R) {
+  const issues = customRiverIssues(R);
+  if (issues.length) throw new Error(`River "${R.name}":\n` + issues.map(x => x.msg).join('\n'));
+}
+
+// The river the level editor can always build from entry, plus what's wrong with it. Whatever fails
+// validation is left out of the preview: a broken global field falls back to the template value, a
+// bad bridge is dropped (nothing else), floating obstacles are dropped when they clash with bridges.
+// issues: [{ msg, type, i }] — type/i name a placeable feature (editorFeatures.js) so its marker can
+// be flagged; they're null for problems that have no marker.
+const BRIDGE_TYPE = { landBridges: 'landBridge', builtBridges: 'builtBridge' };
+export function displayRiverR(entry) {
+  const config = clone(entry.config), issues = [];
+  for (const { field, msg } of customRiverIssues(customRiverR(entry))) {
+    if (field.startsWith('obstacles.')) delete config.obstacles[field.slice('obstacles.'.length)];
+    else if (field in CUSTOM_TEMPLATE) config[field] = clone(CUSTOM_TEMPLATE[field]);
+    else delete config[field];
+    issues.push({ msg: `${msg} — using a default in the preview`, type: null, i: null });
+  }
+  if (config.obstacles && !Object.keys(config.obstacles).length) delete config.obstacles;
+  const R = customRiverR({ ...entry, config });
+  const drop = { landBridges: new Set(), builtBridges: new Set() };
+  for (const x of riverConfigIssues(R)) {
+    if (x.key === 'obstacles') {
+      delete R.obstacles;
+      issues.push({ msg: `${x.msg}\n(floating obstacles are left out of the preview)`, type: null, i: null });
+    } else if (x.i == null) {
+      R[x.key] = [];
+      issues.push({ msg: x.msg, type: null, i: null });
+    } else {
+      drop[x.key].add(x.i);
+      issues.push({ msg: `${x.msg} — left out of the preview`, type: BRIDGE_TYPE[x.key], i: x.i });
+    }
+  }
+  for (const key of Object.keys(drop)) {
+    if (drop[key].size) R[key] = R[key].filter((_, i) => !drop[key].has(i));
+  }
+  return { R, issues };
 }
 
 // ---------- export ----------

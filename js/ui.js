@@ -50,6 +50,7 @@ const xpBar = prof => {
 
 // ---------- menu ----------
 export function showMenu() {
+  if (S.testEnd) S.testEnd();   // leaving a test run by any route: real profile back, saving on
   S.gameState = 'menu';
   document.body.classList.remove('inrun', 'editing');
   pad.queue.length = 0;

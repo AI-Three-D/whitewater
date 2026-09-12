@@ -39,12 +39,17 @@ export function nearestChan(chans, x) {
   }
   return best;
 }
-// validates a river's bridge config at load time (see LAND_BRIDGE / BUILT_BRIDGE in config.js)
-export function validateRiverConfig(R) {
+// Every problem with R's bridge config, as { key, i, msg }: key is 'landBridges', 'builtBridges' or
+// 'obstacles', i the array index (null when the whole array is at fault). Unlike a throw, this lets
+// the level editor leave out just the offending objects and build the rest (customRivers.js).
+export function riverConfigIssues(R) {
+  const issues = [];
   const natArr = R.landBridges ?? [], builtArr = R.builtBridges ?? [];
-  if (!Array.isArray(natArr) || !Array.isArray(builtArr)) throw new Error(`River "${R.name}": landBridges / builtBridges must be arrays`);
-  if (!natArr.length && !builtArr.length) return;
-  if (R.obstacles) throw new Error(`River "${R.name}": bridges (landBridges / builtBridges) cannot be combined with floating obstacles (R.obstacles) — drifting logs and ice would jam the passages under the bridge. Remove one of the two.`);
+  for (const [key, arr] of [['landBridges', natArr], ['builtBridges', builtArr]]) {
+    if (!Array.isArray(arr)) issues.push({ key, i: null, msg: `River "${R.name}": landBridges / builtBridges must be arrays` });
+  }
+  if (issues.length || (!natArr.length && !builtArr.length)) return issues;
+  if (R.obstacles) issues.push({ key: 'obstacles', i: null, msg: `River "${R.name}": bridges (landBridges / builtBridges) cannot be combined with floating obstacles (R.obstacles) — drifting logs and ice would jam the passages under the bridge. Remove one of the two.` });
   const Lw = GRID.L * GRID.dx, finishZ = Math.min(R.len ?? (Lw - 25), Lw - 25);
   const num = (tag, cfg, defs, key, lo, hi, nullable) => {
     const v = cfg[key] ?? defs[key];
@@ -59,68 +64,84 @@ export function validateRiverConfig(R) {
     if (R.pond && Math.abs(z - R.pond.z) < R.pond.len / 2 + 20) throw new Error(`${tag}: z=${z} is too close to the pond at ${R.pond.z} m`);
     for (const wf of R.waterfalls || []) if (Math.abs(z - wf.z) < 15) throw new Error(`${tag}: z=${z} is too close to the waterfall at ${wf.z} m`);
   };
-  const extents = [];   // [z, half-extent, label] over both kinds, for the mutual spacing check
+  const extents = [];   // [z, half-extent, label, key, index] for every bridge that passed its own checks
   natArr.forEach((cfg, k) => {
     const tag = `River "${R.name}": landBridges[${k}]`;
-    placement(tag, cfg.z);
-    const width = num(tag, cfg, LAND_BRIDGE, 'width', 1.5, 40);
-    num(tag, cfg, LAND_BRIDGE, 'widthVar', 0, 1); num(tag, cfg, LAND_BRIDGE, 'height', LAND_BRIDGE.minHeight, 30);
-    num(tag, cfg, LAND_BRIDGE, 'thickness', 0.4, 8); num(tag, cfg, LAND_BRIDGE, 'rise', 0, 5);
-    num(tag, cfg, LAND_BRIDGE, 'roughness', 0, 2.5); num(tag, cfg, LAND_BRIDGE, 'wander', 0, 3);
-    const flare = num(tag, cfg, LAND_BRIDGE, 'flare', 0, 2);
-    const pillars = cfg.pillars ?? LAND_BRIDGE.pillars;
-    if (Array.isArray(pillars)) {
-      if (pillars.length > LAND_BRIDGE.maxPillars) throw new Error(`${tag}: at most ${LAND_BRIDGE.maxPillars} pillars (got ${pillars.length})`);
-      pillars.forEach((p, i) => {
-        const ptag = `${tag}.pillars[${i}]`, d = LAND_BRIDGE.pillar;
-        num(ptag, p, d, 'along', -0.2, 1.2); num(ptag, p, d, 'across', -1.5, 1.5); num(ptag, p, d, 'radius', 0.2, 25, true);
-        num(ptag, p, d, 'sizeAlong', 0.1, 12); num(ptag, p, d, 'sizeAcross', 0.1, 12); num(ptag, p, d, 'yaw', -360, 360);
-        num(ptag, p, d, 'irregular', 0, 3); num(ptag, p, d, 'baseFlare', 0, 3); num(ptag, p, d, 'waist', 0, 0.7);
-        num(ptag, p, d, 'flare', 0, 4); num(ptag, p, d, 'flareFrom', 0, 0.98); num(ptag, p, d, 'flareCurve', 0.3, 6);
-      });
-    } else if (!Number.isInteger(pillars) || pillars < 0 || pillars > LAND_BRIDGE.maxPillars)
-      throw new Error(`${tag}: pillars must be an integer from 0 to ${LAND_BRIDGE.maxPillars}, or an array of pillar specs (got ${pillars})`);
-    extents.push([cfg.z, width / 2 * (1 + flare) + 7, `landBridges[${k}]`]);
+    try {
+      placement(tag, cfg.z);
+      const width = num(tag, cfg, LAND_BRIDGE, 'width', 1.5, 40);
+      num(tag, cfg, LAND_BRIDGE, 'widthVar', 0, 1); num(tag, cfg, LAND_BRIDGE, 'height', LAND_BRIDGE.minHeight, 30);
+      num(tag, cfg, LAND_BRIDGE, 'thickness', 0.4, 8); num(tag, cfg, LAND_BRIDGE, 'rise', 0, 5);
+      num(tag, cfg, LAND_BRIDGE, 'roughness', 0, 2.5); num(tag, cfg, LAND_BRIDGE, 'wander', 0, 3);
+      const flare = num(tag, cfg, LAND_BRIDGE, 'flare', 0, 2);
+      const pillars = cfg.pillars ?? LAND_BRIDGE.pillars;
+      if (Array.isArray(pillars)) {
+        if (pillars.length > LAND_BRIDGE.maxPillars) throw new Error(`${tag}: at most ${LAND_BRIDGE.maxPillars} pillars (got ${pillars.length})`);
+        pillars.forEach((p, i) => {
+          const ptag = `${tag}.pillars[${i}]`, d = LAND_BRIDGE.pillar;
+          num(ptag, p, d, 'along', -0.2, 1.2); num(ptag, p, d, 'across', -1.5, 1.5); num(ptag, p, d, 'radius', 0.2, 25, true);
+          num(ptag, p, d, 'sizeAlong', 0.1, 12); num(ptag, p, d, 'sizeAcross', 0.1, 12); num(ptag, p, d, 'yaw', -360, 360);
+          num(ptag, p, d, 'irregular', 0, 3); num(ptag, p, d, 'baseFlare', 0, 3); num(ptag, p, d, 'waist', 0, 0.7);
+          num(ptag, p, d, 'flare', 0, 4); num(ptag, p, d, 'flareFrom', 0, 0.98); num(ptag, p, d, 'flareCurve', 0.3, 6);
+        });
+      } else if (!Number.isInteger(pillars) || pillars < 0 || pillars > LAND_BRIDGE.maxPillars)
+        throw new Error(`${tag}: pillars must be an integer from 0 to ${LAND_BRIDGE.maxPillars}, or an array of pillar specs (got ${pillars})`);
+      extents.push([cfg.z, width / 2 * (1 + flare) + 7, `landBridges[${k}]`, 'landBridges', k]);
+    } catch (e) {
+      issues.push({ key: 'landBridges', i: k, msg: e.message });
+    }
   });
   builtArr.forEach((cfg, k) => {
     const tag = `River "${R.name}": builtBridges[${k}]`;
-    placement(tag, cfg.z);
-    const mat = cfg.material ?? BUILT_BRIDGE.material;
-    if (!BRIDGE_MATERIALS[mat]) throw new Error(`${tag}: material must be one of ${Object.keys(BRIDGE_MATERIALS).join(', ')} (got ${mat})`);
-    const col = cfg.color ?? BUILT_BRIDGE.color;
-    if (!Array.isArray(col) || col.length !== 3 || col.some(v => typeof v !== 'number' || v < 0 || v > 4))
-      throw new Error(`${tag}: color must be an [r, g, b] array of numbers in [0, 4]`);
-    const width = num(tag, cfg, BUILT_BRIDGE, 'width', 2, 40);
-    num(tag, cfg, BUILT_BRIDGE, 'height', BUILT_BRIDGE.minHeight, 40);
-    const thickness = num(tag, cfg, BUILT_BRIDGE, 'thickness', 0.2, 6);
-    const slab = num(tag, cfg, BUILT_BRIDGE, 'slab', 0.1, 6);
-    if (slab > thickness + 1e-6) throw new Error(`${tag}: slab (${slab}) cannot exceed thickness (${thickness})`);
-    num(tag, cfg, BUILT_BRIDGE, 'rail', 0, 4); num(tag, cfg, BUILT_BRIDGE, 'railThick', 0.05, 2);
-    const shoulder = num(tag, cfg, BUILT_BRIDGE, 'shoulder', 0.5, 30);
-    num(tag, cfg, BUILT_BRIDGE, 'abutExt', 0, 30);
-    const pylons = cfg.pylons ?? BUILT_BRIDGE.pylons;
-    if (Array.isArray(pylons)) {
-      if (pylons.length > BUILT_BRIDGE.maxPylons) throw new Error(`${tag}: at most ${BUILT_BRIDGE.maxPylons} pylons (got ${pylons.length})`);
-      pylons.forEach((p, i) => {
-        const ptag = `${tag}.pylons[${i}]`, d = BUILT_BRIDGE.pylon;
-        num(ptag, p, d, 'along', -0.2, 1.2); num(ptag, p, d, 'across', -1.5, 1.5);
-        num(ptag, p, d, 'sizeAlong', 0.2, 12); num(ptag, p, d, 'sizeAcross', 0.2, 20); num(ptag, p, d, 'yaw', -360, 360);
-        num(ptag, p, d, 'taper', 0, 0.6); num(ptag, p, d, 'footing', 0, 2); num(ptag, p, d, 'cap', 0, 2);
-      });
-    } else if (!Number.isInteger(pylons) || pylons < 0 || pylons > BUILT_BRIDGE.maxPylons)
-      throw new Error(`${tag}: pylons must be an integer from 0 to ${BUILT_BRIDGE.maxPylons}, or an array of pylon specs (got ${pylons})`);
-    extents.push([cfg.z, width / 2 + shoulder + 6, `builtBridges[${k}]`]);
+    try {
+      placement(tag, cfg.z);
+      const mat = cfg.material ?? BUILT_BRIDGE.material;
+      if (!BRIDGE_MATERIALS[mat]) throw new Error(`${tag}: material must be one of ${Object.keys(BRIDGE_MATERIALS).join(', ')} (got ${mat})`);
+      const col = cfg.color ?? BUILT_BRIDGE.color;
+      if (!Array.isArray(col) || col.length !== 3 || col.some(v => typeof v !== 'number' || v < 0 || v > 4))
+        throw new Error(`${tag}: color must be an [r, g, b] array of numbers in [0, 4]`);
+      const width = num(tag, cfg, BUILT_BRIDGE, 'width', 2, 40);
+      num(tag, cfg, BUILT_BRIDGE, 'height', BUILT_BRIDGE.minHeight, 40);
+      const thickness = num(tag, cfg, BUILT_BRIDGE, 'thickness', 0.2, 6);
+      const slab = num(tag, cfg, BUILT_BRIDGE, 'slab', 0.1, 6);
+      if (slab > thickness + 1e-6) throw new Error(`${tag}: slab (${slab}) cannot exceed thickness (${thickness})`);
+      num(tag, cfg, BUILT_BRIDGE, 'rail', 0, 4); num(tag, cfg, BUILT_BRIDGE, 'railThick', 0.05, 2);
+      const shoulder = num(tag, cfg, BUILT_BRIDGE, 'shoulder', 0.5, 30);
+      num(tag, cfg, BUILT_BRIDGE, 'abutExt', 0, 30);
+      const pylons = cfg.pylons ?? BUILT_BRIDGE.pylons;
+      if (Array.isArray(pylons)) {
+        if (pylons.length > BUILT_BRIDGE.maxPylons) throw new Error(`${tag}: at most ${BUILT_BRIDGE.maxPylons} pylons (got ${pylons.length})`);
+        pylons.forEach((p, i) => {
+          const ptag = `${tag}.pylons[${i}]`, d = BUILT_BRIDGE.pylon;
+          num(ptag, p, d, 'along', -0.2, 1.2); num(ptag, p, d, 'across', -1.5, 1.5);
+          num(ptag, p, d, 'sizeAlong', 0.2, 12); num(ptag, p, d, 'sizeAcross', 0.2, 20); num(ptag, p, d, 'yaw', -360, 360);
+          num(ptag, p, d, 'taper', 0, 0.6); num(ptag, p, d, 'footing', 0, 2); num(ptag, p, d, 'cap', 0, 2);
+        });
+      } else if (!Number.isInteger(pylons) || pylons < 0 || pylons > BUILT_BRIDGE.maxPylons)
+        throw new Error(`${tag}: pylons must be an integer from 0 to ${BUILT_BRIDGE.maxPylons}, or an array of pylon specs (got ${pylons})`);
+      extents.push([cfg.z, width / 2 + shoulder + 6, `builtBridges[${k}]`, 'builtBridges', k]);
+    } catch (e) {
+      issues.push({ key: 'builtBridges', i: k, msg: e.message });
+    }
   });
-  for (let a = 0; a < extents.length; a++) for (let c = a + 1; c < extents.length; c++) {
-    const need = extents[a][1] + extents[c][1];
-    if (Math.abs(extents[a][0] - extents[c][0]) < need)
-      throw new Error(`River "${R.name}": ${extents[a][2]} and ${extents[c][2]} overlap — keep their z at least ${need.toFixed(0)} m apart`);
+  // greedy, in config order: a bridge that overlaps one already kept is the one flagged, so the
+  // editor can still build the other
+  const kept = [];
+  for (const ex of extents) {
+    const hit = kept.find(o => Math.abs(o[0] - ex[0]) < o[1] + ex[1]);
+    if (!hit) { kept.push(ex); continue; }
+    issues.push({ key: ex[3], i: ex[4],
+      msg: `River "${R.name}": ${hit[2]} and ${ex[2]} overlap — keep their z at least ${(hit[1] + ex[1]).toFixed(0)} m apart` });
   }
+  return issues;
 }
-// Channel centreline / width profile for R — extracted from generateRiver so the level editor can
-// preview bank lines and the centreline for an edited config without a full rebuild. It consumes
-// the first draws of R.seed's rng stream (meander phases, constriction placement); generateRiver
-// keeps using the returned rng, so everything downstream (rock placement) stays bit-identical.
+
+export function validateRiverConfig(R) {
+  const issues = riverConfigIssues(R);
+  if (issues.length) throw new Error(issues[0].msg);
+}
+
+
 export function channelProfile(R) {
   const { W, L, dx } = GRID, Lw = L * dx, Wd = W * dx;
   const finishZ = Math.min(R.len ?? (Lw - 25), Lw - 25);
