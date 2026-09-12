@@ -90,11 +90,13 @@ function section(id, title, children) {
 
 // ---------- sections ----------
 function riverRows(cfg, ctx) {
-  const rows = [], tierRow = div('ctl btns', '<span class="lab">tier</span>');
+  const rows = [], tierRow = div('ctl', '<span class="lab">tier</span>'), seg = div('seg');
   for (const t of TIERS) {
-    tierRow.appendChild(btn(t.id, () => { cfg.tier = t.id; ctx.api.change({ panel: true }); }, cfg.tier === t.id ? 'on' : ''));
+    seg.appendChild(btn(t.id, () => { cfg.tier = t.id; ctx.api.change({ panel: true }); }, cfg.tier === t.id ? 'on' : ''));
   }
+  tierRow.appendChild(seg);
   rows.push(tierRow);
+
   const ch = () => ctx.api.change();
   rows.push(buildCtl(sel('biome', () => cfg.biome ?? 'alpine', v => { cfg.biome = v; }, Object.keys(BIOMES)), ch));
   rows.push(buildCtl(sel('time of day', () => cfg.timeOfDay ?? 'day', v => { cfg.timeOfDay = v; }, Object.keys(TIME_OF_DAY)), ch));
@@ -275,11 +277,16 @@ function featureRows(cfg, ctx) {
     F.storage.items(cfg).forEach((it, i) => {
       const seld = ctx.sel && ctx.sel.type === type && ctx.sel.i === i;
       const row = div('featrow' + (seld ? ' on' : ''), `${F.icon} ${F.label} · ${F.z(it).toFixed(0)} m`);
+      row.dataset.feat = `${type}:${i}`;   // editor.js flags it red when it fails validation
       row.onclick = () => ctx.api.select(type, i);
       rows.push(row);
       if (seld) {
         const box = div('featparams');
+        const issue = div('issue');
+        issue.dataset.feat = `${type}:${i}`;   // filled in by editor.js (markPanelRows)
+        box.appendChild(issue);
         for (const spec of F.params(it)) box.appendChild(buildCtl(spec, () => ctx.api.change()));
+        
         if (F.columns) for (const row of columnRows(it, F.columns, ctx)) box.appendChild(row);
         box.appendChild(div('hint', 'drag its marker on the river to move it' + (type === 'vortex' ? ' (moves in x and z)' : '')));
         box.appendChild(btn('🗑 Delete (Del)', ctx.api.del, 'del'));

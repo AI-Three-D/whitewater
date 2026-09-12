@@ -291,9 +291,20 @@ body.editing #clock,body.editing #dbg{display:none!important}
 .ed-panel .ctl select{flex:1;min-width:0;background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:5px;padding:2px}
 .ed-panel .ctl select option{color:#000}
 .ed-panel .ctl label{color:#cde;cursor:pointer}
-.ed-panel button{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer}
-.ed-panel button.on{background:#7fe8c9;color:#06201a;border-color:#7fe8c9;font-weight:700}
-.ed-panel button:disabled{opacity:.35;cursor:default}
+/* side-panel buttons: prefixed with #editor so they beat the toolbar's "#editor button" rule.
+   Without the id, the toolbar padding and font win everywhere in the panel */
+   #editor .ed-panel button{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer}
+   #editor .ed-panel button.on{background:#7fe8c9;color:#06201a;border-color:#7fe8c9;font-weight:700}
+   #editor .ed-panel button:disabled{opacity:.35;cursor:default}
+   #editor .ed-panel .featparams .del{margin:4px 10px;border-color:rgba(255,120,90,.7);color:#ffb3a0}
+   /* a row of choice buttons (tier): fills the space right of the label and wraps to a second line
+      instead of running past the panel edge */
+   .ed-panel .ctl .seg{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;gap:4px}
+   /* features that fail validation (editor.js markPanelRows) */
+   .ed-panel .featrow.bad{color:#ff9a80;background:rgba(255,60,40,.12)}
+   .ed-panel .featrow.bad::before{content:'⚠ '}
+   .ed-panel .featparams .issue{padding:4px 10px;font-size:11px;color:#ff9a80;white-space:pre-wrap}
+   .ed-panel .featparams .issue:empty{display:none}
 .ed-panel .addbtn{margin:4px 8px 8px}
 .ed-panel .mhead{justify-content:space-between}
 .ed-panel .featgrid{display:flex;flex-wrap:wrap;gap:5px;padding:4px 8px}
