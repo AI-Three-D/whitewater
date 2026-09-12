@@ -17,6 +17,7 @@ import { updateObstacles, writeObstacleInstances } from './obstacles.js';
 import { hud } from './hud.js';
 import { initUi, showMenu, hideStore, hideCharSheet, showHowTo, hideHowTo, isOpen } from './ui.js';
 import { startRun, confirmStart, endRun, retryRun, eatSnack, drinkEnergy, cycleCamera, toggleDbg, toggleNoCapsize, togglePause } from './run.js';
+import { editorFrame } from './editor.js';
 
 const BUILD = 'build 35';
 
@@ -123,7 +124,9 @@ function frame(now) {
   const dtRaw = (now - lastT) / 1000;
   lastT = now;
   if (dtRaw > 0) S.fps += (1 / dtRaw - S.fps) * 0.1;
+  if (S.gameState === 'editor') return editorFrame(dtRaw); 
   if (!S.river || S.gameState === 'menu' || S.warmingUp || S.paused) return;
+  
   const dtReal = clamp(dtRaw, 0, 0.05);
 
   stepPhysics(dtReal);
