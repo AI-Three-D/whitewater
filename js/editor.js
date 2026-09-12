@@ -42,7 +42,7 @@ const FLY_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'Shift
 const MODE_KEYS = { Digit1: 'view', Digit2: 'width', Digit3: 'meander', Digit4: 'features', Digit5: 'test' };
 
 const ed = {
-  entry: null, playing: false, infoT: 0, mode: 'view', armed: null, sel: null, meanderSel: 0, profile: null, drag: null, alert: null,
+  invalid: null, entry: null, playing: false, infoT: 0, mode: 'view', armed: null, sel: null, meanderSel: 0, profile: null, drag: null, alert: null,
   panelHidden: false,
   // test-run panel settings (session-only — not part of the river config, never saved with it)
   test: { craft: 'classic', skill: 5, stamina: 5, god: false },
@@ -162,32 +162,46 @@ function resetWorld() {
   placeObstacles();
   placeLandslides();
 }
+
 function rebuild(resetCam) {
   if (!isOpenEd()) return false;
   const t0 = performance.now(), prev = S.river;
   const R = customRiverR(ed.entry);
+  ed.invalid = null;
+  let buildR = R, error = null;
   try {
     checkCustomR(R);
     validateRiverConfig(R);
-    loadRiver(R);
   } catch (e) {
+    error = e.message || String(e);
+    const deg = degradeConfig(R);   // checkCustomR failures aren't feature-local → deg is null
+    if (deg) { buildR = deg.R; ed.invalid = deg; } else buildR = null;
+  }
+  if (buildR) {
+    try { loadRiver(buildR); }
+    catch (e) { error = e.message || String(e); buildR = null; }
+  }
+  if (!buildR) {
     if (S.river !== prev) S.river = null;   // half-loaded — don't draw a mismatched scene
-    const msg = e.message || String(e);
-    setStatus('⚠ ' + msg, true);
-    setAlert(msg, { locate: locateFromMessage(msg) });
+    clearOverlay();
+    setStatus('⚠ ' + error, true);
+    setAlert(error, { locate: locateFromMessage(error) });
     return false;
   }
-  kayak.reset();                 // obstacles/landslides are seeded relative to the boat at the put-in
+  kayak.reset();
   resetPickupsForAttempt();
-  S.river.pickups.map = [];      // the hidden map belongs to the profile, not to a level
+  S.river.pickups.map = [];
   resetWorld();
   if (resetCam || !prev) setView(ed.entry.view);
   refreshProfile();
   refreshOverlayMesh();
-  const warnings = S.river.warnings;
-  if (warnings && warnings.length) {
-    setStatus(`built in ${(performance.now() - t0).toFixed(0)} ms · ⚠ ${warnings[0]}`);
-    setAlert(warnings.join('\n'), { warn: true });
+  if (error) {
+    setStatus('⚠ ' + error, true);
+    setAlert(error + '\nThe invalid feature was left out of the preview — its marker is shown in red. Drag it to a valid spot or delete it.',
+      { locate: locateFromMessage(error) });
+  } else if (S.river.warnings && S.river.warnings.length) {
+    setStatus(`built in ${(performance.now() - t0).toFixed(0)} ms · ⚠ ${S.river.warnings[0]}`);
+    setAlert(S.river.warnings.join('\n'), { warn: true });
   } else {
     setStatus(`built in ${(performance.now() - t0).toFixed(0)} ms`);
     setAlert(null);
@@ -213,20 +227,31 @@ function testProfile() {
 }
 async function startTestRun(pt) {
   if (!S.river || !ed.entry) return;
+  if (S.gameState === 'testWarmup') return;   // a previous attempt is still settling (see issue 3)
   clearTimeout(rebuildTimer);
   clearTimeout(saveTimer);
   ed.testSpawn = pt;
-  ed.savedProfile = S.profile;
-  suspendSave(true);   // the synthetic profile below must never reach the real save slot
+  // first entry only — on a retry S.profile is already the synthetic test profile, and capturing
+  // it here is exactly how a retry used to leak the test profile into the real save slot
+  if (!ed.savedProfile) {
+    ed.savedProfile = S.profile;
+    ed.savedNoCapsize = S.debugNoCapsize;
+    suspendSave(true);   // the synthetic profile below must never reach the real save slot
+  }
   S.profile = testProfile();
   S.debugNoCapsize = ed.test.god;
+
+
   S.runCraft = craftOf(S.profile);
   S.effK = craftKayakParams(S.runCraft, S.profile);
   resetRunCounters();
   S.gameState = 'testWarmup';   // main.js draws nothing for this state — same idea as a real run's warmup
+ 
   S.testExit = exitTestRun;
   S.testRetry = () => startTestRun(ed.testSpawn);
+  S.testAbort = testTeardown;
   S.onRunOver = handleTestRunOver;
+
   document.body.classList.remove('editing');
   document.body.classList.add('inrun');
   $('stam').style.display = 'block';
@@ -247,22 +272,29 @@ function handleTestRunOver() {
   if (btnMenu) { btnMenu.textContent = '← Back to editor'; btnMenu.onclick = exitTestRun; }
   if (btnRetry) { btnRetry.textContent = '↻ Retry test'; btnRetry.onclick = () => { $('msg').style.display = 'none'; startTestRun(ed.testSpawn); }; }
 }
-function exitTestRun() {
+
+function testTeardown() {
+  if (!ed.savedProfile) return;
   suspendSave(false);
   S.profile = ed.savedProfile;
   ed.savedProfile = null;
+  S.debugNoCapsize = ed.savedNoCapsize;
   S.testExit = null;
   S.testRetry = null;
   S.onRunOver = null;
+  S.testAbort = null;
+}
+
+function exitTestRun() {
+  testTeardown();
   S.paused = false;
   $('msg').style.display = 'none';
   document.body.classList.remove('inrun');
   document.body.classList.add('editing');
   $('editor').style.display = 'flex';
   S.gameState = 'editor';
-  rebuild(false);   // the test run's water/obstacles were seeded around the spawn point, not the fly camera
+  rebuild(false);
 }
-
 // ---------- picking: mouse → a point on the river surface ----------
 const surfY = (x, z) => Math.max(terrainH(x, z), nearestChan(S.river.rows[rowOf(z)], x).eta);
 function unprojectRay(e) {
@@ -321,10 +353,36 @@ function markerAt(pt) {
   }
   return best;
 }
-// bridges alone must clear validateRiverConfig's placement() window (river.js): z in
-// [PUTIN + 25, finishZ - 10], kept 1 m inside that on both ends against rounding. Every other
-// feature type just needs to stay clear of the put-in pool — validateRiverConfig imposes no
-// z bound on them at all, so the generic floor/ceiling here is a courtesy, not a hard limit.
+
+function degradeConfig(R) {
+  const live = { landBridges: (R.landBridges || []).slice(), builtBridges: (R.builtBridges || []).slice() };
+  const orig = { landBridges: live.landBridges.map((_, i) => i), builtBridges: live.builtBridges.map((_, i) => i) };
+  const dropped = new Set();   // 'type:originalIndex' — drives the red markers
+  let obstaclesDropped = false;
+  const total = live.landBridges.length + live.builtBridges.length + 2;
+  for (let guard = 0; guard <= total; guard++) {
+    const cand = { ...R, landBridges: live.landBridges, builtBridges: live.builtBridges };
+    if (obstaclesDropped) delete cand.obstacles;
+    try {
+      validateRiverConfig(cand);
+      return { R: cand, dropped, obstaclesDropped };
+    } catch (e) {
+      const m = /(landBridges|builtBridges)\[(\d+)\]/.exec(e.message || '');
+      if (m) {
+        const key = m[1], i = +m[2];
+        dropped.add(`${BRIDGE_ARRAY_TYPE[key]}:${orig[key][i]}`);
+        live[key].splice(i, 1);
+        orig[key].splice(i, 1);
+      } else if (!obstaclesDropped && R.obstacles) {
+        obstaclesDropped = true;   // the bridges × floating-obstacles conflict names no index
+      } else {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 const BRIDGE_FEATURES = new Set(['landBridge', 'builtBridge']);
 function featureZRange(type) {
   const zMax = ed.profile ? ed.profile.finishZ : L * dx - 25;
@@ -378,16 +436,20 @@ function refreshOverlayMesh() {
   if (ed.mode === 'width' || ed.mode === 'meander') {
     for (const s of [-1, 1]) addPath(mb, linePts(z => pr.centerAt(z) + s * pr.hwAt(z), 6, zEnd, 2, 0.3), 0.18, [1, 0.85, 0.2]);
   }
+  const ERR_COLOR = [1, 0.18, 0.12];
+
   if (ed.mode === 'features') {
     for (const m of allMarkers()) {
       const F = FEATURES[m.type], seld = ed.sel && ed.sel.type === m.type && ed.sel.i === m.i;
+      const bad = ed.invalid && ed.invalid.dropped.has(`${m.type}:${m.i}`);
+      const col = bad ? ERR_COLOR : F.color;
       const span = F.span && F.span(m.it);
-      if (span) addPath(mb, linePts(pr.centerAt, Math.max(span[0], 2), Math.min(span[1], L * dx - 2), 3, 0.45), 0.5, F.color);
+      if (span) addPath(mb, linePts(pr.centerAt, Math.max(span[0], 2), Math.min(span[1], L * dx - 2), 3, 0.45), 0.5, col);
       const y = surfY(m.x, m.z);
-      addCylinder(mb, [m.x, y, m.z], [m.x, y + 5, m.z], 0.12, 0.12, 6, F.color);
+      addCylinder(mb, [m.x, y, m.z], [m.x, y + 5, m.z], 0.12, 0.12, 6, col);
       const r = seld ? 1.0 : 0.65;
-      addSphere(mb, [m.x, y + 5.4, m.z], [r, r, r], 5, 8, seld ? [1, 1, 1] : F.color);
-      if (seld) addRingTube(mb, [m.x, y + 0.35, m.z], 2.2, 2.2, 0.14, 18, 6, [1, 1, 1]);
+      addSphere(mb, [m.x, y + 5.4, m.z], [r, r, r], 5, 8, seld ? [1, 1, 1] : col);
+      if (seld) addRingTube(mb, [m.x, y + 0.35, m.z], 2.2, 2.2, 0.14, 18, 6, bad ? ERR_COLOR : [1, 1, 1]);
     }
   }
   setOverlayMesh(mb);
@@ -539,7 +601,7 @@ export function openEditor(id) {
   if (S.warmingUp) return;
   const entry = getCustom(id);
   if (!entry) return;
-  Object.assign(ed, { entry, playing: false, infoT: 0, mode: 'view', armed: null, sel: null, meanderSel: 0, drag: null, alert: null, panelHidden: false });
+  Object.assign(ed, { entry, invalid: null, playing: false, infoT: 0, mode: 'view', armed: null, sel: null, meanderSel: 0, drag: null, alert: null, panelHidden: false });
   keys.clear();
   S.gameState = 'editor';
   S.paused = false;
@@ -705,6 +767,19 @@ function bindPointer() {
     S.flyCam.speed = clamp(S.flyCam.speed * Math.exp(-e.deltaY * 0.0014), FLY.minSpeed, FLY.maxSpeed);
   }, { passive: false });
 }
+export function clearFrame() {
+  const enc = gpu.device.createCommandEncoder();
+  const pass = enc.beginRenderPass({
+    colorAttachments: [{
+      view: gpu.ctx.getCurrentTexture().createView(),
+      clearValue: { r: 0.02, g: 0.05, b: 0.08, a: 1 }, loadOp: 'clear', storeOp: 'store',
+    }],
+    depthStencilAttachment: { view: gpu.depthView, depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' },
+  });
+  pass.end();
+  gpu.device.queue.submit([enc.finish()]);
+}
+
 export function initEditor() {
   bindKeys();
   bindPointer();

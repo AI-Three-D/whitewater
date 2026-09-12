@@ -17,7 +17,6 @@ import { writeSimUniforms, runWarmup } from './sim.js';
 import { showMenu, showLevelUp, isOpen, plural } from './ui.js';
 import { popLoot } from './hud.js';
 
-// ---------- in-run actions ----------
 export function cycleCamera() {
   S.camMode = (S.camMode + 1) % 3;
 }
@@ -32,7 +31,6 @@ export function toggleNoCapsize() {
   $('mGod').classList.toggle('on', S.debugNoCapsize);
 }
 
-// frame() in main.js checks S.paused and skips physics/rendering while set; this just flips it and swaps #msg to a Resume prompt
 export function togglePause() {
   if (S.gameState !== 'run') return;
   S.paused = !S.paused;
@@ -70,6 +68,7 @@ export function drinkEnergy() {
 }
 
 export function retryRun() {
+  if (S.gameState === 'testWarmup') return;
   if (S.testRetry) return S.testRetry();
   if (S.river && S.gameState !== 'menu' && !S.warmingUp && !isOpen('lvl')) startRun(S.river.R);
 }

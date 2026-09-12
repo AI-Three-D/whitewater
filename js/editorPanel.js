@@ -270,16 +270,22 @@ function featureRows(cfg, ctx) {
     grid.appendChild(b);
   }
   rows.push(grid);
+  
   for (const type of FEATURE_ORDER) {
     const F = FEATURES[type];
     F.storage.items(cfg).forEach((it, i) => {
       const seld = ctx.sel && ctx.sel.type === type && ctx.sel.i === i;
       const row = div('featrow' + (seld ? ' on' : ''), `${F.icon} ${F.label} · ${F.z(it).toFixed(0)} m`);
+      row.dataset.feat = `${type}:${i}`;
       row.onclick = () => ctx.api.select(type, i);
       rows.push(row);
       if (seld) {
         const box = div('featparams');
+        const issue = div('issue');
+        issue.dataset.feat = `${type}:${i}`;  
+        box.appendChild(issue);
         for (const spec of F.params(it)) box.appendChild(buildCtl(spec, () => ctx.api.change()));
+
         if (F.columns) for (const row of columnRows(it, F.columns, ctx)) box.appendChild(row);
         box.appendChild(div('hint', 'drag its marker on the river to move it' + (type === 'vortex' ? ' (moves in x and z)' : '')));
         box.appendChild(btn('🗑 Delete (Del)', ctx.api.del, 'del'));
@@ -287,6 +293,7 @@ function featureRows(cfg, ctx) {
       }
     });
   }
+  
   return rows;
 }
 

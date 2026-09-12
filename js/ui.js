@@ -48,8 +48,8 @@ const xpBar = prof => {
   return { need, html: `<div class="xpbar"><div class="xpfill" style="width:${pct}%"></div></div>` };
 };
 
-// ---------- menu ----------
 export function showMenu() {
+  if (S.testAbort) S.testAbort();   // a level-editor test run was live: restore the real profile first
   S.gameState = 'menu';
   document.body.classList.remove('inrun', 'editing');
   pad.queue.length = 0;

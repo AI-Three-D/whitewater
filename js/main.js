@@ -37,10 +37,7 @@ const KEY_ACTIONS = {
   F1: e => { toggleDbg(); e.preventDefault(); },
   KeyF: () => { if (S.gameState === 'run') endRun('finished'); },
   Escape: e => {
-    // stopImmediatePropagation: exitTestRun() flips gameState back to 'editor', and editor.js has
-    // its own window-level Escape handler right behind this one — without this it would see that
-    // new gameState on the very same keypress and immediately call closeEditor() → showMenu(),
-    // undoing the return-to-editor it just did
+    if (S.gameState === 'testWarmup') return;
     if (S.testExit) { e.stopImmediatePropagation(); S.testExit(); }
     else if (isOpen('charsheet')) hideCharSheet();
     else if (isOpen('store')) hideStore();
@@ -128,6 +125,7 @@ function frame(now) {
   const dtReal = clamp(dtRaw, 0, 0.05);
   if (S.gameState === 'editor') {
     if (S.river) renderFrame(dtReal, editorUpdate(dtReal));
+    else clearFrame();   // validation failed with nothing buildable: blank frame, no stale scene
     return;
   }
   // editor test-run setup (editor.js): mid-transition, nothing to draw until it lands on 'run'
