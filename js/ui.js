@@ -106,12 +106,10 @@ function renderTopbar() {
     </div>
     <div class="topbar-btns"><button id="openCharSheet">Character</button><button id="openStoreBtn">Store</button>
       <button id="debugUnlockBtn" title="unlocks every river and shows the custom-river level editor" style="background:${S.debugUnlockAll ? '#a33' : ''}">${S.debugUnlockAll ? 'Debug mode: ON' : 'Debug mode: off'}</button>
-
       <button id="debugMoneyBtn">Debug: +1000 coins</button>
       <button id="debugInvBtn">Debug: full inventory</button>
       <button id="debugMaxBtn">Debug: max skills</button>
       <button id="debugGearBtn">Debug: all gear</button>
-      
       </div>`;
   $('openCharSheet').onclick = showCharSheet;
   $('openStoreBtn').onclick = showStore;

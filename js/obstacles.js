@@ -1,7 +1,7 @@
 // Floating obstacles (logs etc.): spawning ahead of the boat, per-sample drag/grounding,
 // capsule-capsule contacts, retirement, instancing. Landslide boulders share the list and instance
 // buffers but are driven by landslides.js.
-import { OBSTACLES, RENDER } from './config/index.js';
+import { OBSTACLES } from './config/index.js';
 import { clamp, mulberry32, qMul, qAxisAngle, mat4Compose } from './math.js';
 import { S } from './state.js';
 import { gpu, ensureInstBuf, ensureScratch } from './gpu.js';

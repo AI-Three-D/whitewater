@@ -208,8 +208,6 @@ const drawInstanced = (pass, mesh, inst, count = 1, first = 0) => {
   pass.draw(mesh.count, count, 0, first);
 };
 
-
-
 function drawBridges(pass, win) {
   const visible = bm => !(bm.zMax < win.zc - win.back || bm.zMin > win.zc + win.ahead);
   if (scenery.bridgeGpu.length) {
