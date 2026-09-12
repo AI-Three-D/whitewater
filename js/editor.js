@@ -664,7 +664,6 @@ export function editorUpdate(dtReal) {
   updateInfo(dtReal);
   return ed.playing;
 }
-
 // ---------- input ----------
 const isTyping = e => e.target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName);
 function bindKeys() {
